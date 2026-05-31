@@ -162,7 +162,7 @@ def status(config_path: str):
     # 检查各步骤的输出文件
     files = {
         "声学处理 (Sv)": output_dir / "sv_data.nc",
-        "鸡群识别": output_dir / "schools.csv",
+        "鱼群识别": output_dir / "schools.csv",
         "密度估算": output_dir / "density.csv",
         "echogram": output_dir / f"{config['reservoir']['name']}_echogram.png",
         "鱼群图": output_dir / f"{config['reservoir']['name']}_schools.png",
