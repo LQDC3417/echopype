@@ -4,7 +4,7 @@ import logging
 import os
 
 # 修复 echopype 在 Windows 中文环境的 YAML 编码问题
-os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+os.environ["PYTHONUTF8"] = "1"
 
 from pathlib import Path
 from typing import List
