@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "fish-acoustics"
+version = "0.1.0"
+description = "EK80 淡水鱼类资源评估系统"
+requires-python = ">=3.10"
+dependencies = [
+    "echopype>=0.11.0",
+    "xarray",
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "click",
+    "pyyaml",
+]
+
+[project.scripts]
+fish-acoustics = "src.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
