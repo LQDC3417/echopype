@@ -82,4 +82,4 @@ class MainToolBar(QToolBar):
     def _on_cmap_changed(self, name):
         if name == "grayscale":
             name = "gray"
-        self.colormap_changed.emit(name, -80, -40)
+        self.colormap_changed.emit(name, -70, -20)
