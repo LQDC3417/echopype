@@ -22,7 +22,7 @@ from OpenGL.GL import (
     glBindTexture, glBlendFunc, glClear, glClearColor, glColor4f,
     glDisable, glEnable, glEnd, glGenTextures, glLineWidth,
     glLoadIdentity, glMatrixMode, glOrtho, glPixelStorei,
-    glTexCoord2D, glTexCoord2f, glTexImage2D, glTexParameteri,
+    glTexCoord2f, glTexImage2D, glTexParameteri,
     glVertex2f, glViewport, glBegin,
 )
 
