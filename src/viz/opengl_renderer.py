@@ -15,6 +15,7 @@ try:
         GL_CLAMP_TO_EDGE,
         GL_COLOR_BUFFER_BIT,
         GL_DEPTH_BUFFER_BIT,
+        GL_MAX_TEXTURE_SIZE,
         GL_LINEAR,
         GL_LINES,
         GL_LINE_STRIP,
@@ -42,6 +43,7 @@ try:
         glEnable,
         glEnd,
         glGenTextures,
+        glGetIntegerv,
         glLineWidth,
         glLoadIdentity,
         glMatrixMode,
@@ -52,11 +54,12 @@ try:
         glTexImage2D,
         glTexParameteri,
         glVertex2f,
+        glViewport,
         glBegin,
     )
 except ImportError:
     raise ImportError(
-        "需要安装 PyOpenGL: pip install PyOpenGL PyOpenGL-accelerate"
+        "需要安装 PyOpenGL: pip install PyOpenGL"
     )
 
 from PySide6.QtCore import Qt, Signal
@@ -92,6 +95,10 @@ class EchogramRenderer(QOpenGLWidget):
         # 纹理
         self._texture_id: int = 0
         self._texture_dirty: bool = True
+        self._tex_w: int = 0
+        self._tex_h: int = 0
+        self._tex_scale_x: float = 1.0
+        self._tex_scale_y: float = 1.0
 
         # 视口变换: 数据坐标 -> 屏幕坐标
         self._offset_x: float = 0.0
@@ -208,32 +215,46 @@ class EchogramRenderer(QOpenGLWidget):
         return (rgba * 255).astype(np.uint8)
 
     def _upload_texture(self) -> None:
-        """上传纹理数据到 GPU"""
+        """上传纹理数据到 GPU，自动降采样以适配最大纹理尺寸"""
         if self._sv_data is None:
             return
 
         rgba = self._sv_to_rgb()
         tex_h, tex_w = rgba.shape[:2]
 
-        # 找到最近的 2 的幂尺寸（部分驱动需要）
-        glBindTexture(GL_TEXTURE_2D, self._texture_id)
+        # 查询 GPU 最大纹理尺寸
+        max_size = glGetIntegerv(GL_MAX_TEXTURE_SIZE)
+        if max_size is None or max_size < 256:
+            max_size = 8192  # 安全默认值
 
+        # 如果超过最大纹理尺寸，降采样
+        self._tex_scale_x = 1.0
+        self._tex_scale_y = 1.0
+        if tex_w > max_size or tex_h > max_size:
+            scale_x = max_size / tex_w
+            scale_y = max_size / tex_h
+            scale = min(scale_x, scale_y)
+            new_w = max(1, int(tex_w * scale))
+            new_h = max(1, int(tex_h * scale))
+            # 用 numpy 降采样（取邻近像素）
+            rgba = rgba[::max(1, tex_h // new_h), ::max(1, tex_w // new_w)]
+            tex_h, tex_w = rgba.shape[:2]
+            self._tex_scale_x = self._data_w / tex_w
+            self._tex_scale_y = self._data_h / tex_h
+
+        glBindTexture(GL_TEXTURE_2D, self._texture_id)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
 
         glTexImage2D(
-            GL_TEXTURE_2D,
-            0,
-            GL_RGBA,
-            tex_w,
-            tex_h,
-            0,
-            GL_RGBA,
-            GL_UNSIGNED_BYTE,
-            rgba,
+            GL_TEXTURE_2D, 0, GL_RGBA,
+            tex_w, tex_h, 0,
+            GL_RGBA, GL_UNSIGNED_BYTE, rgba,
         )
+        self._tex_w = tex_w
+        self._tex_h = tex_h
         self._texture_dirty = False
 
     def _draw_echogram_texture(self) -> None:
