@@ -133,8 +133,6 @@ class MainWindow(QMainWindow):
             self._config = {
                 "processing": {
                     "sonar_model": "EK80",
-                    "waveform_mode": "CW",
-                    "encode_mode": "power",
                     "noise_removal": {
                         "ping_num": 5,
                         "range_sample_num": 10,

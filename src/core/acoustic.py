@@ -50,6 +50,42 @@ def open_single_file(raw_file: Path, config: dict):
     return echodata
 
 
+def _detect_waveform_mode(echodata) -> tuple:
+    """
+    从 EchoData 自动检测 waveform_mode 和 encode_mode。
+
+    Returns
+    -------
+    (waveform_mode, encode_mode) : (str, str)
+        waveform_mode: "CW" 或 "BB"
+        encode_mode: "complex" 或 "power"
+    """
+    try:
+        bg = echodata["Sonar/Beam_group1"]
+
+        # 检测 transmit_type: "CW" → narrowband, "FM"/"BB" → broadband
+        transmit_type = bg["transmit_type"].values
+        if transmit_type.ndim > 1:
+            transmit_type = transmit_type[0]  # 取第一个 channel
+        first_type = str(transmit_type.flat[0]).upper() if transmit_type.size > 0 else "CW"
+
+        if first_type in ("FM", "BB"):
+            waveform_mode = "BB"
+        else:
+            waveform_mode = "CW"
+
+        # 检测 beam_type: 1=complex, 3=power/angle
+        beam_type = int(bg["beam_type"].values[0]) if "beam_type" in bg else 1
+        encode_mode = "complex" if beam_type == 1 else "power"
+
+        logger.info(f"自动检测: waveform_mode={waveform_mode}, encode_mode={encode_mode}")
+        return waveform_mode, encode_mode
+
+    except Exception as e:
+        logger.warning(f"自动检测失败，使用默认值 CW/power: {e}")
+        return "CW", "power"
+
+
 def _add_depth(ds_Sv: xr.Dataset, echodata) -> xr.Dataset:
     """
     使用 echopype.consolidate.add_depth 计算真实水深。
@@ -96,10 +132,9 @@ def process_single_file(echodata, config: dict) -> xr.Dataset:
 
     proc_cfg = config["processing"]
 
-    # 1. 计算 Sv
+    # 1. 计算 Sv（自动检测 CW/BB 和 complex/power）
     logger.info("计算 Sv...")
-    waveform_mode = proc_cfg.get("waveform_mode", "CW")
-    encode_mode = proc_cfg.get("encode_mode", "power")
+    waveform_mode, encode_mode = _detect_waveform_mode(echodata)
     ds_Sv = compute_Sv(
         echodata,
         waveform_mode=waveform_mode,
