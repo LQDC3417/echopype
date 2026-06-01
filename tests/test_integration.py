@@ -4,7 +4,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from src.utils import load_config, validate_config
+from src.core.utils import load_config, validate_config
 
 
 @pytest.mark.skipif(
@@ -17,6 +17,7 @@ def test_full_pipeline():
         "reservoir": {"name": "集成测试", "region": "测试"},
         "input": {"raw_dir": "D:/data/test/raw", "pattern": "*.raw"},
         "processing": {
+            "sonar_model": "EK80",
             "frequencies": [38000],
             "waveform_mode": "CW",
             "encode_mode": "power",
@@ -38,17 +39,17 @@ def test_full_pipeline():
     validate_config(config)
 
     # 声学处理
-    from src.acoustic import process_all_files
+    from src.core.acoustic import process_all_files
     ds_Sv = process_all_files(config)
     assert ds_Sv is not None
     assert "Sv" in ds_Sv
 
     # 鱼群识别
-    from src.school import detect_schools, schools_to_dataframe
+    from src.core.school import detect_schools, schools_to_dataframe
     mask = detect_schools(ds_Sv, config)
     schools_df = schools_to_dataframe(mask, ds_Sv)
 
     # 密度估算
-    from src.density import estimate_density
+    from src.core.density import estimate_density
     density_df = estimate_density(schools_df, ds_Sv, config)
     assert "density_ind_ha" in density_df.columns

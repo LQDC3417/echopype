@@ -3,7 +3,7 @@
 import pytest
 import yaml
 
-from src.utils import load_config, validate_config
+from src.core.utils import load_config, validate_config
 
 
 def test_load_config_valid(config_file):

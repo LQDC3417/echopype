@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from src.school import detect_schools, schools_to_dataframe
+from src.core.school import detect_schools, schools_to_dataframe
 
 
 def _make_mock_sv(n_pings=50, n_samples=100):

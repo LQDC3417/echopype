@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from src.density import calculate_nasc, estimate_density
+from src.core.density import calculate_abc, estimate_density
 
 
 def _make_mock_data():
@@ -46,17 +46,17 @@ def _make_mock_data():
     return ds_Sv, schools_df
 
 
-def test_calculate_nasc():
-    """测试 NASC 计算"""
+def test_calculate_abc():
+    """测试 ABC 计算"""
     ds_Sv, _ = _make_mock_data()
     config = {
         "processing": {"frequencies": [38000]},
         "density": {"ts_default": -30.0},
     }
-    nasc_df = calculate_nasc(ds_Sv, config)
-    assert isinstance(nasc_df, pd.DataFrame)
-    assert "nasc" in nasc_df.columns
-    assert "transect_id" in nasc_df.columns
+    abc_df = calculate_abc(ds_Sv, config)
+    assert isinstance(abc_df, pd.DataFrame)
+    assert "abc" in abc_df.columns
+    assert "transect_id" in abc_df.columns
 
 
 def test_estimate_density():
@@ -69,4 +69,4 @@ def test_estimate_density():
     density_df = estimate_density(schools_df, ds_Sv, config)
     assert isinstance(density_df, pd.DataFrame)
     assert "density_ind_ha" in density_df.columns
-    assert "total_biomass_kg" in density_df.columns
+    assert "total_biomass_kg_ha" in density_df.columns
