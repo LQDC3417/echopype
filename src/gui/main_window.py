@@ -65,8 +65,10 @@ class MainWindow(QMainWindow):
         # 中央区域：三栏布局
         splitter = QSplitter(Qt.Horizontal)
 
-        # 左侧文件树
+        # 左侧文件树 — 根目录指向项目根目录
         self.file_tree = FileTree()
+        project_root = str(Path(__file__).resolve().parent.parent.parent)
+        self.file_tree.set_root_path(project_root)
         splitter.addWidget(self.file_tree)
 
         # 中间 Echogram
@@ -108,8 +110,14 @@ class MainWindow(QMainWindow):
 
     def _open_file(self):
         """打开文件对话框"""
+        # 默认打开 raw_data 目录
+        project_root = Path(__file__).resolve().parent.parent.parent
+        raw_dir = str(project_root / "raw_data")
+        if not Path(raw_dir).exists():
+            raw_dir = str(project_root)
+
         path, _ = QFileDialog.getOpenFileName(
-            self, "打开 raw 文件", "", "Raw 文件 (*.raw);;所有文件 (*)"
+            self, "打开 raw 文件", raw_dir, "Raw 文件 (*.raw);;所有文件 (*)"
         )
         if path:
             self._load_file(Path(path))
