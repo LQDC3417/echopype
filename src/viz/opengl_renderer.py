@@ -156,7 +156,8 @@ class EchogramRenderer(QOpenGLWidget):
         """
         cmap = cm.get_cmap(self._cmap_name)
         # 转置: (n_pings, n_samples) -> (n_samples, n_pings)
-        data_T = self._sv_data.T
+        # flipud: 表面(depth=0)在上, 水底在下
+        data_T = np.flipud(self._sv_data.T)
         norm = np.clip((data_T - self._vmin) / (self._vmax - self._vmin), 0, 1)
         rgba = cmap(norm)
         return (rgba * 255).astype(np.uint8)
@@ -226,8 +227,9 @@ class EchogramRenderer(QOpenGLWidget):
             for start, end in self._find_runs(col):
                 x0 = self._offset_x + ping * self._zoom
                 x1 = x0 + self._zoom
-                y0 = self._offset_y + start * self._zoom
-                y1 = self._offset_y + end * self._zoom
+                # 翻转 Y 与纹理一致
+                y0 = self._offset_y + (h - 1 - end) * self._zoom
+                y1 = self._offset_y + (h - 1 - start) * self._zoom
                 glBegin(GL_QUADS)
                 glVertex2f(x0, y0); glVertex2f(x1, y0)
                 glVertex2f(x1, y1); glVertex2f(x0, y1)
@@ -247,7 +249,8 @@ class EchogramRenderer(QOpenGLWidget):
                 glBegin(GL_LINE_STRIP)
                 continue
             x = self._offset_x + i * self._zoom
-            y = self._offset_y + val * self._zoom
+            # 翻转 Y: 纹理已 flipud, 需要将 sample index 映射到翻转后的坐标
+            y = self._offset_y + (self._data_h - 1 - val) * self._zoom
             glVertex2f(x, y)
         glEnd()
 
@@ -265,8 +268,9 @@ class EchogramRenderer(QOpenGLWidget):
             for start, end in self._find_runs(col):
                 x0 = self._offset_x + ping * self._zoom
                 x1 = x0 + self._zoom
-                y0 = self._offset_y + start * self._zoom
-                y1 = self._offset_y + end * self._zoom
+                # 翻转 Y 与纹理一致
+                y0 = self._offset_y + (h - 1 - end) * self._zoom
+                y1 = self._offset_y + (h - 1 - start) * self._zoom
                 glBegin(GL_QUADS)
                 glVertex2f(x0, y0); glVertex2f(x1, y0)
                 glVertex2f(x1, y1); glVertex2f(x0, y1)
@@ -279,14 +283,16 @@ class EchogramRenderer(QOpenGLWidget):
             for x in range(w):
                 if not mask[y, x]:
                     continue
+                # 翻转 Y 与纹理一致
+                fy = h - 1 - y
                 if x == w - 1 or not mask[y, x + 1]:
                     px = self._offset_x + (x + 1) * self._zoom
-                    y0 = self._offset_y + y * self._zoom
+                    y0 = self._offset_y + fy * self._zoom
                     glBegin(GL_LINES)
                     glVertex2f(px, y0); glVertex2f(px, y0 + self._zoom)
                     glEnd()
                 if y == h - 1 or not mask[y + 1, x]:
-                    py = self._offset_y + (y + 1) * self._zoom
+                    py = self._offset_y + (fy + 1) * self._zoom
                     x0 = self._offset_x + x * self._zoom
                     glBegin(GL_LINES)
                     glVertex2f(x0, py); glVertex2f(x0 + self._zoom, py)
