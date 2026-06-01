@@ -223,8 +223,11 @@ class EchogramRenderer(QOpenGLWidget):
         tex_h, tex_w = rgba.shape[:2]
 
         # 查询 GPU 最大纹理尺寸
-        max_size = glGetIntegerv(GL_MAX_TEXTURE_SIZE)
-        if max_size is None or max_size < 256:
+        try:
+            max_size = glGetIntegerv(GL_MAX_TEXTURE_SIZE)
+            if max_size is None or max_size < 256:
+                max_size = 8192
+        except Exception:
             max_size = 8192  # 安全默认值
 
         # 如果超过最大纹理尺寸，降采样

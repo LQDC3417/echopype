@@ -181,6 +181,7 @@ class MainWindow(QMainWindow):
 
     def _on_sv_computed(self, ds_Sv):
         """Sv 计算完成"""
+        import numpy as np
         self._ds_Sv = ds_Sv
         self.statusbar.hide_progress()
         self.statusbar.set_status("Sv 计算完成")
@@ -188,7 +189,9 @@ class MainWindow(QMainWindow):
         sv = ds_Sv["Sv"].values
         if sv.ndim == 3:
             sv = sv[0]
+        print(f"[DEBUG] Sv shape: {sv.shape}, min: {np.nanmin(sv):.1f}, max: {np.nanmax(sv):.1f}", flush=True)
         self.echogram.set_data(sv)
+        print(f"[DEBUG] echogram.set_data called", flush=True)
 
         self.property_panel.file_info.update_info(ds_Sv)
 
