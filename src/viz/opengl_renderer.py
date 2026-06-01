@@ -222,28 +222,16 @@ class EchogramRenderer(QOpenGLWidget):
         rgba = self._sv_to_rgb()
         tex_h, tex_w = rgba.shape[:2]
 
-        # 查询 GPU 最大纹理尺寸
-        try:
-            max_size = glGetIntegerv(GL_MAX_TEXTURE_SIZE)
-            if max_size is None or max_size < 256:
-                max_size = 8192
-        except Exception:
-            max_size = 8192  # 安全默认值
+        # GPU 最大纹理尺寸（大多数 GPU 支持 16384）
+        MAX_TEX_SIZE = 16384
 
         # 如果超过最大纹理尺寸，降采样
-        self._tex_scale_x = 1.0
-        self._tex_scale_y = 1.0
-        if tex_w > max_size or tex_h > max_size:
-            scale_x = max_size / tex_w
-            scale_y = max_size / tex_h
-            scale = min(scale_x, scale_y)
-            new_w = max(1, int(tex_w * scale))
-            new_h = max(1, int(tex_h * scale))
-            # 用 numpy 降采样（取邻近像素）
-            rgba = rgba[::max(1, tex_h // new_h), ::max(1, tex_w // new_w)]
+        if tex_w > MAX_TEX_SIZE or tex_h > MAX_TEX_SIZE:
+            step_x = max(1, int(np.ceil(tex_w / MAX_TEX_SIZE)))
+            step_y = max(1, int(np.ceil(tex_h / MAX_TEX_SIZE)))
+            rgba = rgba[::step_y, ::step_x]
             tex_h, tex_w = rgba.shape[:2]
-            self._tex_scale_x = self._data_w / tex_w
-            self._tex_scale_y = self._data_h / tex_h
+            print(f"[DEBUG] Texture downsampled to {tex_w}x{tex_h} (step={step_x},{step_y})", flush=True)
 
         glBindTexture(GL_TEXTURE_2D, self._texture_id)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
