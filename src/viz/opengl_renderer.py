@@ -1,7 +1,7 @@
 """OpenGL Echogram 渲染器
 
 高性能 echogram 渲染，支持缩放、平移、叠加层与框选交互。
-依赖: PyOpenGL, PyOpenGL-accelerate, matplotlib, numpy, PyQt5/PySide2
+依赖: PyOpenGL, matplotlib, numpy, PySide6
 """
 
 from typing import Optional, Tuple
@@ -59,17 +59,9 @@ except ImportError:
         "需要安装 PyOpenGL: pip install PyOpenGL PyOpenGL-accelerate"
     )
 
-try:
-    from PyQt5.QtCore import Qt, pyqtSignal as Signal
-    from PyQt5.QtGui import QMouseEvent, QWheelEvent
-    from PyQt5.QtWidgets import QOpenGLWidget
-except ImportError:
-    try:
-        from PySide2.QtCore import Qt, Signal
-        from PySide2.QtGui import QMouseEvent, QWheelEvent
-        from PySide2.QtWidgets import QOpenGLWidget
-    except ImportError:
-        raise ImportError("需要安装 PyQt5 或 PySide2")
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QMouseEvent, QWheelEvent
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 
 class EchogramRenderer(QOpenGLWidget):
@@ -483,6 +475,18 @@ class EchogramRenderer(QOpenGLWidget):
         sx = dx * self._zoom + self._offset_x
         sy = dy * self._zoom + self._offset_y
         return sx, sy
+
+    # ── 视图控制 ──────────────────────────────────────────────
+
+    def reset_view(self) -> None:
+        """重置视图到默认状态"""
+        self._offset_x = 0.0
+        self._offset_y = 0.0
+        self._zoom = 1.0
+        self._selecting = False
+        self._select_start = None
+        self._select_end = None
+        self.update()
 
     # ── 工具方法 ──────────────────────────────────────────────
 
