@@ -389,7 +389,7 @@ class EchogramRenderer(QOpenGLWidget):
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         """滚轮缩放 — 以鼠标位置为中心"""
-        pos = event.pos()
+        pos = event.position()
         sx, sy = float(pos.x()), float(pos.y())
 
         # 数据坐标（缩放前）
