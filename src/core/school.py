@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from src.core.utils import build_analysis_mask
+
 logger = logging.getLogger("fish_acoustics")
 
 
@@ -25,7 +27,12 @@ def _build_edge_coords(center_coords: np.ndarray) -> np.ndarray:
     return edges
 
 
-def detect_schools(ds_Sv: xr.Dataset, config: dict) -> xr.DataArray:
+def detect_schools(
+    ds_Sv: xr.Dataset,
+    config: dict,
+    surface_sample: float | None = None,
+    bottom_line: np.ndarray | None = None,
+) -> xr.DataArray:
     """
     鱼群检测：使用 echopype 公共 API detect_shoal
 
@@ -35,6 +42,10 @@ def detect_schools(ds_Sv: xr.Dataset, config: dict) -> xr.DataArray:
         包含 Sv 变量的数据集
     config : dict
         配置字典，需包含 school_detection 子项
+    surface_sample : float or None
+        表线 sample index，以上区域排除；None 表示不限
+    bottom_line : np.ndarray or None
+        底线 sample index 数组 (n_pings,)，以下区域排除；None 表示不限
 
     Returns
     -------
@@ -96,6 +107,28 @@ def detect_schools(ds_Sv: xr.Dataset, config: dict) -> xr.DataArray:
     idim = _build_edge_coords(idim_center)
     jdim = _build_edge_coords(jdim_center)
 
+    # ── 分析区域 mask ──
+    sv_arr = ds_Sv["Sv"].values
+    if sv_arr.ndim == 3:
+        sv_arr = sv_arr[0]
+    n_pings, n_samples = sv_arr.shape
+    analysis_mask = build_analysis_mask(
+        (n_pings, n_samples), surface_sample, bottom_line
+    )
+    if analysis_mask is not None:
+        # 直接修改 Sv 数组（in-place），避免拷贝整个 Dataset
+        original_values = sv_arr.copy()
+        sv_arr[~analysis_mask] = -999.0
+        ds_for_detect = ds_Sv
+        surf_label = f"{surface_sample:.0f}" if surface_sample is not None else "None"
+        logger.info(
+            f"分析区域限定: 表线={surf_label}, "
+            f"有效样本={(analysis_mask.sum() / analysis_mask.size * 100):.1f}%"
+        )
+    else:
+        ds_for_detect = ds_Sv
+        original_values = None
+
     params = {
         "var_name": "Sv",
         "channel": channel,
@@ -108,7 +141,11 @@ def detect_schools(ds_Sv: xr.Dataset, config: dict) -> xr.DataArray:
     }
 
     logger.info(f"鱼群检测: method={method}, thr={params['thr']}")
-    mask = detect_shoal(ds_Sv, method=method, params=params)
+    mask = detect_shoal(ds_for_detect, method=method, params=params)
+
+    # 恢复原始 Sv 值
+    if original_values is not None:
+        sv_arr[:] = original_values
 
     n_detected = int(mask.sum().values)
     logger.info(f"检测到 {n_detected} 个鱼群像素")
