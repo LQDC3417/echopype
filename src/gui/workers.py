@@ -163,29 +163,21 @@ class DetectSeafloorWorker(QThread):
 
 
 class DetectSchoolsWorker(QThread):
-    """鱼群检测"""
+    """鱼群检测（ds_Sv 已由 MainWindow 按分析区域裁剪）"""
     finished = Signal(object, object)  # mask, DataFrame
     error = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, ds_Sv, config: dict,
-                 surface_sample: float | None = None,
-                 bottom_line=None):
+    def __init__(self, ds_Sv, config: dict):
         super().__init__()
         self.ds_Sv = ds_Sv
         self.config = config
-        self.surface_sample = surface_sample
-        self.bottom_line = bottom_line
 
     def run(self):
         try:
             from src.core.school import detect_schools, schools_to_dataframe
             self.progress.emit("检测鱼群...")
-            mask = detect_schools(
-                self.ds_Sv, self.config,
-                surface_sample=self.surface_sample,
-                bottom_line=self.bottom_line,
-            )
+            mask = detect_schools(self.ds_Sv, self.config)
             df = schools_to_dataframe(mask, self.ds_Sv)
             self.finished.emit(mask, df)
         except Exception as e:
@@ -193,30 +185,22 @@ class DetectSchoolsWorker(QThread):
 
 
 class DensityWorker(QThread):
-    """密度估算"""
+    """密度估算（ds_Sv 已由 MainWindow 按分析区域裁剪）"""
     finished = Signal(object)  # DataFrame
     error = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, schools_df, ds_Sv, config: dict,
-                 surface_sample: float | None = None,
-                 bottom_line=None):
+    def __init__(self, schools_df, ds_Sv, config: dict):
         super().__init__()
         self.schools_df = schools_df
         self.ds_Sv = ds_Sv
         self.config = config
-        self.surface_sample = surface_sample
-        self.bottom_line = bottom_line
 
     def run(self):
         try:
             from src.core.density import estimate_density
             self.progress.emit("计算密度...")
-            df = estimate_density(
-                self.schools_df, self.ds_Sv, self.config,
-                surface_sample=self.surface_sample,
-                bottom_line=self.bottom_line,
-            )
+            df = estimate_density(self.schools_df, self.ds_Sv, self.config)
             self.finished.emit(df)
         except Exception as e:
             self.error.emit(traceback.format_exc())

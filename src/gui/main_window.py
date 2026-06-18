@@ -19,6 +19,7 @@ from pathlib import Path
 import logging
 import numpy as np
 import pandas as pd
+import xarray as xr
 from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QFileDialog, QMessageBox,
     QDockWidget, QMenu, QWidget, QVBoxLayout, QInputDialog,
@@ -58,7 +59,8 @@ class MainWindow(QMainWindow):
         # ── 状态 ──
         self._config: dict | None = None
         self._echodata = None
-        self._ds_Sv = None
+        self._ds_Sv = None            # 完整 Sv（含水底数据）
+        self._ds_Sv_analysis = None   # 分析区域裁剪后的 Sv（表线~底线）
         self._noise_mask_manual = None
         self._bottom_line = None
         self._surface_depth_m = 2.0  # 表线深度（米）
@@ -687,6 +689,7 @@ class MainWindow(QMainWindow):
         self._bottom_line = bottom
         self.echogram.set_bottom_line(bottom)
         self._save_file_state()
+        self._apply_analysis_region_to_ds()
         self.statusbar.set_status("底线已手动更新")
 
     def _on_update_bottom(self):
@@ -695,6 +698,7 @@ class MainWindow(QMainWindow):
         if bottom is not None:
             self._bottom_line = bottom
             self._save_file_state()
+            self._apply_analysis_region_to_ds()
             self.statusbar.set_status("底线已更新并保存 ✅")
 
     def _on_surface_line_changed(self, depth_m: float):
@@ -702,6 +706,7 @@ class MainWindow(QMainWindow):
         self._surface_depth_m = depth_m
         self._update_surface_line_render()
         self._save_file_state()
+        self._apply_analysis_region_to_ds()
 
     def _surface_depth_to_sample(self) -> float | None:
         """将表线深度(m)转为 sample index，用于后端分析区域限定。"""
@@ -719,19 +724,54 @@ class MainWindow(QMainWindow):
         idx = int(np.searchsorted(er_vals, self._surface_depth_m))
         return float(max(0, min(idx, len(er_vals) - 1)))
 
-    def _get_analysis_region_params(self) -> dict:
-        """获取分析区域参数，用于传给后端 worker。
-        仅在 _analysis_region_enabled 时返回非空 dict。
-        """
-        if not self._analysis_region_enabled or self._bottom_line is None:
-            return {}
+    def _apply_analysis_region_to_ds(self):
+        """根据分析区域（表线~底线）裁剪 ds_Sv，生成 _ds_Sv_analysis。"""
+        if not self._analysis_region_enabled or self._ds_Sv is None:
+            self._ds_Sv_analysis = None
+            return
+
         surface_sample = self._surface_depth_to_sample()
-        if surface_sample is None:
-            return {}
-        return {
-            "surface_sample": surface_sample,
-            "bottom_line": self._bottom_line,
-        }
+        if surface_sample is None and self._bottom_line is None:
+            self._ds_Sv_analysis = None
+            return
+
+        from src.core.utils import build_analysis_mask
+        Sv = self._ds_Sv["Sv"]
+        if "channel" in Sv.dims:
+            Sv = Sv.isel(channel=0)
+        sv_arr = Sv.values
+        if sv_arr.ndim == 3:
+            sv_arr = sv_arr[0]
+        n_pings, n_samples = sv_arr.shape
+
+        mask = build_analysis_mask(
+            (n_pings, n_samples), surface_sample, self._bottom_line
+        )
+        if mask is None:
+            self._ds_Sv_analysis = None
+            return
+
+        # 将区域外的 Sv 设为 NaN（不参与任何计算）
+        sv_masked = sv_arr.copy().astype(np.float32)
+        sv_masked[~mask] = np.nan
+
+        ds_masked = self._ds_Sv.copy()
+        var_dims = self._ds_Sv["Sv"].dims
+        ds_masked["Sv"] = xr.DataArray(
+            sv_masked.reshape(self._ds_Sv["Sv"].shape),
+            dims=var_dims, attrs=self._ds_Sv["Sv"].attrs,
+        )
+        self._ds_Sv_analysis = ds_masked
+        logger.info(
+            f"分析区域 Sv 裁剪完成: 有效样本 "
+            f"{mask.sum()}/{mask.size} ({mask.sum()/mask.size*100:.1f}%)"
+        )
+
+    def _get_analysis_ds(self):
+        """返回当前应使用的 ds_Sv：分析区域开启时返回裁剪版本，否则返回完整版本。"""
+        if self._analysis_region_enabled and self._ds_Sv_analysis is not None:
+            return self._ds_Sv_analysis
+        return self._ds_Sv
 
     def _update_surface_line_render(self):
         """将表线深度(m)转为 sample index 并传给渲染器"""
@@ -750,14 +790,23 @@ class MainWindow(QMainWindow):
             self._surface_depth_m = val
             self.property_panel.processing.spin_surface.setValue(val)
             self._update_surface_line_render()
+            self._apply_analysis_region_to_ds()
             self.statusbar.set_status(f"表线深度: {val:.1f} m")
 
     def _on_analysis_region_toggle(self, enabled: bool):
-        """切换分析区域限定"""
+        """切换分析区域限定：开启时裁剪 ds_Sv，关闭时恢复完整数据"""
         self._analysis_region_enabled = enabled
         self.echogram.set_analysis_region_enabled(enabled)
+        self._apply_analysis_region_to_ds()
         if enabled:
-            self.statusbar.set_status("分析区域限定已开启：仅在表线~底线间计算")
+            if self._ds_Sv_analysis is not None:
+                n_pings = len(self._ds_Sv_analysis["ping_time"])
+                n_samples = len(self._ds_Sv_analysis["range_sample"])
+                self.statusbar.set_status(
+                    f"分析区域限定已开启: {n_pings}×{n_samples} 样本"
+                )
+            else:
+                self.statusbar.set_status("分析区域限定已开启（需要底线）")
         else:
             self.statusbar.set_status("分析区域限定已关闭")
 
@@ -771,8 +820,8 @@ class MainWindow(QMainWindow):
         )
         self.pipeline_step.emit("鱼群检测")
         self.statusbar.show_progress("检测鱼群...")
-        analysis = self._get_analysis_region_params()
-        self._current_worker = DetectSchoolsWorker(self._ds_Sv, self._config, **analysis)
+        ds_for_detect = self._get_analysis_ds()
+        self._current_worker = DetectSchoolsWorker(ds_for_detect, self._config)
         self._current_worker.finished.connect(self._on_schools_detected)
         self._current_worker.error.connect(self._on_worker_error)
         self._current_worker.start()
@@ -811,8 +860,8 @@ class MainWindow(QMainWindow):
         self.pipeline_step.emit("密度估算")
         schools_df = self._schools_df if self._schools_df is not None else pd.DataFrame()
         self.statusbar.show_progress("计算密度...")
-        analysis = self._get_analysis_region_params()
-        self._current_worker = DensityWorker(schools_df, self._ds_Sv, self._config, **analysis)
+        ds_for_density = self._get_analysis_ds()
+        self._current_worker = DensityWorker(schools_df, ds_for_density, self._config)
         self._current_worker.finished.connect(self._on_density_computed)
         self._current_worker.error.connect(self._on_worker_error)
         self._current_worker.start()
