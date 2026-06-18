@@ -46,9 +46,7 @@ class ProcessingTab(QWidget):
     """处理参数标签页"""
 
     noise_params_changed = Signal(dict)
-    bottom_params_changed = Signal(dict)
-    school_params_changed = Signal(dict)
-    detect_bottom_clicked = Signal()
+    surface_line_changed = Signal(float)  # 表线深度(m)
     detect_schools_clicked = Signal()
     compute_density_clicked = Signal()
 
@@ -82,29 +80,21 @@ class ProcessingTab(QWidget):
         self.spin_range_num.valueChanged.connect(self._emit_noise_params)
         self.spin_snr.valueChanged.connect(self._emit_noise_params)
 
-        # --- 底部检测参数 ---
-        bottom_group = QGroupBox("底部检测")
-        bottom_layout = QFormLayout()
-        self.spin_threshold = QDoubleSpinBox()
-        self.spin_threshold.setRange(-100, 0)
-        self.spin_threshold.setValue(-50.0)
-        self.spin_threshold.setSuffix(" dB")
-        self.spin_offset = QDoubleSpinBox()
-        self.spin_offset.setRange(0, 10)
-        self.spin_offset.setValue(0.5)
-        self.spin_offset.setSuffix(" m")
-        self.spin_bin_skip = QSpinBox()
-        self.spin_bin_skip.setRange(0, 1000)
-        self.spin_bin_skip.setValue(200)
-        self.btn_detect_bottom = QPushButton("重新检测底部")
-        bottom_layout.addRow("阈值:", self.spin_threshold)
-        bottom_layout.addRow("偏移:", self.spin_offset)
-        bottom_layout.addRow("跳过表面样本:", self.spin_bin_skip)
-        bottom_layout.addRow(self.btn_detect_bottom)
-        bottom_group.setLayout(bottom_layout)
-        layout.addWidget(bottom_group)
+        # --- 表线设置 ---
+        surface_group = QGroupBox("表线设置")
+        surface_layout = QFormLayout()
+        self.spin_surface = QDoubleSpinBox()
+        self.spin_surface.setRange(0, 50)
+        self.spin_surface.setValue(2.0)
+        self.spin_surface.setSuffix(" m")
+        self.spin_surface.setToolTip("设定水面以下多少米绘制表线。分析时仅在表线~底线之间进行计算。")
+        surface_layout.addRow("表线深度:", self.spin_surface)
+        surface_group.setLayout(surface_layout)
+        layout.addWidget(surface_group)
 
-        self.btn_detect_bottom.clicked.connect(self.detect_bottom_clicked)
+        self.spin_surface.valueChanged.connect(
+            lambda v: self.surface_line_changed.emit(float(v))
+        )
 
         # --- 鱼群检测参数 ---
         school_group = QGroupBox("鱼群检测")
@@ -126,10 +116,16 @@ class ProcessingTab(QWidget):
         density_layout = QFormLayout()
         self.spin_ts = QDoubleSpinBox()
         self.spin_ts.setRange(-70, -20)
-        self.spin_ts.setValue(-40.0)
+        self.spin_ts.setValue(-30.0)
         self.spin_ts.setSuffix(" dB")
+        self.spin_avg_weight = QDoubleSpinBox()
+        self.spin_avg_weight.setRange(0.001, 100.0)
+        self.spin_avg_weight.setValue(0.5)
+        self.spin_avg_weight.setSuffix(" kg")
+        self.spin_avg_weight.setToolTip("单尾平均体重，用于计算生物量 (kg/ha)")
         self.btn_compute_density = QPushButton("计算密度")
         density_layout.addRow("TS 默认值:", self.spin_ts)
+        density_layout.addRow("平均体重:", self.spin_avg_weight)
         density_layout.addRow(self.btn_compute_density)
         density_group.setLayout(density_layout)
         layout.addWidget(density_group)
@@ -156,13 +152,44 @@ class ProcessingTab(QWidget):
             "SNR_threshold": f"{self.spin_snr.value()}dB",
         }
 
-    def get_bottom_config(self) -> dict:
+    def get_school_config(self) -> dict:
+        """获取鱼群检测参数"""
+        return {"thr": self.spin_school_thr.value()}
+
+    def get_density_config(self) -> dict:
+        """获取密度估算参数"""
         return {
-            "method": "basic",
-            "threshold": self.spin_threshold.value(),
-            "offset_m": self.spin_offset.value(),
-            "bin_skip_from_surface": self.spin_bin_skip.value(),
+            "ts_default": self.spin_ts.value(),
+            "avg_weight_kg": self.spin_avg_weight.value(),
         }
+
+    def load_from_config(self, config: dict):
+        """从配置字典加载参数"""
+        proc = config.get("processing", {})
+        noise = proc.get("noise_removal", {})
+        if "ping_num" in noise:
+            self.spin_ping_num.setValue(noise["ping_num"])
+        if "range_sample_num" in noise:
+            self.spin_range_num.setValue(noise["range_sample_num"])
+        if "SNR_threshold" in noise:
+            val = float(str(noise["SNR_threshold"]).replace("dB", "").strip())
+            self.spin_snr.setValue(val)
+
+        bottom = proc.get("bottom_detection", {})
+
+        school = config.get("school_detection", {})
+        if "thr" in school:
+            self.spin_school_thr.setValue(school["thr"])
+
+        density = config.get("density", {})
+
+        surface = config.get("surface_line", {})
+        if "depth_m" in surface:
+            self.spin_surface.setValue(surface["depth_m"])
+        if "ts_default" in density:
+            self.spin_ts.setValue(density["ts_default"])
+        if "avg_weight_kg" in density:
+            self.spin_avg_weight.setValue(density["avg_weight_kg"])
 
 
 class StatsTab(QWidget):
@@ -218,8 +245,7 @@ class PropertyPanel(QTabWidget):
     """右侧属性面板"""
 
     noise_params_changed = Signal(dict)
-    bottom_params_changed = Signal(dict)
-    detect_bottom_clicked = Signal()
+    surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
     compute_density_clicked = Signal()
 
@@ -236,6 +262,6 @@ class PropertyPanel(QTabWidget):
 
         # 转发信号
         self.processing.noise_params_changed.connect(self.noise_params_changed)
-        self.processing.detect_bottom_clicked.connect(self.detect_bottom_clicked)
+        self.processing.surface_line_changed.connect(self.surface_line_changed)
         self.processing.detect_schools_clicked.connect(self.detect_schools_clicked)
         self.processing.compute_density_clicked.connect(self.compute_density_clicked)
