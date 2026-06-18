@@ -106,42 +106,70 @@ def _add_depth(ds_Sv: xr.Dataset, echodata) -> xr.Dataset:
     return ds_Sv
 
 
-def process_single_file(echodata, config: dict) -> xr.Dataset:
+def compute_sv(echodata, config: dict) -> xr.Dataset:
     """
-    处理单个 EchoData 对象的完整流程：
+    计算 Sv 并添加深度信息（不做噪声去除和底部检测）。
+
+    处理流程：
     1. compute_Sv — 计算体积反向散射强度
-    2. remove_background_noise — 噪声去除
-    3. depth — 计算真实水深
-    4. detect_seafloor — 底部检测
+    2. add_depth — 计算真实水深（几何量，与噪声无关）
 
     Parameters
     ----------
     echodata : echopype.EchoData
-        由 open_raw 或 open_single_file 返回的 EchoData 对象
     config : dict
-        配置字典
 
     Returns
     -------
     xr.Dataset
-        包含 Sv、depth、bottom_depth 的数据集
+        包含 Sv 和 depth 的数据集
     """
-    from echopype.calibrate import compute_Sv
-    from echopype.clean import remove_background_noise
-    from echopype.mask import detect_seafloor
+    from echopype.calibrate import compute_Sv as ep_compute_Sv
 
-    proc_cfg = config["processing"]
-
-    # 1. 计算 Sv（自动检测 CW/BB 和 complex/power）
     logger.info("计算 Sv...")
     waveform_mode, encode_mode = _detect_waveform_mode(echodata)
-    ds_Sv = compute_Sv(
+    ds_Sv = ep_compute_Sv(
         echodata,
         waveform_mode=waveform_mode,
         encode_mode=encode_mode,
     )
 
-    # 2. 噪声去除
+    # 深度是几何量，应在噪声去除前独立计算
+    ds_Sv = _add_depth(ds_Sv, echodata)
+
+    logger.info("Sv + depth 计算完成")
+    return ds_Sv
+
+
+def process_single_file(echodata, config: dict) -> xr.Dataset:
+    """
+    处理单个 EchoData 对象的完整流程（供 CLI 和批量导入使用）：
+    1. compute_Sv + depth
+    2. remove_background_noise — 噪声去除
+    3. detect_seafloor — 底部检测
+
+    关键原则：Sv 原始数据永不覆盖，去噪结果存入 Sv_corrected。
+    下游操作（底部检测等）优先使用 Sv_corrected。
+
+    Parameters
+    ----------
+    echodata : echopype.EchoData
+    config : dict
+
+    Returns
+    -------
+    xr.Dataset
+        包含 Sv、Sv_corrected（如有）、depth、bottom_depth 的数据集
+    """
+    from echopype.clean import remove_background_noise
+    from echopype.mask import detect_seafloor
+
+    proc_cfg = config["processing"]
+
+    # 1. 计算 Sv + depth
+    ds_Sv = compute_sv(echodata, config)
+
+    # 2. 噪声去除（Sv 原始数据保留，去噪结果存入 Sv_corrected）
     noise_cfg = proc_cfg.get("noise_removal", {})
     logger.info("去除背景噪声...")
     ds_Sv = remove_background_noise(
@@ -150,21 +178,17 @@ def process_single_file(echodata, config: dict) -> xr.Dataset:
         range_sample_num=noise_cfg.get("range_sample_num", 10),
         SNR_threshold=noise_cfg.get("SNR_threshold", "3.0dB"),
     )
-    # 使用校正后的 Sv 替换原始 Sv
     if "Sv_corrected" in ds_Sv:
-        ds_Sv["Sv"] = ds_Sv["Sv_corrected"]
-        logger.info("已使用 Sv_corrected 替换 Sv")
+        logger.info("噪声去除完成，Sv_corrected 已生成（原始 Sv 保留）")
 
-    # 3. 计算真实水深
-    ds_Sv = _add_depth(ds_Sv, echodata)
-
-    # 4. 底部检测
+    # 3. 底部检测（优先使用去噪后的数据）
     bottom_cfg = proc_cfg.get("bottom_detection", {})
     logger.info("检测底部...")
 
     channel = str(ds_Sv["channel"].values[0])
+    var_for_bottom = "Sv_corrected" if "Sv_corrected" in ds_Sv else "Sv"
     bottom_params = {
-        "var_name": "Sv",
+        "var_name": var_for_bottom,
         "channel": channel,
         "threshold": bottom_cfg.get("threshold", -50.0),
         "offset_m": bottom_cfg.get("offset_m", 0.5),

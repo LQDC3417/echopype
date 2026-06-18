@@ -6,10 +6,17 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from src.core.utils import build_analysis_mask
+
 logger = logging.getLogger("fish_acoustics")
 
 
-def calculate_abc(ds_Sv: xr.Dataset, config: dict) -> pd.DataFrame:
+def calculate_abc(
+    ds_Sv: xr.Dataset,
+    config: dict,
+    surface_sample: float | None = None,
+    bottom_line: np.ndarray | None = None,
+) -> pd.DataFrame:
     """
     计算 Area Backscattering Coefficient (ABC)
 
@@ -23,6 +30,10 @@ def calculate_abc(ds_Sv: xr.Dataset, config: dict) -> pd.DataFrame:
         包含 Sv 和 echo_range 的数据集
     config : dict
         配置字典
+    surface_sample : float or None
+        表线 sample index，以上区域不参与积分
+    bottom_line : np.ndarray or None
+        底线 sample index 数组 (n_pings,)，以下区域不参与积分
 
     Returns
     -------
@@ -51,9 +62,19 @@ def calculate_abc(ds_Sv: xr.Dataset, config: dict) -> pd.DataFrame:
 
     # Sv 转线性
     Sv_linear = 10 ** (Sv / 10)
+    Sv_linear = np.where(np.isfinite(Sv_linear), Sv_linear, 0)
+
+    # ── 分析区域 mask ──
+    analysis_mask = build_analysis_mask(Sv.shape, surface_sample, bottom_line)
+    if analysis_mask is not None:
+        Sv_linear[~analysis_mask] = 0.0
+        surf_label = f"{surface_sample:.0f}" if surface_sample is not None else "None"
+        logger.info(
+            f"ABC 分析区域限定: 表线={surf_label}, "
+            f"有效样本={(analysis_mask.sum() / analysis_mask.size * 100):.1f}%"
+        )
 
     # 积分
-    Sv_linear = np.where(np.isfinite(Sv_linear), Sv_linear, 0)
     integrated = np.nansum(Sv_linear * np.abs(dr), axis=1)
 
     # ABC = 4π × integrated [m²/m²]
@@ -80,6 +101,8 @@ def estimate_density(
     schools_df: pd.DataFrame,
     ds_Sv: xr.Dataset,
     config: dict,
+    surface_sample: float | None = None,
+    bottom_line: np.ndarray | None = None,
 ) -> pd.DataFrame:
     """
     基于 ABC 和 TS 估算鱼类密度
@@ -98,17 +121,23 @@ def estimate_density(
         Sv 数据集
     config : dict
         配置字典
+    surface_sample : float or None
+        表线 sample index，以上区域不参与积分
+    bottom_line : np.ndarray or None
+        底线 sample index 数组 (n_pings,)，以下区域不参与积分
 
     Returns
     -------
     pd.DataFrame
         密度估算结果
     """
-    ts_default = config.get("density", {}).get("ts_default", -30.0)
+    density_cfg = config.get("density", {})
+    ts_default = density_cfg.get("ts_default", -30.0)
+    avg_weight_kg = density_cfg.get("avg_weight_kg", 0.5)
     sigma_bs = 10 ** (ts_default / 10)
 
-    # 计算 ABC
-    abc_df = calculate_abc(ds_Sv, config)
+    # 计算 ABC（传入分析区域参数）
+    abc_df = calculate_abc(ds_Sv, config, surface_sample, bottom_line)
 
     # 合并鱼群信息
     if schools_df.empty:
@@ -124,7 +153,7 @@ def estimate_density(
             "abc": [total_abc],
             "density_ind_m2": [density_m2],
             "density_ind_ha": [density_ha],
-            "total_biomass_kg_ha": [density_ha * 0.5],  # 假设平均体重 0.5kg
+            "total_biomass_kg_ha": [density_ha * avg_weight_kg],
         })
     else:
         # 按鱼群计算
@@ -148,7 +177,7 @@ def estimate_density(
                 "abc": school_abc,
                 "density_ind_m2": density_m2,
                 "density_ind_ha": density_ha,
-                "total_biomass_kg_ha": density_ha * 0.5,  # 假设平均体重 0.5kg
+                "total_biomass_kg_ha": density_ha * avg_weight_kg,
             })
 
         result = pd.DataFrame(records)
