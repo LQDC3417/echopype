@@ -10,41 +10,51 @@
 - 独立 X/Y 缩放, 自动保持数据纵横比
 """
 
+import logging
 import numpy as np
 import matplotlib.cm as cm
 
 from OpenGL.GL import (
     GL_BLEND, GL_CLAMP_TO_EDGE, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT,
-    GL_LINEAR, GL_LINES, GL_LINE_STRIP, GL_MODELVIEW, GL_NEAREST,
+    GL_LINEAR, GL_LINES, GL_LINE_STRIP, GL_LINE_STIPPLE,
+    GL_MAX_TEXTURE_SIZE, GL_MODELVIEW, GL_NEAREST,
     GL_ONE_MINUS_SRC_ALPHA, GL_PROJECTION, GL_QUADS, GL_RGBA,
     GL_SRC_ALPHA, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
     GL_TEXTURE_MIN_FILTER, GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T,
     GL_UNPACK_ALIGNMENT, GL_UNSIGNED_BYTE,
     glBindTexture, glBlendFunc, glClear, glClearColor, glColor4f,
-    glDisable, glEnable, glEnd, glGenTextures, glLineWidth,
-    glLoadIdentity, glMatrixMode, glOrtho, glPixelStorei,
-    glTexCoord2f, glTexImage2D, glTexParameteri,
-    glVertex2f, glViewport, glBegin,
+    glDisable, glEnable, glEnd, glGenTextures, glGetIntegerv,
+    glLineStipple, glLineWidth, glLoadIdentity, glMatrixMode, glOrtho,
+    glPixelStorei, glTexCoord2f, glTexImage2D, glTexParameteri,
+    glVertex2f, glViewport, glBegin, GL_POINTS, glPointSize,
 )
 
+logger = logging.getLogger(__name__)
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QMouseEvent, QWheelEvent
+from PySide6.QtGui import QMouseEvent, QWheelEvent, QAction, QCursor, QPainter, QFont, QColor
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from PySide6.QtWidgets import QMenu
+
+from src.gui.toolbars import MouseMode
 
 
 class EchogramRenderer(QOpenGLWidget):
-    """OpenGL Echogram 渲染器
-
-    坐标系:
-    - 数据坐标: (ping_index, sample_index) — 原始数据索引
-    - 屏幕坐标: (sx, sy) — 像素, 左上角为原点
-    - 变换: screen = offset + data * zoom
-    """
+    """OpenGL Echogram 渲染器"""
 
     mouse_moved = Signal(float, float)  # (ping_index, sample_index)
     region_selected = Signal(float, float, float, float)
+    bottom_line_edited = Signal(object)  # np.ndarray — 编辑后的底线
+    sv_at_cursor = Signal(float, float, float)  # (ping, depth, sv_value)
+    surface_line_requested = Signal()  # 右键请求设置表线
+    analysis_region_toggle = Signal(bool)  # 分析区域限定开关
+    re_detect_bottom = Signal()  # 重新检测底部
+    update_bottom_requested = Signal()  # 手动更新/保存当前底线
+    file_page_requested = Signal(int)  # delta: -1=上一页, +1=下一页
+    zoom_changed = Signal(float, float)  # (zoom_x, zoom_y)
 
-    MAX_TEX_SIZE = 16384
+    MAX_TEX_SIZE_FALLBACK = 16384  # GPU 查询失败时的保底值
+    NODE_RADIUS = 4.0  # 底线节点半径（像素）
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -54,7 +64,17 @@ class EchogramRenderer(QOpenGLWidget):
         self._sv_data = None
         self._noise_mask = None
         self._bottom_line = None  # (n_pings,) sample indices
+        self._surface_line = None  # float — 表线深度(in sample index units)
         self._school_mask = None
+
+        # 鼠标模式
+        self._mouse_mode = MouseMode.NAVIGATE
+
+        # 底线编辑状态
+        self._bottom_editing = False
+        self._bottom_draw_points = []  # 手绘模式收集的点 [(ping, sample), ...]
+        self._dragging_node = -1  # 正在拖拽的节点索引
+        self._hover_node = -1  # 悬停的节点索引
 
         # 颜色映射
         self._cmap_name = "jet"
@@ -69,11 +89,12 @@ class EchogramRenderer(QOpenGLWidget):
         self._downsample_x = 1
         self._downsample_y = 1
 
-        # 视口变换 — 独立 X/Y 缩放
+        # 视口变换
         self._offset_x = 0.0
         self._offset_y = 0.0
-        self._zoom_x = 1.0  # pixels per ping
-        self._zoom_y = 1.0  # pixels per sample
+        self._zoom_x = 1.0
+        self._zoom_y = 1.0
+        self._max_tex_size = self.MAX_TEX_SIZE_FALLBACK  # initializeGL 后更新为 GPU 真实值
 
         # 鼠标状态
         self._panning = False
@@ -86,10 +107,24 @@ class EchogramRenderer(QOpenGLWidget):
         self._n_pings = 0
         self._n_samples = 0
 
+        # 通道信息叠加
+        self._channel_text = ""
+        self._analysis_region_enabled = False
+
+        # 启用鼠标追踪（用于悬停检测）
+        self.setMouseTracking(True)
+
+        # 右键菜单通过 contextMenuEvent 处理
+
+    def _emit_prev_page(self):
+        self.file_page_requested.emit(-1)
+
+    def _emit_next_page(self):
+        self.file_page_requested.emit(1)
+
     # ── 数据设置 ──────────────────────────────────────────────
 
     def set_data(self, sv_data: np.ndarray) -> None:
-        """设置 Sv 数据 (n_pings, n_samples)"""
         self._sv_data = sv_data.astype(np.float32)
         self._n_pings = sv_data.shape[0]
         self._n_samples = sv_data.shape[1]
@@ -97,26 +132,63 @@ class EchogramRenderer(QOpenGLWidget):
         self._fit_to_view()
         self.update()
 
-    def set_noise_mask(self, mask: np.ndarray) -> None:
-        self._noise_mask = mask.astype(bool)
+    def set_noise_mask(self, mask) -> None:
+        if mask is None:
+            self._noise_mask = None
+        else:
+            self._noise_mask = mask.astype(bool)
         self.update()
 
-    def set_bottom_line(self, bottom: np.ndarray) -> None:
-        self._bottom_line = np.asarray(bottom, dtype=np.float32)
+    def set_bottom_line(self, bottom: np.ndarray | None) -> None:
+        if bottom is None:
+            self._bottom_line = None
+        else:
+            self._bottom_line = np.asarray(bottom, dtype=np.float32)
         self.update()
 
-    def set_school_mask(self, mask: np.ndarray) -> None:
-        self._school_mask = mask.astype(bool)
+    def get_bottom_line(self) -> np.ndarray | None:
+        """获取当前底线数据（只读副本）"""
+        if self._bottom_line is None:
+            return None
+        return self._bottom_line.copy()
+
+    def set_surface_line(self, depth_samples: float) -> None:
+        """设置表线深度（sample index 单位），None 表示关闭"""
+        self._surface_line = depth_samples
+        self.update()
+
+    def set_school_mask(self, mask) -> None:
+        if mask is None:
+            self._school_mask = None
+        else:
+            self._school_mask = mask.astype(bool)
         self.update()
 
     def set_colormap(self, name: str = "jet", vmin: float = -70.0, vmax: float = -20.0) -> None:
-        self._cmap_name = name
+        self._cmap_name = "gray" if name == "grayscale" else name
         self._vmin = vmin
         self._vmax = vmax
         self._texture_dirty = True
         self.update()
 
-    # ── OpenGL 生命周期 ───────────────────────────────────────
+    def set_channel_info(self, text: str) -> None:
+        """设置频率/通道信息叠加文字"""
+        self._channel_text = text
+        self.update()
+
+    def set_mouse_mode(self, mode) -> None:
+        self._mouse_mode = mode
+        # 退出正在进行的编辑
+        if mode != MouseMode.DRAW_BOTTOM:
+            self._bottom_draw_points.clear()
+            self._bottom_editing = False
+        self._dragging_node = -1
+
+    def set_analysis_region_enabled(self, enabled: bool) -> None:
+        """设置分析区域限定标志"""
+        self._analysis_region_enabled = enabled
+        self.update()
+
 
     def initializeGL(self) -> None:
         glClearColor(0.0, 0.0, 0.0, 1.0)
@@ -124,6 +196,9 @@ class EchogramRenderer(QOpenGLWidget):
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
         self._texture_id = int(glGenTextures(1))
+        # 查询 GPU 实际支持的最大纹理尺寸
+        max_size = glGetIntegerv(GL_MAX_TEXTURE_SIZE)
+        self._max_tex_size = int(max_size) if max_size else self.MAX_TEX_SIZE_FALLBACK
 
     def resizeGL(self, w: int, h: int) -> None:
         glViewport(0, 0, w, h)
@@ -145,42 +220,58 @@ class EchogramRenderer(QOpenGLWidget):
             self._draw_noise_overlay()
         if self._bottom_line is not None:
             self._draw_bottom_line()
+        if self._surface_line is not None:
+            self._draw_surface_line()
         if self._school_mask is not None:
             self._draw_school_overlay()
         if self._selecting and self._select_start and self._select_end:
             self._draw_selection_rect()
 
+        # 底线绘制预览
+        if self._bottom_draw_points:
+            self._draw_bottom_preview()
+
+        # 叠加信息文字
+        if self._channel_text or self._cmap_name:
+            self._draw_overlay_text()
+
     # ── 纹理生成与渲染 ────────────────────────────────────────
 
     def _sv_to_rgba(self) -> np.ndarray:
-        """Sv (n_pings, n_samples) → RGBA (n_samples, n_pings, 4)
+        """Sv 数据 → RGBA 纹理数组。
 
-        转置 + flipud: 表面在纹理顶部, 水底在底部
+        (n_pings, n_samples) → 转置 → (n_samples, n_pings, 4)
+        仅转置，不做 flipud。OpenGL 纹理坐标 (0,0) 位于 quad 顶部，
+        对应 sample=0（水面附近），纹理坐标 (1,1) 对应最深 sample。
         """
-        cmap = cm.get_cmap(self._cmap_name)
-        data_T = np.flipud(self._sv_data.T)
-        norm = np.clip((data_T - self._vmin) / (self._vmax - self._vmin), 0, 1)
+        # matplotlib ≥3.7 推荐 colormaps[name]，回退兼容旧版
+        try:
+            from matplotlib import colormaps
+            cmap = colormaps[self._cmap_name]
+        except (ImportError, AttributeError):
+            cmap = cm.get_cmap(self._cmap_name)
+        data_T = self._sv_data.T
+        span = self._vmax - self._vmin
+        if span == 0:
+            span = 1.0
+        norm = np.clip((data_T - self._vmin) / span, 0, 1)
         rgba = cmap(norm)
         return (rgba * 255).astype(np.uint8)
 
     def _upload_texture(self) -> None:
         if self._sv_data is None:
             return
-
         rgba = self._sv_to_rgba()
         tex_h, tex_w = rgba.shape[:2]
-
         self._downsample_x = 1
         self._downsample_y = 1
-        if tex_w > self.MAX_TEX_SIZE:
-            self._downsample_x = int(np.ceil(tex_w / self.MAX_TEX_SIZE))
-        if tex_h > self.MAX_TEX_SIZE:
-            self._downsample_y = int(np.ceil(tex_h / self.MAX_TEX_SIZE))
-
+        if tex_w > self._max_tex_size:
+            self._downsample_x = int(np.ceil(tex_w / self._max_tex_size))
+        if tex_h > self._max_tex_size:
+            self._downsample_y = int(np.ceil(tex_h / self._max_tex_size))
         if self._downsample_x > 1 or self._downsample_y > 1:
             rgba = rgba[::self._downsample_y, ::self._downsample_x]
             tex_h, tex_w = rgba.shape[:2]
-
         glBindTexture(GL_TEXTURE_2D, self._texture_id)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
@@ -195,38 +286,39 @@ class EchogramRenderer(QOpenGLWidget):
     def _draw_echogram_texture(self) -> None:
         if self._texture_dirty:
             self._upload_texture()
-
         glBindTexture(GL_TEXTURE_2D, self._texture_id)
         glEnable(GL_TEXTURE_2D)
-
-        # 屏幕范围: offset + n_pings * zoom_x, offset + n_samples * zoom_y
         sx = self._offset_x
         sy = self._offset_y
         sw = self._n_pings * self._zoom_x
         sh = self._n_samples * self._zoom_y
-
         glColor4f(1.0, 1.0, 1.0, 1.0)
         glBegin(GL_QUADS)
-        glTexCoord2f(0, 0); glVertex2f(sx, sy)           # 左上=ping0, surface
-        glTexCoord2f(1, 0); glVertex2f(sx + sw, sy)       # 右上=pingN, surface
-        glTexCoord2f(1, 1); glVertex2f(sx + sw, sy + sh)  # 右下=pingN, bottom
-        glTexCoord2f(0, 1); glVertex2f(sx, sy + sh)       # 左下=ping0, bottom
+        glTexCoord2f(0, 0); glVertex2f(sx, sy)
+        glTexCoord2f(1, 0); glVertex2f(sx + sw, sy)
+        glTexCoord2f(1, 1); glVertex2f(sx + sw, sy + sh)
+        glTexCoord2f(0, 1); glVertex2f(sx, sy + sh)
         glEnd()
         glDisable(GL_TEXTURE_2D)
 
     # ── 坐标转换 ──────────────────────────────────────────────
 
     def _data_to_screen(self, ping_idx: float, sample_idx: float) -> tuple:
-        """数据坐标 → 屏幕坐标"""
         sx = self._offset_x + ping_idx * self._zoom_x
         sy = self._offset_y + sample_idx * self._zoom_y
         return sx, sy
 
     def _screen_to_data(self, sx: float, sy: float) -> tuple:
-        """屏幕坐标 → 数据坐标 (ping_index, sample_index)"""
         px = (sx - self._offset_x) / self._zoom_x
         py = (sy - self._offset_y) / self._zoom_y
         return px, py
+
+    def _get_sv_at(self, ping: int, sample: int) -> float:
+        if self._sv_data is None:
+            return float('nan')
+        if 0 <= ping < self._n_pings and 0 <= sample < self._n_samples:
+            return float(self._sv_data[ping, sample])
+        return float('nan')
 
     # ── 叠加层渲染 ────────────────────────────────────────────
 
@@ -235,26 +327,26 @@ class EchogramRenderer(QOpenGLWidget):
         if mask is None:
             return
         glColor4f(0.3, 0.3, 0.3, 0.5)
-        h, w = mask.shape  # h=n_samples, w=n_pings
-        for ping in range(w):
-            col = mask[:, ping]
-            if not np.any(col):
+        h, w = mask.shape  # (n_pings, n_samples)
+        glBegin(GL_QUADS)
+        for ping in range(h):
+            row = mask[ping, :]
+            if not np.any(row):
                 continue
-            for start, end in self._find_runs(col):
+            for start, end in self._find_runs(row):
                 x0 = self._offset_x + ping * self._zoom_x
                 x1 = x0 + self._zoom_x
-                y0 = self._offset_y + (h - 1 - end) * self._zoom_y
-                y1 = self._offset_y + (h - 1 - start) * self._zoom_y
-                glBegin(GL_QUADS)
+                y0 = self._offset_y + start * self._zoom_y
+                y1 = self._offset_y + end * self._zoom_y
                 glVertex2f(x0, y0); glVertex2f(x1, y0)
                 glVertex2f(x1, y1); glVertex2f(x0, y1)
-                glEnd()
+        glEnd()
 
     def _draw_bottom_line(self) -> None:
         bl = self._bottom_line
-        if bl is None:
+        if bl is None or bl.ndim == 0:
             return
-        glColor4f(1.0, 1.0, 1.0, 1.0)
+        glColor4f(0.8, 0.6, 0.0, 1.0)  # 深黄色，Echoview 风格底线
         glLineWidth(2.0)
         glBegin(GL_LINE_STRIP)
         for i, val in enumerate(bl):
@@ -263,7 +355,54 @@ class EchogramRenderer(QOpenGLWidget):
                 glBegin(GL_LINE_STRIP)
                 continue
             x = self._offset_x + i * self._zoom_x
-            y = self._offset_y + (self._n_samples - 1 - val) * self._zoom_y
+            y = self._offset_y + val * self._zoom_y
+            glVertex2f(x, y)
+        glEnd()
+
+        # 绘制节点标记（调整模式下）
+        if self._mouse_mode == MouseMode.ADJUST_BOTTOM:
+            glPointSize(6.0)
+            glBegin(GL_POINTS)
+            for i, val in enumerate(bl):
+                if np.isnan(val):
+                    continue
+                if i == self._hover_node or i == self._dragging_node:
+                    glColor4f(1.0, 0.5, 0.0, 1.0)  # 橙色高亮
+                else:
+                    glColor4f(1.0, 1.0, 0.0, 1.0)  # 黄色
+                x = self._offset_x + i * self._zoom_x
+                y = self._offset_y + val * self._zoom_y
+                glVertex2f(x, y)
+            glEnd()
+
+    def _draw_surface_line(self) -> None:
+        """绘制表线 — 亮绿色虚线横跨全宽"""
+        sl = self._surface_line
+        if sl is None:
+            return
+        glEnable(GL_LINE_STIPPLE)
+        glLineStipple(4, 0x0F0F)  # 虚线模式
+        glColor4f(0.2, 1.0, 0.4, 0.8)
+        glLineWidth(1.5)
+        y = self._offset_y + sl * self._zoom_y
+        x0 = self._offset_x
+        x1 = self._offset_x + self._n_pings * self._zoom_x
+        glBegin(GL_LINES)
+        glVertex2f(x0, y)
+        glVertex2f(x1, y)
+        glEnd()
+        glDisable(GL_LINE_STIPPLE)
+
+    def _draw_bottom_preview(self) -> None:
+        """绘制手绘底线预览 — 橙色连线"""
+        if not self._bottom_draw_points:
+            return
+        glColor4f(1.0, 0.5, 0.0, 1.0)
+        glLineWidth(2.0)
+        glBegin(GL_LINE_STRIP)
+        for ping, sample in self._bottom_draw_points:
+            x = self._offset_x + ping * self._zoom_x
+            y = self._offset_y + sample * self._zoom_y
             glVertex2f(x, y)
         glEnd()
 
@@ -271,41 +410,44 @@ class EchogramRenderer(QOpenGLWidget):
         mask = self._school_mask
         if mask is None:
             return
+        h, w = mask.shape  # (n_pings, n_samples)
+        # 填充半透明绿色
         glColor4f(0.0, 1.0, 0.0, 0.25)
-        h, w = mask.shape
-        for ping in range(w):
-            col = mask[:, ping]
-            if not np.any(col):
+        glBegin(GL_QUADS)
+        for ping in range(h):
+            row = mask[ping, :]
+            if not np.any(row):
                 continue
-            for start, end in self._find_runs(col):
+            for start, end in self._find_runs(row):
                 x0 = self._offset_x + ping * self._zoom_x
                 x1 = x0 + self._zoom_x
-                y0 = self._offset_y + (h - 1 - end) * self._zoom_y
-                y1 = self._offset_y + (h - 1 - start) * self._zoom_y
-                glBegin(GL_QUADS)
+                y0 = self._offset_y + start * self._zoom_y
+                y1 = self._offset_y + end * self._zoom_y
                 glVertex2f(x0, y0); glVertex2f(x1, y0)
                 glVertex2f(x1, y1); glVertex2f(x0, y1)
-                glEnd()
+        glEnd()
+        # 边界线条 — 批量绘制
+        self._draw_school_boundaries(mask, h, w)
 
-        glColor4f(0.0, 1.0, 0.0, 0.8)
-        glLineWidth(1.0)
-        for y in range(h):
-            for x in range(w):
-                if not mask[y, x]:
+    def _draw_school_boundaries(self, mask, h, w) -> None:
+        """绘制鱼群边界线条 — 单次 glBegin/glEnd，Echoview 风格深色边界"""
+        glColor4f(0.0, 0.5, 0.0, 0.9)
+        glLineWidth(1.5)
+        glBegin(GL_LINES)
+        for ping in range(h):
+            for sample in range(w):
+                if not mask[ping, sample]:
                     continue
-                fy = h - 1 - y
-                if x == w - 1 or not mask[y, x + 1]:
-                    px = self._offset_x + (x + 1) * self._zoom_x
-                    y0 = self._offset_y + fy * self._zoom_y
-                    glBegin(GL_LINES)
+                if ping == h - 1 or not mask[ping + 1, sample]:
+                    py = self._offset_y + (sample + 1) * self._zoom_y
+                    x0 = self._offset_x + ping * self._zoom_x
+                    x1 = x0 + self._zoom_x
+                    glVertex2f(x0, py); glVertex2f(x1, py)
+                if sample == w - 1 or not mask[ping, sample + 1]:
+                    px = self._offset_x + (ping + 1) * self._zoom_x
+                    y0 = self._offset_y + sample * self._zoom_y
                     glVertex2f(px, y0); glVertex2f(px, y0 + self._zoom_y)
-                    glEnd()
-                if y == h - 1 or not mask[y + 1, x]:
-                    py = self._offset_y + (fy + 1) * self._zoom_y
-                    x0 = self._offset_x + x * self._zoom_x
-                    glBegin(GL_LINES)
-                    glVertex2f(x0, py); glVertex2f(x0 + self._zoom_x, py)
-                    glEnd()
+        glEnd()
 
     def _draw_selection_rect(self) -> None:
         if not (self._select_start and self._select_end):
@@ -337,23 +479,49 @@ class EchogramRenderer(QOpenGLWidget):
         self._zoom_y = max(0.01, min(100.0, self._zoom_y * factor))
         self._offset_x = sx - data_x * self._zoom_x
         self._offset_y = sy - data_y * self._zoom_y
+        self.zoom_changed.emit(self._zoom_x, self._zoom_y)
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         sx, sy = float(event.x()), float(event.y())
+
         if event.button() == Qt.MiddleButton:
             self._panning = True
             self._pan_start = (sx, sy)
             self.setCursor(Qt.ClosedHandCursor)
-        elif event.button() == Qt.LeftButton:
-            self._selecting = True
-            self._select_start = (sx, sy)
-            self._select_end = (sx, sy)
+            return
+
+        if event.button() == Qt.LeftButton:
+            if self._mouse_mode == MouseMode.NAVIGATE or self._mouse_mode == MouseMode.SELECT_NOISE or self._mouse_mode == MouseMode.INSPECT:
+                self._selecting = True
+                self._select_start = (sx, sy)
+                self._select_end = (sx, sy)
+
+            elif self._mouse_mode == MouseMode.DRAW_BOTTOM:
+                # 添加绘制点
+                px, py = self._screen_to_data(sx, sy)
+                self._bottom_draw_points.append((px, py))
+                self._bottom_editing = True
+                self.update()
+
+            elif self._mouse_mode == MouseMode.ADJUST_BOTTOM:
+                # 检查是否点击了节点附近
+                node = self._find_nearest_node(sx, sy)
+                if node >= 0:
+                    self._dragging_node = node
+                    self.setCursor(Qt.ClosedHandCursor)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         sx, sy = float(event.x()), float(event.y())
         data_x, data_y = self._screen_to_data(sx, sy)
         self.mouse_moved.emit(data_x, data_y)
+
+        # 发射 Sv 值
+        ping_idx = int(round(data_x))
+        sample_idx = int(round(data_y))
+        sv_val = self._get_sv_at(ping_idx, sample_idx)
+        self.sv_at_cursor.emit(data_x, data_y, sv_val)
+
         if self._panning and self._pan_start:
             dx = sx - self._pan_start[0]
             dy = sy - self._pan_start[1]
@@ -361,43 +529,215 @@ class EchogramRenderer(QOpenGLWidget):
             self._offset_y += dy
             self._pan_start = (sx, sy)
             self.update()
+
         elif self._selecting:
             self._select_end = (sx, sy)
             self.update()
+
+        elif self._mouse_mode == MouseMode.ADJUST_BOTTOM:
+            if self._dragging_node >= 0 and self._bottom_line is not None:
+                # 拖拽节点
+                _, py = self._screen_to_data(sx, sy)
+                py = max(0, min(self._n_samples - 1, py))
+                self._bottom_line[self._dragging_node] = py
+                self.update()
+            else:
+                # 悬停检测
+                node = self._find_nearest_node(sx, sy)
+                if node != self._hover_node:
+                    self._hover_node = node
+                    if node >= 0:
+                        self.setCursor(Qt.PointingHandCursor)
+                    else:
+                        self.setCursor(Qt.ArrowCursor)
+                    self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MiddleButton:
             self._panning = False
             self._pan_start = None
             self.setCursor(Qt.ArrowCursor)
-        elif event.button() == Qt.LeftButton and self._selecting:
-            self._selecting = False
-            if self._select_start and self._select_end:
-                x0, y0 = self._screen_to_data(*self._select_start)
-                x1, y1 = self._screen_to_data(*self._select_end)
-                self.region_selected.emit(
-                    min(x0, x1), min(y0, y1),
-                    max(x0, x1), max(y0, y1),
-                )
-            self._select_start = None
-            self._select_end = None
+
+        elif event.button() == Qt.LeftButton:
+            if self._selecting:
+                self._selecting = False
+                if self._select_start and self._select_end:
+                    x0, y0 = self._screen_to_data(*self._select_start)
+                    x1, y1 = self._screen_to_data(*self._select_end)
+                    self.region_selected.emit(
+                        min(x0, x1), min(y0, y1),
+                        max(x0, x1), max(y0, y1),
+                    )
+                self._select_start = None
+                self._select_end = None
+                self.update()
+
+            elif self._dragging_node >= 0:
+                # 完成拖拽
+                self._dragging_node = -1
+                self.setCursor(Qt.ArrowCursor)
+                if self._bottom_line is not None:
+                    self.bottom_line_edited.emit(self._bottom_line.copy())
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if self._mouse_mode == MouseMode.DRAW_BOTTOM and self._bottom_draw_points:
+            # 双击结束绘制
+            self._finish_bottom_drawing()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            if self._mouse_mode == MouseMode.DRAW_BOTTOM and self._bottom_draw_points:
+                self._finish_bottom_drawing()
+        elif event.key() == Qt.Key_Escape:
+            self._bottom_draw_points.clear()
+            self._bottom_editing = False
             self.update()
+
+    # ── 右键菜单 ──────────────────────────────────────────────
+
+    def contextMenuEvent(self, event) -> None:
+        """Qt 右键事件 → 显示上下文菜单"""
+        self._show_context_menu(event.pos())
+
+    def _show_context_menu(self, pos) -> None:
+        """显示右键菜单"""
+        menu = QMenu(self)
+        menu.addAction("🔄 重置视图", self.reset_view)
+        menu.addAction("⬜ 适应窗口", self._fit_to_view_and_update)
+        menu.addSeparator()
+
+        # ── 翻页 ──
+        act_prev = menu.addAction("◀ 上一页")
+        act_prev.triggered.connect(self._emit_prev_page)
+        act_next = menu.addAction("▶ 下一页")
+        act_next.triggered.connect(self._emit_next_page)
+        menu.addSeparator()
+
+        # 显示当前位置信息
+        sx, sy = float(pos.x()), float(pos.y())
+        px, py = self._screen_to_data(sx, sy)
+        ping_idx = int(round(px))
+        sample_idx = int(round(py))
+        sv_val = self._get_sv_at(ping_idx, sample_idx)
+        if not np.isnan(sv_val):
+            menu.addAction(f"📍 Ping: {ping_idx} | Sample: {sample_idx} | Sv: {sv_val:.1f} dB").setEnabled(False)
+            menu.addSeparator()
+
+        # ── 表线 / 分析区域 ──
+        menu.addAction("📏 设置表线深度...", lambda: self.surface_line_requested.emit())
+        act_analysis = menu.addAction("📐 限定分析区域（表线~底线）")
+        act_analysis.setCheckable(True)
+        act_analysis.setChecked(self._analysis_region_enabled)
+        act_analysis.triggered.connect(
+            lambda checked: self.analysis_region_toggle.emit(checked)
+        )
+        menu.addSeparator()
+
+        is_bottom_editing = self._mouse_mode in (MouseMode.DRAW_BOTTOM, MouseMode.ADJUST_BOTTOM)
+
+        menu.addAction("🔍 重新检测底部", lambda: self.re_detect_bottom.emit())
+
+        # ── 手动更新底线 ──
+        if is_bottom_editing and self._bottom_line is not None:
+            menu.addAction("💾 更新底线", lambda: self.update_bottom_requested.emit())
+
+        if self._mouse_mode == MouseMode.DRAW_BOTTOM:
+            menu.addSeparator()
+            menu.addAction("✅ 完成绘制", self._finish_bottom_drawing)
+            menu.addAction("🗑 清除绘制点", self._clear_bottom_drawing)
+
+        menu.exec_(self.mapToGlobal(pos))
+
+    # ── 底线编辑辅助 ──────────────────────────────────────────
+
+    def _find_nearest_node(self, sx: float, sy: float) -> int:
+        """查找屏幕坐标 (sx, sy) 附近最近的底线节点"""
+        if self._bottom_line is None:
+            return -1
+        min_dist = self.NODE_RADIUS * 2
+        best_idx = -1
+        for i, val in enumerate(self._bottom_line):
+            if np.isnan(val):
+                continue
+            nx, ny = self._data_to_screen(i, val)
+            dist = ((sx - nx) ** 2 + (sy - ny) ** 2) ** 0.5
+            if dist < min_dist:
+                min_dist = dist
+                best_idx = i
+        return best_idx
+
+    def _finish_bottom_drawing(self):
+        """完成手绘底线"""
+        if not self._bottom_draw_points:
+            return
+        # 将绘制点转换为底线数组
+        points = sorted(self._bottom_draw_points, key=lambda p: p[0])
+        bottom = np.full(self._n_pings, np.nan, dtype=np.float32)
+
+        # 线性插值
+        for i in range(len(points) - 1):
+            p1_ping, p1_sample = points[i]
+            p2_ping, p2_sample = points[i + 1]
+            x1 = max(0, int(round(p1_ping)))
+            x2 = min(self._n_pings, int(round(p2_ping)) + 1)
+            if x2 <= x1:
+                continue
+            for x in range(x1, x2):
+                t = (x - p1_ping) / max(1, p2_ping - p1_ping)
+                bottom[x] = p1_sample + t * (p2_sample - p1_sample)
+
+        # 处理首尾
+        if points:
+            first_ping = int(round(points[0][0]))
+            if first_ping > 0:
+                bottom[:first_ping] = points[0][1]
+            last_ping = int(round(points[-1][0]))
+            if last_ping < self._n_pings - 1:
+                bottom[last_ping + 1:] = points[-1][1]
+
+        self._bottom_line = bottom
+        self._bottom_draw_points.clear()
+        self._bottom_editing = False
+        self.bottom_line_edited.emit(bottom.copy())
+        self.update()
+
+    def _clear_bottom_drawing(self):
+        self._bottom_draw_points.clear()
+        self._bottom_editing = False
+        self.update()
+
+    def _draw_overlay_text(self):
+        """在左上角渲染叠加文字"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        font = QFont("Segoe UI", 10, QFont.Bold)
+        painter.setFont(font)
+        painter.setPen(QColor(255, 255, 255, 200))
+
+        y = 22
+        if self._channel_text:
+            painter.drawText(10, y, self._channel_text)
+            y += 20
+        if self._cmap_name:
+            painter.drawText(10, y, f"Colormap: {self._cmap_name}  [{self._vmin:.0f}, {self._vmax:.0f}] dB")
+        painter.end()
+
+    def _fit_to_view_and_update(self):
+        self._fit_to_view()
+        self.update()
 
     # ── 视图控制 ──────────────────────────────────────────────
 
     def _fit_to_view(self) -> None:
-        """自动适配: 保持数据纵横比, 居中显示"""
         if self._n_pings == 0 or self._n_samples == 0:
             return
         ww = max(self.width(), 200)
         wh = max(self.height(), 200)
-        # 留 5% 边距
         margin = 0.05
         avail_w = ww * (1 - 2 * margin)
         avail_h = wh * (1 - 2 * margin)
         self._zoom_x = avail_w / self._n_pings
         self._zoom_y = avail_h / self._n_samples
-        # 居中
         data_screen_w = self._n_pings * self._zoom_x
         data_screen_h = self._n_samples * self._zoom_y
         self._offset_x = (ww - data_screen_w) / 2
