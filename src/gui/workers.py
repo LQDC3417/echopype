@@ -1,8 +1,28 @@
 """后台处理工作线程"""
 
 import traceback
+import numpy as np
 from PySide6.QtCore import QThread, Signal
 from pathlib import Path
+
+
+def apply_manual_mask(ds, manual_mask):
+    """将手动框选的噪声 mask 应用到数据集（写入 Sv_corrected，不覆盖原始 Sv）。"""
+    if manual_mask is None:
+        return ds
+    target = ds["Sv_corrected"] if "Sv_corrected" in ds else ds["Sv"]
+    sv_arr = target.values.copy()
+    if sv_arr.ndim == 3:
+        sv_arr = sv_arr[0]
+    if manual_mask.shape == sv_arr.shape:
+        sv_arr[manual_mask] = np.nan
+        if target.ndim == 3:
+            target.values[0, :, :] = sv_arr
+        else:
+            target.values[:] = sv_arr
+        if "Sv_corrected" not in ds:
+            ds["Sv_corrected"] = target
+    return ds
 
 
 class LoadFileWorker(QThread):
@@ -61,7 +81,6 @@ class NoiseRemovalWorker(QThread):
 
     def run(self):
         try:
-            import numpy as np
             from echopype.clean import remove_background_noise
             noise_cfg = self.config.get("processing", {}).get("noise_removal", {})
             self.progress.emit("去除背景噪声...")
@@ -71,21 +90,7 @@ class NoiseRemovalWorker(QThread):
                 range_sample_num=noise_cfg.get("range_sample_num", 10),
                 SNR_threshold=noise_cfg.get("SNR_threshold", "3.0dB"),
             )
-            # 应用手动框选的噪声 mask（写入 Sv_corrected，不覆盖原始 Sv）
-            if self.manual_mask is not None:
-                target = ds["Sv_corrected"] if "Sv_corrected" in ds else ds["Sv"]
-                sv_arr = target.values.copy()
-                if sv_arr.ndim == 3:
-                    sv_arr = sv_arr[0]
-                if self.manual_mask.shape == sv_arr.shape:
-                    sv_arr[self.manual_mask] = np.nan
-                    if target.ndim == 3:
-                        target.values[0, :, :] = sv_arr
-                    else:
-                        target.values[:] = sv_arr
-                    if "Sv_corrected" not in ds:
-                        ds["Sv_corrected"] = target
-
+            ds = apply_manual_mask(ds, self.manual_mask)
             self.finished.emit(ds)
         except Exception as e:
             self.error.emit(traceback.format_exc())
@@ -104,8 +109,8 @@ class DetectSeafloorWorker(QThread):
 
     def run(self):
         try:
-            import numpy as np
             from echopype.mask import detect_seafloor
+            from src.core.region import get_echo_range_1d, bottom_depth_to_sample_indices
 
             bottom_cfg = self.config.get("processing", {}).get("bottom_detection", {})
             threshold = bottom_cfg.get("threshold", -50.0)
@@ -114,16 +119,10 @@ class DetectSeafloorWorker(QThread):
             method = bottom_cfg.get("method", "basic")
 
             ds = self.ds_Sv
-            # 优先使用去噪后的数据
             var_name = "Sv_corrected" if "Sv_corrected" in ds else "Sv"
-            sv_arr = ds[var_name].values
-            if sv_arr.ndim == 3:
-                sv_arr = sv_arr[0]
-            n_pings, n_samples = sv_arr.shape
 
             channel = str(ds["channel"].values[0]) if "channel" in ds else None
 
-            # ── 调用 echopype API 获取真实水深(m) ──
             params = {
                 "var_name": var_name,
                 "threshold": threshold,
@@ -136,27 +135,16 @@ class DetectSeafloorWorker(QThread):
             self.progress.emit("echopype detect_seafloor ...")
             bottom_depth_m = detect_seafloor(ds, method=method, params=params)
 
-            # ── 将水深(m)转为 sample index ──
-            if "echo_range" in ds:
-                echo_range = ds["echo_range"]
-                if "channel" in echo_range.dims:
-                    echo_range = echo_range.isel(channel=0)
-                er = echo_range.values
-                if er.ndim == 2:
-                    er = er[0] if er.shape[0] == 1 else er[:, 0]
-            else:
-                er = np.arange(n_samples, dtype=float)
+            # 使用后端函数转换：深度(m) → sample index
+            er = get_echo_range_1d(ds)
+            if er is None:
+                er = np.arange(ds.sizes["range_sample"], dtype=float)
 
             bottom_depth_np = bottom_depth_m.values
-            bottom_indices = np.full(n_pings, np.nan, dtype=np.float32)
-            for i in range(n_pings):
-                bd = bottom_depth_np[i] if bottom_depth_np.ndim == 1 else bottom_depth_np[i, 0]
-                if np.isnan(bd) or bd <= 0:
-                    continue
-                idx = np.searchsorted(er, bd)
-                idx = max(0, min(n_samples - 1, idx))
-                bottom_indices[i] = float(idx)
+            if bottom_depth_np.ndim > 1:
+                bottom_depth_np = bottom_depth_np[:, 0]
 
+            bottom_indices = bottom_depth_to_sample_indices(bottom_depth_np, er)
             self.finished.emit(bottom_indices)
         except Exception as e:
             self.error.emit(traceback.format_exc())
@@ -201,6 +189,38 @@ class DensityWorker(QThread):
             from src.core.density import estimate_density
             self.progress.emit("计算密度...")
             df = estimate_density(self.schools_df, self.ds_Sv, self.config)
+            self.finished.emit(df)
+        except Exception as e:
+            self.error.emit(traceback.format_exc())
+
+
+class GridWorker(QThread):
+    """网格化分析"""
+    finished = Signal(object)  # DataFrame
+    error = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, ds_Sv, surface_depth_m, grid_config, density_config):
+        super().__init__()
+        self.ds_Sv = ds_Sv
+        self.surface_depth_m = surface_depth_m
+        self.grid_config = grid_config
+        self.density_config = density_config
+
+    def run(self):
+        try:
+            from src.core.grid import create_grid, compute_grid_density
+            self.progress.emit("创建网格...")
+            grid_cells = create_grid(
+                self.ds_Sv,
+                surface_depth_m=self.surface_depth_m,
+                vertical_interval_m=self.grid_config["vertical_interval_m"],
+                horizontal_interval=self.grid_config["horizontal_interval"],
+                method=self.grid_config["horizontal_method"],
+            )
+            self.progress.emit("计算网格统计...")
+            config = {"density": self.density_config}
+            df = compute_grid_density(self.ds_Sv, grid_cells, config)
             self.finished.emit(df)
         except Exception as e:
             self.error.emit(traceback.format_exc())

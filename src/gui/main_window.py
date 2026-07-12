@@ -19,10 +19,9 @@ from pathlib import Path
 import logging
 import numpy as np
 import pandas as pd
-import xarray as xr
 from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QFileDialog, QMessageBox,
-    QDockWidget, QMenu, QWidget, QVBoxLayout, QInputDialog,
+    QWidget, QVBoxLayout, QInputDialog,
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
@@ -32,16 +31,24 @@ from src.gui.fileset_tree import FilesetTreeWidget, BatchImportDialog
 from src.gui.fileset import Fileset
 from src.gui.variable_list import VariableListWidget
 from src.gui.region_panel import RegionTableWidget
-from src.gui.property_panel import PropertyPanel
+from src.gui.stats_dialog import StatsDialog
+from src.gui.export_dialog import ExportDialog
 from src.gui.status_bar import MainStatusBar
-from src.gui.toolbars import StandardToolBar, EchogramToolBar, MouseMode
+from src.gui.toolbars import StandardToolBar, EchogramToolBar, ProcessingToolBar, MouseMode
 from src.gui.workers import (
     LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
-    DetectSeafloorWorker, DetectSchoolsWorker, DensityWorker,
+    DetectSeafloorWorker, DetectSchoolsWorker, DensityWorker, GridWorker,
 )
 from src.core.utils import load_config
 
 logger = logging.getLogger(__name__)
+
+
+def squeeze_sv(sv: np.ndarray) -> np.ndarray:
+    """将 3D Sv 数组降维为 2D（取第一个 channel）。"""
+    if sv.ndim == 3:
+        return sv[0]
+    return sv
 
 
 class MainWindow(QMainWindow):
@@ -176,12 +183,17 @@ class MainWindow(QMainWindow):
         self.addToolBar(self.std_toolbar)
         self.echo_toolbar = EchogramToolBar(self)
         self.addToolBar(self.echo_toolbar)
+        self.proc_toolbar = ProcessingToolBar(self)
+        self.addToolBar(self.proc_toolbar)
+
+        # ── 统计对话框 ──
+        self.stats_dialog = StatsDialog(self)
 
         # ── 状态栏 ──
         self.statusbar = MainStatusBar(self)
         self.setStatusBar(self.statusbar)
 
-        # ── 主水平分割：左 | 中 | 右 ──
+        # ── 主水平分割：左 | 中 ──
         main_split = QSplitter(Qt.Horizontal)
 
         # 左侧：文件集 + 变量列表（上下分割）
@@ -208,13 +220,8 @@ class MainWindow(QMainWindow):
 
         main_split.addWidget(center_widget)
 
-        # 右侧：属性面板
-        self.property_panel = PropertyPanel()
-        main_split.addWidget(self.property_panel)
-
         main_split.setStretchFactor(0, 1)  # 左侧文件树
         main_split.setStretchFactor(1, 5)  # 中间 Echogram（主区域）
-        main_split.setStretchFactor(2, 2)  # 右侧属性面板
         self.setCentralWidget(main_split)
 
     # ═══════════════════════════════════════════════════════
@@ -264,11 +271,12 @@ class MainWindow(QMainWindow):
         # echogram 翻页信号
         self.echogram.file_page_requested.connect(self._switch_file)
 
-        # 属性面板
-        self.property_panel.noise_params_changed.connect(self._on_noise_params_changed)
-        self.property_panel.surface_line_changed.connect(self._on_surface_line_changed)
-        self.property_panel.detect_schools_clicked.connect(self._detect_schools)
-        self.property_panel.compute_density_clicked.connect(self._compute_density)
+        # 处理工具栏
+        self.proc_toolbar.surface_line_changed.connect(self._on_surface_line_changed)
+        self.proc_toolbar.detect_schools_clicked.connect(self._detect_schools)
+        self.proc_toolbar.compute_density_clicked.connect(self._compute_density)
+        self.proc_toolbar.stats_clicked.connect(self._show_stats)
+        self.proc_toolbar.grid_clicked.connect(self._run_grid_analysis)
 
         # 变量列表
         self.variable_list.variable_selected.connect(self._on_variable_selected)
@@ -318,7 +326,7 @@ class MainWindow(QMainWindow):
             try:
                 self._config = load_config(path)
                 self.statusbar.set_status(f"配置已加载: {path}")
-                self.property_panel.processing.load_from_config(self._config)
+                self.proc_toolbar.load_from_config(self._config)
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"加载失败: {e}")
 
@@ -384,11 +392,17 @@ class MainWindow(QMainWindow):
         self._current_worker.progress.connect(self.statusbar.set_status)
         self._current_worker.start()
 
+    def _apply_sv_to_display(self, ds_Sv, sv):
+        """将 Sv 数据应用到显示：更新变量列表、渲染器、文件信息、表线。"""
+        self._ds_Sv = ds_Sv
+        self._update_variable_list(ds_Sv, sv)
+        self.echogram.set_data(sv)
+        self._update_file_info(ds_Sv)
+        self._update_surface_line_render()
+
     def _on_cached_sv_computed(self, ds_Sv, path: Path):
         """Sv 计算完成 → 缓存 → 显示 → 自动加载下一个"""
-        sv = ds_Sv["Sv"].values
-        if sv.ndim == 3:
-            sv = sv[0]
+        sv = squeeze_sv(ds_Sv["Sv"].values)
 
         # 缓存（只存 Sv+depth，噪声和底部由用户手动触发）
         self._file_cache[str(path)] = {
@@ -403,14 +417,10 @@ class MainWindow(QMainWindow):
         is_first = (self._raw_queue_index == 0)
         if is_first:
             # 第一个文件：显示 + 更新变量列表
-            self._ds_Sv = ds_Sv
-            self._update_variable_list(ds_Sv, sv)
-            self.echogram.set_data(sv)
-            self.property_panel.file_info.update_info(ds_Sv)
-            self._update_surface_line_render()
+            self._apply_sv_to_display(ds_Sv, sv)
             self.statusbar.hide_progress()
             self.statusbar.set_status(
-                f"文件 {1}/{len(self._raw_file_queue)}: {path.name} — Sv 计算完成 ✅"
+                f"文件 {1}/{len(self._raw_file_queue)}: {path.name} — Sv 计算完成"
             )
 
         # 加载下一个
@@ -423,7 +433,7 @@ class MainWindow(QMainWindow):
             total = len(self._raw_file_queue)
             self.statusbar.hide_progress()
             self.statusbar.set_status(
-                f"全部 {total} 个文件已缓存 ✅ — 右键 Echogram 翻页切换"
+                f"全部 {total} 个文件已缓存 — 右键 Echogram 翻页切换"
             )
             self._raw_queue_index = 0  # 重置
 
@@ -489,9 +499,9 @@ class MainWindow(QMainWindow):
 
         # 恢复表线深度
         self._surface_depth_m = cached.get("surface_depth_m", 2.0)
-        self.property_panel.processing.spin_surface.blockSignals(True)
-        self.property_panel.processing.spin_surface.setValue(self._surface_depth_m)
-        self.property_panel.processing.spin_surface.blockSignals(False)
+        self.proc_toolbar.spin_surface.blockSignals(True)
+        self.proc_toolbar.spin_surface.setValue(self._surface_depth_m)
+        self.proc_toolbar.spin_surface.blockSignals(False)
         self._update_surface_line_render()
 
         # 恢复噪声 mask
@@ -501,6 +511,9 @@ class MainWindow(QMainWindow):
         # 恢复鱼群 mask
         self._schools_mask = cached.get("school_mask")
         self.echogram.set_school_mask(self._schools_mask)
+
+        # 重建分析区域（确保 _ds_Sv_analysis 与当前底线/表线一致）
+        self._apply_analysis_region_to_ds()
 
         self.statusbar.set_status(
             f"文件 {new_idx + 1}/{n_queue}: {path.name}"
@@ -595,18 +608,11 @@ class MainWindow(QMainWindow):
     def _on_sv_computed(self, ds_Sv):
         self._ds_Sv = ds_Sv
         self.statusbar.hide_progress()
-        self.statusbar.set_status("Sv 计算完成 ✅")
+        self.statusbar.set_status("Sv 计算完成")
 
-        sv = ds_Sv["Sv"].values
-        if sv.ndim == 3:
-            sv = sv[0]
+        sv = squeeze_sv(ds_Sv["Sv"].values)
 
-        # 统一更新变量列表
-        self._update_variable_list(ds_Sv, sv)
-
-        self.echogram.set_data(sv)
-        self.property_panel.file_info.update_info(ds_Sv)
-        self._update_surface_line_render()
+        self._apply_sv_to_display(ds_Sv, sv)
 
         # 链式处理
         if getattr(self, "_run_all_chain", False):
@@ -620,7 +626,7 @@ class MainWindow(QMainWindow):
             return
         # 从 UI 同步噪声参数到 config
         self._config.setdefault("processing", {})["noise_removal"] = (
-            self.property_panel.processing.get_noise_config()
+            self.proc_toolbar.get_noise_config()
         )
         self.pipeline_step.emit("噪声去除")
         self.statusbar.show_progress("去除噪声...")
@@ -647,10 +653,10 @@ class MainWindow(QMainWindow):
             if sv_display.ndim == 3:
                 sv_display = sv_display[0]
             self.echogram.set_data(sv_display)
-            self.statusbar.set_status("噪声去除完成 ✅（显示去噪数据，原始 Sv 已保留）")
+            self.statusbar.set_status("噪声去除完成（显示去噪数据，原始 Sv 已保留）")
         else:
             self.echogram.set_data(sv_raw)
-            self.statusbar.set_status("噪声去除完成 ✅")
+            self.statusbar.set_status("噪声去除完成")
 
         # 同步更新缓存中当前文件的 ds
         if self._raw_file_queue and self._raw_queue_index < len(self._raw_file_queue):
@@ -665,6 +671,11 @@ class MainWindow(QMainWindow):
         if self._ds_Sv is None or self._config is None:
             QMessageBox.warning(self, "警告", "请先加载数据")
             return
+        # 同步 UI 参数到 config
+        self._config.setdefault("processing", {})["bottom_detection"] = {
+            **self._config.get("processing", {}).get("bottom_detection", {}),
+            **self.proc_toolbar.get_bottom_config(),
+        }
         self.pipeline_step.emit("底部检测")
         self.statusbar.show_progress("检测底部...")
         self._current_worker = DetectSeafloorWorker(self._ds_Sv, self._config)
@@ -674,13 +685,26 @@ class MainWindow(QMainWindow):
         self._current_worker.start()
 
     def _on_bottom_detected(self, bottom):
-        self._bottom_line = bottom
-        self.echogram.set_bottom_line(bottom)
+        self._bottom_line = np.asarray(bottom, dtype=np.float32)
+        self.echogram.set_bottom_line(self._bottom_line)
         self.statusbar.hide_progress()
-        self.statusbar.set_status("底部检测完成 ✅")
 
         # 缓存底线到当前文件
         self._save_file_state()
+
+        # 自动启用分析区域（表线~底线）
+        self._analysis_region_enabled = True
+        self.echogram.set_analysis_region_enabled(True)
+        self._apply_analysis_region_to_ds()
+
+        self.statusbar.set_status("底部检测完成 — 分析区域已启用，已进入绘制底线模式")
+
+        # 自动切换到绘制底线模式（blockSignals 避免干扰链式处理）
+        if not getattr(self, "_run_all_chain", False):
+            self.echo_toolbar.mode_combo.blockSignals(True)
+            self.echo_toolbar.mode_combo.setCurrentIndex(2)  # DRAW_BOTTOM
+            self.echo_toolbar.mode_combo.blockSignals(False)
+            self.echogram.set_mouse_mode(MouseMode.DRAW_BOTTOM.value)
 
         if getattr(self, "_run_all_chain", False):
             QTimer.singleShot(200, self._detect_schools)
@@ -699,7 +723,7 @@ class MainWindow(QMainWindow):
             self._bottom_line = bottom
             self._save_file_state()
             self._apply_analysis_region_to_ds()
-            self.statusbar.set_status("底线已更新并保存 ✅")
+            self.statusbar.set_status("底线已更新并保存")
 
     def _on_surface_line_changed(self, depth_m: float):
         """表线深度变更"""
@@ -712,17 +736,8 @@ class MainWindow(QMainWindow):
         """将表线深度(m)转为 sample index，用于后端分析区域限定。"""
         if self._ds_Sv is None:
             return None
-        if "echo_range" in self._ds_Sv:
-            er = self._ds_Sv["echo_range"]
-            if "channel" in er.dims:
-                er = er.isel(channel=0)
-            er_vals = er.values
-            if er_vals.ndim == 2:
-                er_vals = er_vals[:, 0]
-        else:
-            return None
-        idx = int(np.searchsorted(er_vals, self._surface_depth_m))
-        return float(max(0, min(idx, len(er_vals) - 1)))
+        from src.core.region import get_surface_sample
+        return get_surface_sample(self._ds_Sv, self._surface_depth_m)
 
     def _apply_analysis_region_to_ds(self):
         """根据分析区域（表线~底线）裁剪 ds_Sv，生成 _ds_Sv_analysis。"""
@@ -730,41 +745,11 @@ class MainWindow(QMainWindow):
             self._ds_Sv_analysis = None
             return
 
-        surface_sample = self._surface_depth_to_sample()
-        if surface_sample is None and self._bottom_line is None:
-            self._ds_Sv_analysis = None
-            return
-
-        from src.core.utils import build_analysis_mask
-        Sv = self._ds_Sv["Sv"]
-        if "channel" in Sv.dims:
-            Sv = Sv.isel(channel=0)
-        sv_arr = Sv.values
-        if sv_arr.ndim == 3:
-            sv_arr = sv_arr[0]
-        n_pings, n_samples = sv_arr.shape
-
-        mask = build_analysis_mask(
-            (n_pings, n_samples), surface_sample, self._bottom_line
-        )
-        if mask is None:
-            self._ds_Sv_analysis = None
-            return
-
-        # 将区域外的 Sv 设为 NaN（不参与任何计算）
-        sv_masked = sv_arr.copy().astype(np.float32)
-        sv_masked[~mask] = np.nan
-
-        ds_masked = self._ds_Sv.copy()
-        var_dims = self._ds_Sv["Sv"].dims
-        ds_masked["Sv"] = xr.DataArray(
-            sv_masked.reshape(self._ds_Sv["Sv"].shape),
-            dims=var_dims, attrs=self._ds_Sv["Sv"].attrs,
-        )
-        self._ds_Sv_analysis = ds_masked
-        logger.info(
-            f"分析区域 Sv 裁剪完成: 有效样本 "
-            f"{mask.sum()}/{mask.size} ({mask.sum()/mask.size*100:.1f}%)"
+        from src.core.region import crop_sv_by_region
+        self._ds_Sv_analysis = crop_sv_by_region(
+            self._ds_Sv,
+            surface_depth_m=self._surface_depth_m if self._surface_depth_m > 0 else None,
+            bottom_sample_indices=self._bottom_line,
         )
 
     def _get_analysis_ds(self):
@@ -788,7 +773,7 @@ class MainWindow(QMainWindow):
         )
         if ok:
             self._surface_depth_m = val
-            self.property_panel.processing.spin_surface.setValue(val)
+            self.proc_toolbar.spin_surface.setValue(val)
             self._update_surface_line_render()
             self._apply_analysis_region_to_ds()
             self.statusbar.set_status(f"表线深度: {val:.1f} m")
@@ -816,7 +801,7 @@ class MainWindow(QMainWindow):
             return
         # 同步 UI 参数到 config
         self._config.setdefault("school_detection", {}).update(
-            self.property_panel.processing.get_school_config()
+            self.proc_toolbar.get_school_config()
         )
         self.pipeline_step.emit("鱼群检测")
         self.statusbar.show_progress("检测鱼群...")
@@ -830,9 +815,9 @@ class MainWindow(QMainWindow):
         self._schools_mask = mask.values
         self._schools_df = df
         self.echogram.set_school_mask(self._schools_mask)
-        self.property_panel.stats.update_schools(df)
+        self.stats_dialog.update_schools(df)
         self.statusbar.hide_progress()
-        self.statusbar.set_status(f"检测到 {len(df)} 个鱼群 ✅")
+        self.statusbar.set_status(f"检测到 {len(df)} 个鱼群")
 
         # 缓存鱼群状态
         self._save_file_state()
@@ -855,7 +840,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "请先加载数据")
             return
         # 同步 UI 参数到 config
-        density_ui = self.property_panel.processing.get_density_config()
+        density_ui = self.proc_toolbar.get_density_config()
         self._config.setdefault("density", {}).update(density_ui)
         self.pipeline_step.emit("密度估算")
         schools_df = self._schools_df if self._schools_df is not None else pd.DataFrame()
@@ -868,9 +853,9 @@ class MainWindow(QMainWindow):
 
     def _on_density_computed(self, df):
         self._density_df = df
-        self.property_panel.stats.update_density(df)
+        self.stats_dialog.update_density(df)
         self.statusbar.hide_progress()
-        self.statusbar.set_status("密度计算完成 ✅")
+        self.statusbar.set_status("密度计算完成")
         self._run_all_chain = False
         self.pipeline_done.emit()
 
@@ -880,6 +865,50 @@ class MainWindow(QMainWindow):
             return
         self._run_all_chain = True
         self._compute_sv()
+
+    def _show_stats(self):
+        """显示统计对话框"""
+        self.stats_dialog.show()
+        self.stats_dialog.raise_()
+        self.stats_dialog.activateWindow()
+
+    def _run_grid_analysis(self):
+        if self._ds_Sv is None or self._config is None:
+            QMessageBox.warning(self, "警告", "请先加载数据")
+            return
+        grid_cfg = self.proc_toolbar.get_grid_config()
+        density_cfg = self.proc_toolbar.get_density_config()
+        self.statusbar.show_progress("网格分析...")
+        self._current_worker = GridWorker(
+            self._get_analysis_ds(), self._surface_depth_m, grid_cfg, density_cfg
+        )
+        self._current_worker.finished.connect(self._on_grid_done)
+        self._current_worker.error.connect(self._on_worker_error)
+        self._current_worker.progress.connect(self.statusbar.set_status)
+        self._current_worker.start()
+
+    def _on_grid_done(self, df):
+        self._grid_df = df
+        self.stats_dialog.update_grid(df)
+        self.statusbar.hide_progress()
+        self.statusbar.set_status(f"网格分析完成: {len(df)} 个单元")
+        # 显示统计对话框
+        self._show_stats()
+
+    def _update_file_info(self, ds_Sv):
+        """更新状态栏文件信息"""
+        if ds_Sv is None:
+            return
+        info_parts = []
+        if "channel" in ds_Sv:
+            info_parts.append(str(ds_Sv["channel"].values[0]))
+        if "ping_time" in ds_Sv:
+            n_pings = len(ds_Sv["ping_time"])
+            info_parts.append(f"{n_pings} pings")
+        if "range_sample" in ds_Sv:
+            n_samples = len(ds_Sv["range_sample"])
+            info_parts.append(f"{n_samples} samples")
+        self.statusbar.set_status(" | ".join(info_parts))
 
     # ═══════════════════════════════════════════════════════
     # 交互
@@ -917,9 +946,7 @@ class MainWindow(QMainWindow):
     def _add_noise_region(self, x1, y1, x2, y2):
         if self._ds_Sv is None:
             return
-        sv = self._ds_Sv["Sv"].values
-        if sv.ndim == 3:
-            sv = sv[0]
+        sv = squeeze_sv(self._ds_Sv["Sv"].values)
         h, w = sv.shape
 
         if self._noise_mask_manual is None:
@@ -946,9 +973,7 @@ class MainWindow(QMainWindow):
     def _inspect_region(self, x1, y1, x2, y2):
         if self._ds_Sv is None:
             return
-        sv = self._ds_Sv["Sv"].values
-        if sv.ndim == 3:
-            sv = sv[0]
+        sv = squeeze_sv(self._ds_Sv["Sv"].values)
 
         px1, px2 = int(min(x1, x2)), int(max(x1, x2))
         py1, py2 = int(min(y1, y2)), int(max(y1, y2))
@@ -1036,13 +1061,49 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════════════════════
 
     def _export(self):
-        if self._density_df is None:
-            QMessageBox.warning(self, "警告", "请先完成密度计算")
+        dlg = ExportDialog(self)
+        if dlg.exec() != ExportDialog.Accepted:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "导出密度 CSV", "", "CSV (*.csv)")
-        if path:
-            self._density_df.to_csv(path, index=False, encoding="utf-8-sig")
-            self.statusbar.set_status(f"已导出: {path}")
+
+        from src.core.export import export_all, export_density_to_csv, export_schools_to_csv
+        from src.core.utils import get_output_dir
+
+        formats = dlg.get_formats()
+        content = dlg.get_content()
+        if not formats:
+            QMessageBox.warning(self, "警告", "请至少选择一种导出格式")
+            return
+
+        output_dir = get_output_dir(self._config)
+        exported = []
+
+        # 按内容导出
+        if content.get("sv") and self._ds_Sv is not None:
+            from src.core.export import export_to_netcdf, export_sv_to_csv, export_to_excel
+            if "netcdf" in formats:
+                exported.append(export_to_netcdf(self._get_analysis_ds(), output_dir / "sv_data.nc"))
+            if "csv" in formats:
+                exported.append(export_sv_to_csv(self._get_analysis_ds(), output_dir / "sv_data.csv"))
+
+        if content.get("schools") and self._schools_df is not None and not self._schools_df.empty:
+            if "csv" in formats:
+                exported.append(export_schools_to_csv(self._schools_df, output_dir / "schools.csv"))
+
+        if content.get("density") and self._density_df is not None and not self._density_df.empty:
+            if "csv" in formats:
+                exported.append(export_density_to_csv(self._density_df, output_dir / "density.csv"))
+
+        if content.get("grid") and hasattr(self, '_grid_df') and self._grid_df is not None:
+            if "csv" in formats:
+                exported.append(export_density_to_csv(self._grid_df, output_dir / "grid_stats.csv"))
+
+        if "excel" in formats:
+            schools = self._schools_df if content.get("schools") else None
+            density = self._density_df if content.get("density") else None
+            from src.core.export import export_to_excel
+            exported.append(export_to_excel(schools, density, output_dir / "results.xlsx"))
+
+        self.statusbar.set_status(f"导出完成: {len(exported)} 个文件 → {output_dir}")
 
     def _export_schools(self):
         if self._schools_df is None or self._schools_df.empty:

@@ -26,13 +26,13 @@ from OpenGL.GL import (
     glDisable, glEnable, glEnd, glGenTextures, glGetIntegerv,
     glLineStipple, glLineWidth, glLoadIdentity, glMatrixMode, glOrtho,
     glPixelStorei, glTexCoord2f, glTexImage2D, glTexParameteri,
-    glVertex2f, glViewport, glBegin, GL_POINTS, glPointSize,
+    glVertex2f, glViewport, glBegin,
 )
 
 logger = logging.getLogger(__name__)
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QMouseEvent, QWheelEvent, QAction, QCursor, QPainter, QFont, QColor
+from PySide6.QtGui import QMouseEvent, QWheelEvent, QPainter, QFont, QColor
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QMenu
 
@@ -73,8 +73,7 @@ class EchogramRenderer(QOpenGLWidget):
         # 底线编辑状态
         self._bottom_editing = False
         self._bottom_draw_points = []  # 手绘模式收集的点 [(ping, sample), ...]
-        self._dragging_node = -1  # 正在拖拽的节点索引
-        self._hover_node = -1  # 悬停的节点索引
+        self._dragging_node = -1  # 正在拖拽的底线节点索引，-1 表示无
 
         # 颜色映射
         self._cmap_name = "jet"
@@ -191,7 +190,7 @@ class EchogramRenderer(QOpenGLWidget):
 
 
     def initializeGL(self) -> None:
-        glClearColor(0.0, 0.0, 0.0, 1.0)
+        glClearColor(1.0, 1.0, 1.0, 1.0)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
@@ -327,20 +326,24 @@ class EchogramRenderer(QOpenGLWidget):
         if mask is None:
             return
         glColor4f(0.3, 0.3, 0.3, 0.5)
-        h, w = mask.shape  # (n_pings, n_samples)
-        glBegin(GL_QUADS)
+        h, w = mask.shape
+        # 批量收集所有 quad 顶点
+        verts = []
         for ping in range(h):
             row = mask[ping, :]
             if not np.any(row):
                 continue
+            x0 = self._offset_x + ping * self._zoom_x
+            x1 = x0 + self._zoom_x
             for start, end in self._find_runs(row):
-                x0 = self._offset_x + ping * self._zoom_x
-                x1 = x0 + self._zoom_x
                 y0 = self._offset_y + start * self._zoom_y
                 y1 = self._offset_y + end * self._zoom_y
-                glVertex2f(x0, y0); glVertex2f(x1, y0)
-                glVertex2f(x1, y1); glVertex2f(x0, y1)
-        glEnd()
+                verts.extend([(x0,y0),(x1,y0),(x1,y1),(x0,y1)])
+        if verts:
+            glBegin(GL_QUADS)
+            for v in verts:
+                glVertex2f(v[0], v[1])
+            glEnd()
 
     def _draw_bottom_line(self) -> None:
         bl = self._bottom_line
@@ -358,22 +361,6 @@ class EchogramRenderer(QOpenGLWidget):
             y = self._offset_y + val * self._zoom_y
             glVertex2f(x, y)
         glEnd()
-
-        # 绘制节点标记（调整模式下）
-        if self._mouse_mode == MouseMode.ADJUST_BOTTOM:
-            glPointSize(6.0)
-            glBegin(GL_POINTS)
-            for i, val in enumerate(bl):
-                if np.isnan(val):
-                    continue
-                if i == self._hover_node or i == self._dragging_node:
-                    glColor4f(1.0, 0.5, 0.0, 1.0)  # 橙色高亮
-                else:
-                    glColor4f(1.0, 1.0, 0.0, 1.0)  # 黄色
-                x = self._offset_x + i * self._zoom_x
-                y = self._offset_y + val * self._zoom_y
-                glVertex2f(x, y)
-            glEnd()
 
     def _draw_surface_line(self) -> None:
         """绘制表线 — 亮绿色虚线横跨全宽"""
@@ -430,23 +417,35 @@ class EchogramRenderer(QOpenGLWidget):
         self._draw_school_boundaries(mask, h, w)
 
     def _draw_school_boundaries(self, mask, h, w) -> None:
-        """绘制鱼群边界线条 — 单次 glBegin/glEnd，Echoview 风格深色边界"""
+        """绘制鱼群边界线条 — 向量化边界检测，Echoview 风格深色边界"""
+        # 向量化检测边界（避免 Python 双重循环）
+        # 下边界：mask 为 True 且下方为 False 或越界
+        bottom_edge = mask.copy()
+        bottom_edge[:-1, :] &= ~mask[1:, :]
+        # 右边界：mask 为 True 且右方为 False 或越界
+        right_edge = mask.copy()
+        right_edge[:, :-1] &= ~mask[:, 1:]
+
+        # 提取边界坐标
+        bottom_pings, bottom_samples = np.where(bottom_edge)
+        right_pings, right_samples = np.where(right_edge)
+
         glColor4f(0.0, 0.5, 0.0, 0.9)
         glLineWidth(1.5)
         glBegin(GL_LINES)
-        for ping in range(h):
-            for sample in range(w):
-                if not mask[ping, sample]:
-                    continue
-                if ping == h - 1 or not mask[ping + 1, sample]:
-                    py = self._offset_y + (sample + 1) * self._zoom_y
-                    x0 = self._offset_x + ping * self._zoom_x
-                    x1 = x0 + self._zoom_x
-                    glVertex2f(x0, py); glVertex2f(x1, py)
-                if sample == w - 1 or not mask[ping, sample + 1]:
-                    px = self._offset_x + (ping + 1) * self._zoom_x
-                    y0 = self._offset_y + sample * self._zoom_y
-                    glVertex2f(px, y0); glVertex2f(px, y0 + self._zoom_y)
+        # 下边界线段
+        for i in range(len(bottom_pings)):
+            p, s = int(bottom_pings[i]), int(bottom_samples[i])
+            py = self._offset_y + (s + 1) * self._zoom_y
+            x0 = self._offset_x + p * self._zoom_x
+            x1 = x0 + self._zoom_x
+            glVertex2f(x0, py); glVertex2f(x1, py)
+        # 右边界线段
+        for i in range(len(right_pings)):
+            p, s = int(right_pings[i]), int(right_samples[i])
+            px = self._offset_x + (p + 1) * self._zoom_x
+            y0 = self._offset_y + s * self._zoom_y
+            glVertex2f(px, y0); glVertex2f(px, y0 + self._zoom_y)
         glEnd()
 
     def _draw_selection_rect(self) -> None:
@@ -504,13 +503,6 @@ class EchogramRenderer(QOpenGLWidget):
                 self._bottom_editing = True
                 self.update()
 
-            elif self._mouse_mode == MouseMode.ADJUST_BOTTOM:
-                # 检查是否点击了节点附近
-                node = self._find_nearest_node(sx, sy)
-                if node >= 0:
-                    self._dragging_node = node
-                    self.setCursor(Qt.ClosedHandCursor)
-
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         sx, sy = float(event.x()), float(event.y())
         data_x, data_y = self._screen_to_data(sx, sy)
@@ -533,24 +525,6 @@ class EchogramRenderer(QOpenGLWidget):
         elif self._selecting:
             self._select_end = (sx, sy)
             self.update()
-
-        elif self._mouse_mode == MouseMode.ADJUST_BOTTOM:
-            if self._dragging_node >= 0 and self._bottom_line is not None:
-                # 拖拽节点
-                _, py = self._screen_to_data(sx, sy)
-                py = max(0, min(self._n_samples - 1, py))
-                self._bottom_line[self._dragging_node] = py
-                self.update()
-            else:
-                # 悬停检测
-                node = self._find_nearest_node(sx, sy)
-                if node != self._hover_node:
-                    self._hover_node = node
-                    if node >= 0:
-                        self.setCursor(Qt.PointingHandCursor)
-                    else:
-                        self.setCursor(Qt.ArrowCursor)
-                    self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MiddleButton:
@@ -633,12 +607,10 @@ class EchogramRenderer(QOpenGLWidget):
         )
         menu.addSeparator()
 
-        is_bottom_editing = self._mouse_mode in (MouseMode.DRAW_BOTTOM, MouseMode.ADJUST_BOTTOM)
-
         menu.addAction("🔍 重新检测底部", lambda: self.re_detect_bottom.emit())
 
-        # ── 手动更新底线 ──
-        if is_bottom_editing and self._bottom_line is not None:
+        # ── 更新底线（有底线时始终可见）──
+        if self._bottom_line is not None:
             menu.addAction("💾 更新底线", lambda: self.update_bottom_requested.emit())
 
         if self._mouse_mode == MouseMode.DRAW_BOTTOM:
@@ -649,22 +621,6 @@ class EchogramRenderer(QOpenGLWidget):
         menu.exec_(self.mapToGlobal(pos))
 
     # ── 底线编辑辅助 ──────────────────────────────────────────
-
-    def _find_nearest_node(self, sx: float, sy: float) -> int:
-        """查找屏幕坐标 (sx, sy) 附近最近的底线节点"""
-        if self._bottom_line is None:
-            return -1
-        min_dist = self.NODE_RADIUS * 2
-        best_idx = -1
-        for i, val in enumerate(self._bottom_line):
-            if np.isnan(val):
-                continue
-            nx, ny = self._data_to_screen(i, val)
-            dist = ((sx - nx) ** 2 + (sy - ny) ** 2) ** 0.5
-            if dist < min_dist:
-                min_dist = dist
-                best_idx = i
-        return best_idx
 
     def _finish_bottom_drawing(self):
         """完成手绘底线"""

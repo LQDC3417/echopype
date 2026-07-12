@@ -12,7 +12,7 @@ class MainStatusBar(QStatusBar):
 
         # 流水线步骤
         self.lbl_step = QLabel("")
-        self.lbl_step.setStyleSheet("color: #e94560; font-weight: bold; padding: 0 8px;")
+        self.lbl_step.setStyleSheet("color: #e53e3e; font-weight: bold; padding: 0 8px;")
         self.addWidget(self.lbl_step)
 
         # 状态信息
@@ -21,7 +21,7 @@ class MainStatusBar(QStatusBar):
 
         # 当前文件
         self.lbl_file = QLabel("")
-        self.lbl_file.setStyleSheet("color: #888; padding: 0 8px;")
+        self.lbl_file.setStyleSheet("color: #4a5568; padding: 0 8px;")
         self.addPermanentWidget(self.lbl_file)
 
         # 坐标显示

@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific
+outputs/
+raw_data/
+echoview_data/
+*.raw
+*.ek60
+*.ek80
+*.nc
+*.zarr
+
+# Temporary files
+*.log
+*.tmp
+_tmp_*.txt
+gui_log.txt
+nul
+
+# Screenshots (keep directory, ignore images)
+screenshots/*.png
+screenshots/*.jpg
+
+# Claude/AI tools
+.claude/
+.codegraph/
+.omc/
+.playwright-cli/
+
+# Test cache
+.pytest_cache/
+.coverage
+htmlcov/

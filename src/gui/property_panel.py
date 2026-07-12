@@ -1,11 +1,41 @@
-"""右侧属性面板：文件信息 + 处理参数 + 统计结果"""
+"""右侧属性面板：文件信息 + 处理参数 + 统计结果
+
+设计原则：
+- 参数分组清晰，一屏可见
+- 数值输入紧凑，标签左对齐
+- 结果区域突出显示
+"""
 
 from PySide6.QtWidgets import (
     QTabWidget, QWidget, QVBoxLayout, QFormLayout,
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
     QTableWidget, QTableWidgetItem, QGroupBox, QScrollArea,
+    QHBoxLayout, QFrame,
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
+
+
+class _InfoRow(QWidget):
+    """信息行：标签 + 值（紧凑布局）"""
+    def __init__(self, label: str, value: str = "--"):
+        super().__init__()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.lbl_label = QLabel(label)
+        self.lbl_label.setStyleSheet("color: #4a5568; font-size: 11px;")
+        self.lbl_label.setFixedWidth(70)
+
+        self.lbl_value = QLabel(value)
+        self.lbl_value.setStyleSheet("color: #2c3e50; font-size: 11px;")
+        self.lbl_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        layout.addWidget(self.lbl_label)
+        layout.addWidget(self.lbl_value, 1)
+
+    def set_value(self, value: str):
+        self.lbl_value.setText(value)
 
 
 class FileInfoTab(QWidget):
@@ -13,40 +43,44 @@ class FileInfoTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QFormLayout(self)
-        self.lbl_sonar = QLabel("--")
-        self.lbl_freq = QLabel("--")
-        self.lbl_pings = QLabel("--")
-        self.lbl_samples = QLabel("--")
-        self.lbl_time_range = QLabel("--")
-        layout.addRow("声呐型号:", self.lbl_sonar)
-        layout.addRow("频率:", self.lbl_freq)
-        layout.addRow("Ping 数:", self.lbl_pings)
-        layout.addRow("采样点数:", self.lbl_samples)
-        layout.addRow("时间范围:", self.lbl_time_range)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        self.row_sonar = _InfoRow("声呐型号")
+        self.row_freq = _InfoRow("频率")
+        self.row_pings = _InfoRow("Ping 数")
+        self.row_samples = _InfoRow("采样点数")
+        self.row_time = _InfoRow("时间范围")
+
+        for row in [self.row_sonar, self.row_freq, self.row_pings,
+                    self.row_samples, self.row_time]:
+            layout.addWidget(row)
+
+        layout.addStretch()
 
     def update_info(self, ds_Sv):
         """更新文件信息"""
         if ds_Sv is None:
             return
         if "channel" in ds_Sv:
-            self.lbl_freq.setText(str(ds_Sv["channel"].values[0]))
+            self.row_freq.set_value(str(ds_Sv["channel"].values[0]))
         if "ping_time" in ds_Sv:
             n_pings = len(ds_Sv["ping_time"])
-            self.lbl_pings.setText(str(n_pings))
+            self.row_pings.set_value(str(n_pings))
             times = ds_Sv["ping_time"].values
             if len(times) > 1:
-                self.lbl_time_range.setText(f"{str(times[0])[:19]} ~ {str(times[-1])[:19]}")
+                self.row_time.set_value(f"{str(times[0])[:19]} ~ {str(times[-1])[:19]}")
         if "range_sample" in ds_Sv:
             n_samples = len(ds_Sv["range_sample"])
-            self.lbl_samples.setText(str(n_samples))
+            self.row_samples.set_value(str(n_samples))
 
 
 class ProcessingTab(QWidget):
     """处理参数标签页"""
 
     noise_params_changed = Signal(dict)
-    surface_line_changed = Signal(float)  # 表线深度(m)
+    surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
     compute_density_clicked = Signal()
 
@@ -54,12 +88,18 @@ class ProcessingTab(QWidget):
         super().__init__(parent)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         container = QWidget()
         layout = QVBoxLayout(container)
+        layout.setSpacing(8)
+        layout.setContentsMargins(8, 8, 8, 8)
 
-        # --- 噪声去除参数 ---
+        # ── 噪声去除参数 ──
         noise_group = QGroupBox("噪声去除")
         noise_layout = QFormLayout()
+        noise_layout.setSpacing(6)
+        noise_layout.setContentsMargins(8, 12, 8, 8)
+
         self.spin_ping_num = QSpinBox()
         self.spin_ping_num.setRange(1, 100)
         self.spin_ping_num.setValue(5)
@@ -70,8 +110,9 @@ class ProcessingTab(QWidget):
         self.spin_snr.setRange(0, 30)
         self.spin_snr.setValue(3.0)
         self.spin_snr.setSuffix(" dB")
+
         noise_layout.addRow("Ping 数:", self.spin_ping_num)
-        noise_layout.addRow("Range 样本数:", self.spin_range_num)
+        noise_layout.addRow("Range 样本:", self.spin_range_num)
         noise_layout.addRow("SNR 阈值:", self.spin_snr)
         noise_group.setLayout(noise_layout)
         layout.addWidget(noise_group)
@@ -80,14 +121,17 @@ class ProcessingTab(QWidget):
         self.spin_range_num.valueChanged.connect(self._emit_noise_params)
         self.spin_snr.valueChanged.connect(self._emit_noise_params)
 
-        # --- 表线设置 ---
+        # ── 表线设置 ──
         surface_group = QGroupBox("表线设置")
         surface_layout = QFormLayout()
+        surface_layout.setSpacing(6)
+        surface_layout.setContentsMargins(8, 12, 8, 8)
+
         self.spin_surface = QDoubleSpinBox()
         self.spin_surface.setRange(0, 50)
         self.spin_surface.setValue(2.0)
         self.spin_surface.setSuffix(" m")
-        self.spin_surface.setToolTip("设定水面以下多少米绘制表线。分析时仅在表线~底线之间进行计算。")
+        self.spin_surface.setToolTip("水面以下多少米绘制表线。分析时仅在表线~底线之间计算。")
         surface_layout.addRow("表线深度:", self.spin_surface)
         surface_group.setLayout(surface_layout)
         layout.addWidget(surface_group)
@@ -96,14 +140,34 @@ class ProcessingTab(QWidget):
             lambda v: self.surface_line_changed.emit(float(v))
         )
 
-        # --- 鱼群检测参数 ---
+        # ── 底部检测参数 ──
+        bottom_group = QGroupBox("底部检测")
+        bottom_layout = QFormLayout()
+        bottom_layout.setSpacing(6)
+        bottom_layout.setContentsMargins(8, 12, 8, 8)
+
+        self.spin_bottom_thr = QDoubleSpinBox()
+        self.spin_bottom_thr.setRange(-70, -20)
+        self.spin_bottom_thr.setValue(-40.0)
+        self.spin_bottom_thr.setSuffix(" dB")
+        self.spin_bottom_thr.setToolTip("Sv 阈值：低于此值视为底部。推荐 -50 ~ -30 dB")
+        bottom_layout.addRow("Sv 阈值:", self.spin_bottom_thr)
+        bottom_group.setLayout(bottom_layout)
+        layout.addWidget(bottom_group)
+
+        # ── 鱼群检测参数 ──
         school_group = QGroupBox("鱼群检测")
         school_layout = QFormLayout()
+        school_layout.setSpacing(6)
+        school_layout.setContentsMargins(8, 12, 8, 8)
+
         self.spin_school_thr = QDoubleSpinBox()
         self.spin_school_thr.setRange(-100, 0)
         self.spin_school_thr.setValue(-55.0)
         self.spin_school_thr.setSuffix(" dB")
         self.btn_detect_schools = QPushButton("检测鱼群")
+        self.btn_detect_schools.setProperty("cssClass", "primary")
+
         school_layout.addRow("Sv 阈值:", self.spin_school_thr)
         school_layout.addRow(self.btn_detect_schools)
         school_group.setLayout(school_layout)
@@ -111,9 +175,12 @@ class ProcessingTab(QWidget):
 
         self.btn_detect_schools.clicked.connect(self.detect_schools_clicked)
 
-        # --- 密度估算 ---
+        # ── 密度估算 ──
         density_group = QGroupBox("密度估算")
         density_layout = QFormLayout()
+        density_layout.setSpacing(6)
+        density_layout.setContentsMargins(8, 12, 8, 8)
+
         self.spin_ts = QDoubleSpinBox()
         self.spin_ts.setRange(-70, -20)
         self.spin_ts.setValue(-30.0)
@@ -124,6 +191,8 @@ class ProcessingTab(QWidget):
         self.spin_avg_weight.setSuffix(" kg")
         self.spin_avg_weight.setToolTip("单尾平均体重，用于计算生物量 (kg/ha)")
         self.btn_compute_density = QPushButton("计算密度")
+        self.btn_compute_density.setProperty("cssClass", "primary")
+
         density_layout.addRow("TS 默认值:", self.spin_ts)
         density_layout.addRow("平均体重:", self.spin_avg_weight)
         density_layout.addRow(self.btn_compute_density)
@@ -136,6 +205,7 @@ class ProcessingTab(QWidget):
         scroll.setWidget(container)
 
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(scroll)
 
     def _emit_noise_params(self):
@@ -153,11 +223,12 @@ class ProcessingTab(QWidget):
         }
 
     def get_school_config(self) -> dict:
-        """获取鱼群检测参数"""
         return {"thr": self.spin_school_thr.value()}
 
+    def get_bottom_config(self) -> dict:
+        return {"threshold": self.spin_bottom_thr.value()}
+
     def get_density_config(self) -> dict:
-        """获取密度估算参数"""
         return {
             "ts_default": self.spin_ts.value(),
             "avg_weight_kg": self.spin_avg_weight.value(),
@@ -176,13 +247,14 @@ class ProcessingTab(QWidget):
             self.spin_snr.setValue(val)
 
         bottom = proc.get("bottom_detection", {})
+        if "threshold" in bottom:
+            self.spin_bottom_thr.setValue(bottom["threshold"])
 
         school = config.get("school_detection", {})
         if "thr" in school:
             self.spin_school_thr.setValue(school["thr"])
 
         density = config.get("density", {})
-
         surface = config.get("surface_line", {})
         if "depth_m" in surface:
             self.spin_surface.setValue(surface["depth_m"])
@@ -198,22 +270,45 @@ class StatsTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        layout.setContentsMargins(8, 8, 8, 8)
 
-        # ABC / 密度摘要
+        # ── 密度摘要（突出显示）──
+        summary_group = QGroupBox("密度摘要")
+        summary_layout = QVBoxLayout()
+        summary_layout.setContentsMargins(8, 12, 8, 8)
+
         self.lbl_abc = QLabel("ABC: --")
+        self.lbl_abc.setStyleSheet("font-size: 13px; font-weight: bold; color: #2f855a;")
         self.lbl_density = QLabel("密度: --")
+        self.lbl_density.setStyleSheet("font-size: 13px; font-weight: bold; color: #1a73e8;")
         self.lbl_biomass = QLabel("生物量: --")
-        layout.addWidget(self.lbl_abc)
-        layout.addWidget(self.lbl_density)
-        layout.addWidget(self.lbl_biomass)
+        self.lbl_biomass.setStyleSheet("font-size: 13px; font-weight: bold; color: #c05621;")
 
-        # 鱼群列表
+        summary_layout.addWidget(self.lbl_abc)
+        summary_layout.addWidget(self.lbl_density)
+        summary_layout.addWidget(self.lbl_biomass)
+        summary_group.setLayout(summary_layout)
+        layout.addWidget(summary_group)
+
+        # ── 鱼群列表 ──
+        schools_group = QGroupBox("鱼群列表")
+        schools_layout = QVBoxLayout()
+        schools_layout.setContentsMargins(8, 12, 8, 8)
+
         self.table = QTableWidget()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
             "ID", "Ping 范围", "深度范围", "面积", "平均 Sv", "中心深度"
         ])
-        layout.addWidget(self.table)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.verticalHeader().setVisible(False)
+
+        schools_layout.addWidget(self.table)
+        schools_group.setLayout(schools_layout)
+        layout.addWidget(schools_group, 1)
 
     def update_density(self, density_df):
         """更新密度统计"""

@@ -3,10 +3,11 @@ reservoir:
   region: "福建"
 
 input:
-  raw_dir: "D:/data/example/raw"
+  raw_dir: "./raw_data"          # 修改为你的 raw 文件目录
   pattern: "*.raw"
 
 processing:
+  sonar_model: "EK80"
   frequencies: [38000, 70000, 120000]
   waveform_mode: "CW"
   encode_mode: "power"
@@ -16,9 +17,9 @@ processing:
     SNR_threshold: "3.0dB"
   bottom_detection:
     method: "basic"
-    threshold: -50.0
+    threshold: -40.0
     offset_m: 0.5
-    bin_skip_from_surface: 200
+    bin_skip_from_surface: 50
 
 school_detection:
   method: "echoview"
@@ -29,7 +30,8 @@ school_detection:
 
 density:
   ts_default: -30.0
+  avg_weight_kg: 0.5            # 平均单体鱼重量(kg)，用于生物量估算
 
 output:
-  dir: "D:/data/example/outputs"
+  dir: "./outputs"               # 修改为你的输出目录
   formats: ["csv", "png"]

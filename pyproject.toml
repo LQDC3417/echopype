@@ -15,6 +15,9 @@ dependencies = [
     "matplotlib",
     "click",
     "pyyaml",
+    "PySide6>=6.6.0",
+    "PyOpenGL>=3.1.7",
+    "scipy",
 ]
 
 [project.scripts]

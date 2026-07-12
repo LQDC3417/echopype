@@ -6,18 +6,16 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from src.core.utils import get_sv_array, get_vertical_coords
+
 logger = logging.getLogger("fish_acoustics")
 
 
 def _build_edge_coords(center_coords: np.ndarray) -> np.ndarray:
-    """
-    将中心坐标转换为边缘坐标（长度 n → n+1）。
-    echoview 算法需要边缘坐标来计算鱼群尺寸。
-    """
+    """将中心坐标转换为边缘坐标（长度 n → n+1）。"""
     if len(center_coords) < 2:
         return np.array([center_coords[0] - 0.5, center_coords[0] + 0.5])
 
-    # 等间距情况：用相邻中点作为边缘
     edges = np.empty(len(center_coords) + 1)
     step = center_coords[1] - center_coords[0]
     edges[0] = center_coords[0] - step / 2
@@ -52,55 +50,34 @@ def detect_schools(
     if method != "echoview":
         raise ValueError(f"不支持的鱼群检测方法: {method}")
 
-    # 选择第一个 channel
     channel = str(ds_Sv["channel"].values[0]) if "channel" in ds_Sv.dims else None
-
-    # 构建边缘坐标（echoview 方法需要 n+1 长度）
     ping_time = ds_Sv["ping_time"].values
-    range_sample = ds_Sv["range_sample"].values
 
-    # idim = 垂直坐标（depth 或 range_sample）
-    if "depth" in ds_Sv:
-        depth_data = ds_Sv["depth"]
-        if "channel" in depth_data.dims:
-            depth_data = depth_data.isel(channel=0)
-        idim_center = depth_data.isel(ping_time=0).values
-    elif "echo_range" in ds_Sv:
-        echo_data = ds_Sv["echo_range"]
-        if "channel" in echo_data.dims:
-            echo_data = echo_data.isel(channel=0)
-        idim_center = echo_data.isel(ping_time=0).values
-    else:
-        idim_center = range_sample.astype(float)
+    # 垂直坐标
+    idim_center = get_vertical_coords(ds_Sv)
 
-    # 填充 NaN 值
-    if np.any(np.isnan(idim_center)):
-        valid_mask = ~np.isnan(idim_center)
-        if np.any(valid_mask):
-            valid_indices = np.where(valid_mask)[0]
-            idim_center = np.interp(
-                np.arange(len(idim_center)),
-                valid_indices,
-                idim_center[valid_mask],
-            )
-        else:
-            idim_center = range_sample.astype(float)
-
-    # jdim = 水平坐标（ping_time）
-    jdim_center = ping_time.astype(float)
-
-    # 确保坐标单调递增
+    # 确保单调递增（同步反转 Sv 数据以保持对齐）
     if len(idim_center) > 1 and idim_center[0] > idim_center[-1]:
         idim_center = idim_center[::-1]
+        # 同步反转 Sv 的深度维度
+        sv_arr = ds_Sv[var_name].values
+        if sv_arr.ndim == 3:
+            ds_Sv[var_name].values[0, :, :] = sv_arr[0, :, ::-1]
+        else:
+            ds_Sv[var_name].values[:] = sv_arr[:, ::-1]
+
+    jdim_center = ping_time.astype(float)
     if len(jdim_center) > 1 and jdim_center[0] > jdim_center[-1]:
         jdim_center = jdim_center[::-1]
 
-    # 转换为边缘坐标
     idim = _build_edge_coords(idim_center)
     jdim = _build_edge_coords(jdim_center)
 
+    # 优先使用去噪数据
+    var_name = "Sv_corrected" if "Sv_corrected" in ds_Sv else "Sv"
+
     params = {
-        "var_name": "Sv",
+        "var_name": var_name,
         "channel": channel,
         "idim": idim,
         "jdim": jdim,
@@ -110,7 +87,7 @@ def detect_schools(
         "minsho": tuple(school_cfg.get("minsho", [3.0, 15.0])),
     }
 
-    logger.info(f"鱼群检测: method={method}, thr={params['thr']}")
+    logger.info(f"鱼群检测: method={method}, var={var_name}, thr={params['thr']}")
     mask = detect_shoal(ds_Sv, method=method, params=params)
 
     n_detected = int(mask.sum().values)
@@ -126,8 +103,6 @@ def schools_to_dataframe(
     """
     将鱼群 mask 转换为 DataFrame，每个鱼群一行。
 
-    使用 scipy.ndimage.label 进行连通区域标记。
-
     Parameters
     ----------
     mask : xr.DataArray
@@ -142,7 +117,6 @@ def schools_to_dataframe(
     """
     from scipy import ndimage
 
-    # 连通区域标记
     labeled, num_features = ndimage.label(mask.values)
 
     if num_features == 0:
@@ -152,18 +126,9 @@ def schools_to_dataframe(
             "mean_sv", "centroid_depth",
         ])
 
-    # 获取坐标
     ping_time = ds_Sv["ping_time"].values
-    if "depth" in ds_Sv:
-        depth = ds_Sv["depth"].isel(ping_time=0).values
-    elif "echo_range" in ds_Sv:
-        depth = ds_Sv["echo_range"].isel(ping_time=0).values
-    else:
-        depth = np.arange(ds_Sv.sizes["range_sample"], dtype=float)
-
-    Sv = ds_Sv["Sv"].values
-    if Sv.ndim == 3:
-        Sv = Sv[0]  # 取第一个 channel
+    depth = get_vertical_coords(ds_Sv)
+    Sv = get_sv_array(ds_Sv)
 
     records = []
     for i in range(1, num_features + 1):
@@ -181,19 +146,20 @@ def schools_to_dataframe(
         depth_start = depth[depth_idx_min] if depth_idx_min < len(depth) else float(depth_idx_min)
         depth_end = depth[depth_idx_max] if depth_idx_max < len(depth) else float(depth_idx_max)
 
-        # 计算面积（像素数 × 分辨率）
         n_pixels = int(region.sum())
-        ping_res = float(np.diff(ping_time[:2])[0]) if len(ping_time) > 1 else 1.0
-        depth_res = float(np.diff(depth[:2])[0]) if len(depth) > 1 else 1.0
-        area = n_pixels * abs(ping_res) * abs(depth_res)
+        # 避免 datetime 与 float 混算：ping_res 单位为秒
+        if np.issubdtype(ping_time.dtype, np.datetime64):
+            ping_res_s = float(np.diff(ping_time[:2]) / np.timedelta64(1, 's')) if len(ping_time) > 1 else 1.0
+        else:
+            ping_res_s = float(np.diff(ping_time[:2])[0]) if len(ping_time) > 1 else 1.0
+        depth_res = float(np.median(np.abs(np.diff(depth)))) if len(depth) > 1 else 1.0
+        area = n_pixels * abs(ping_res_s) * depth_res
 
-        # 计算平均 Sv
         sv_values = Sv[region]
         sv_values = sv_values[np.isfinite(sv_values)]
         mean_sv = float(np.mean(sv_values)) if len(sv_values) > 0 else np.nan
 
-        # 中心深度
-        centroid_depth = float(depth[int(rows.mean())]) if len(rows) > 0 else np.nan
+        centroid_depth = float(depth[int(cols.mean())]) if len(cols) > 0 else np.nan
 
         records.append({
             "school_id": i,

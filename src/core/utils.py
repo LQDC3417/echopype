@@ -1,58 +1,84 @@
-"""通用工具：配置加载、日志、路径管理"""
+"""通用工具：配置加载、日志、路径管理
+
+注意：build_analysis_mask 已移至 src.core.region 模块，保留此处的兼容导入。
+"""
 
 import logging
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import xarray as xr
 import yaml
 
+# 兼容导入：旧代码可能从 utils 导入 build_analysis_mask
+from src.core.region import build_analysis_mask  # noqa: F401
 
-def build_analysis_mask(
-    sv_shape: tuple,
-    surface_sample: float | None,
-    bottom_line: np.ndarray | None,
-) -> np.ndarray | None:
-    """构建分析区域 mask（True = 在分析区域内）。
+logger = logging.getLogger(__name__)
 
-    Parameters
-    ----------
-    sv_shape : (n_pings, n_samples)
-    surface_sample : float or None
-        表线 sample index，以上部分排除
-    bottom_line : np.ndarray or None
-        底线 sample index 数组 (n_pings,)，以下部分排除
+
+def squeeze_sv(sv: np.ndarray) -> np.ndarray:
+    """将 3D Sv 数组降维为 2D（取第一个 channel）。"""
+    if sv.ndim == 3:
+        return sv[0]
+    return sv
+
+
+def sv_to_linear(Sv: np.ndarray) -> np.ndarray:
+    """将 Sv(dB) 转换为线性值，NaN 位置置零。"""
+    linear = 10 ** (Sv / 10)
+    return np.where(np.isfinite(linear), linear, 0.0)
+
+
+def get_sv_array(ds_Sv: xr.Dataset) -> np.ndarray:
+    """获取 Sv 2D 数组，优先使用去噪后的 Sv_corrected。
 
     Returns
     -------
-    np.ndarray or None
-        bool mask，shape=sv_shape；全 None 时返回 None
+    np.ndarray
+        shape=(n_pings, n_samples)
     """
-    if surface_sample is None and bottom_line is None:
-        return None
+    var = "Sv_corrected" if "Sv_corrected" in ds_Sv else "Sv"
+    return squeeze_sv(ds_Sv[var].values)
 
-    n_pings, n_samples = sv_shape
-    mask = np.ones(sv_shape, dtype=bool)
 
-    if surface_sample is not None and not np.isnan(surface_sample):
-        surf_idx = int(round(surface_sample))
-        if surf_idx > 0:
-            mask[:, :surf_idx] = False
+def get_vertical_coords(ds_Sv: xr.Dataset) -> np.ndarray:
+    """获取垂直坐标（depth 优先，fallback 到 echo_range → range_sample）。
 
-    if bottom_line is not None:
-        bl = np.asarray(bottom_line, dtype=np.float32)
-        if bl.ndim == 0:
-            return mask
-        bl_clipped = np.clip(bl, 0, n_samples)
-        for i in range(min(n_pings, len(bl))):
-            val = bl_clipped[i]
-            if np.isnan(val):
-                continue
-            bi = int(round(val))
-            if bi < n_samples:
-                mask[i, bi:] = False
+    Returns
+    -------
+    np.ndarray
+        1D 垂直坐标数组，shape=(n_samples,)
+    """
+    range_sample = ds_Sv["range_sample"].values
 
-    return mask
+    if "depth" in ds_Sv:
+        depth_data = ds_Sv["depth"]
+        if "channel" in depth_data.dims:
+            depth_data = depth_data.isel(channel=0)
+        coords = depth_data.isel(ping_time=0).values
+    elif "echo_range" in ds_Sv:
+        echo_data = ds_Sv["echo_range"]
+        if "channel" in echo_data.dims:
+            echo_data = echo_data.isel(channel=0)
+        coords = echo_data.isel(ping_time=0).values
+    else:
+        logger.warning("数据集中无 depth/echo_range，使用 range_sample 作为 fallback（单位为 sample index，非米）")
+        coords = range_sample.astype(float)
+
+    if np.any(np.isnan(coords)):
+        valid_mask = ~np.isnan(coords)
+        if np.any(valid_mask):
+            valid_indices = np.where(valid_mask)[0]
+            coords = np.interp(
+                np.arange(len(coords)),
+                valid_indices,
+                coords[valid_mask],
+            )
+        else:
+            coords = range_sample.astype(float)
+
+    return coords
 
 
 def load_config(config_path: str) -> dict:
