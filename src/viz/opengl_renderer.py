@@ -54,7 +54,6 @@ class EchogramRenderer(QOpenGLWidget):
     zoom_changed = Signal(float, float)  # (zoom_x, zoom_y)
 
     MAX_TEX_SIZE_FALLBACK = 16384  # GPU 查询失败时的保底值
-    NODE_RADIUS = 4.0  # 底线节点半径（像素）
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -72,8 +71,9 @@ class EchogramRenderer(QOpenGLWidget):
 
         # 底线编辑状态
         self._bottom_editing = False
+        self._bottom_drawing = False  # 是否正在按住左键绘制
         self._bottom_draw_points = []  # 手绘模式收集的点 [(ping, sample), ...]
-        self._dragging_node = -1  # 正在拖拽的底线节点索引，-1 表示无
+        self._bottom_undo_stack = []  # 撤销栈：保存底线历史状态
 
         # 颜色映射
         self._cmap_name = "jet"
@@ -181,7 +181,7 @@ class EchogramRenderer(QOpenGLWidget):
         if mode != MouseMode.DRAW_BOTTOM:
             self._bottom_draw_points.clear()
             self._bottom_editing = False
-        self._dragging_node = -1
+            self._bottom_drawing = False
 
     def set_analysis_region_enabled(self, enabled: bool) -> None:
         """设置分析区域限定标志"""
@@ -236,20 +236,43 @@ class EchogramRenderer(QOpenGLWidget):
 
     # ── 纹理生成与渲染 ────────────────────────────────────────
 
-    def _sv_to_rgba(self) -> np.ndarray:
+    def _sv_to_rgba(self, ping_start: int = 0, ping_end: int = -1,
+                    sample_start: int = 0, sample_end: int = -1) -> np.ndarray:
         """Sv 数据 → RGBA 纹理数组。
 
         (n_pings, n_samples) → 转置 → (n_samples, n_pings, 4)
         仅转置，不做 flipud。OpenGL 纹理坐标 (0,0) 位于 quad 顶部，
         对应 sample=0（水面附近），纹理坐标 (1,1) 对应最深 sample。
+
+        Parameters
+        ----------
+        ping_start, ping_end : int
+            Ping 范围（用于视口裁剪）
+        sample_start, sample_end : int
+            Sample 范围（用于视口裁剪）
         """
+        # 视口裁剪：仅处理可见区域
+        if ping_end < 0:
+            ping_end = self._n_pings
+        if sample_end < 0:
+            sample_end = self._n_samples
+
+        # 边界检查
+        ping_start = max(0, min(ping_start, self._n_pings))
+        ping_end = max(ping_start, min(ping_end, self._n_pings))
+        sample_start = max(0, min(sample_start, self._n_samples))
+        sample_end = max(sample_start, min(sample_end, self._n_samples))
+
+        # 裁剪数据
+        data_slice = self._sv_data[ping_start:ping_end, sample_start:sample_end]
+
         # matplotlib ≥3.7 推荐 colormaps[name]，回退兼容旧版
         try:
             from matplotlib import colormaps
             cmap = colormaps[self._cmap_name]
         except (ImportError, AttributeError):
             cmap = cm.get_cmap(self._cmap_name)
-        data_T = self._sv_data.T
+        data_T = data_slice.T
         span = self._vmax - self._vmin
         if span == 0:
             span = 1.0
@@ -497,10 +520,15 @@ class EchogramRenderer(QOpenGLWidget):
                 self._select_end = (sx, sy)
 
             elif self._mouse_mode == MouseMode.DRAW_BOTTOM:
-                # 添加绘制点
+                # 开始自由手绘
+                self._bottom_drawing = True
+                self._bottom_editing = True
+                # 保存当前底线状态到撤销栈
+                self._save_bottom_undo()
+                # 添加第一个绘制点
                 px, py = self._screen_to_data(sx, sy)
                 self._bottom_draw_points.append((px, py))
-                self._bottom_editing = True
+                self.setCursor(Qt.CrossCursor)
                 self.update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
@@ -513,6 +541,15 @@ class EchogramRenderer(QOpenGLWidget):
         sample_idx = int(round(data_y))
         sv_val = self._get_sv_at(ping_idx, sample_idx)
         self.sv_at_cursor.emit(data_x, data_y, sv_val)
+
+        # 自由手绘中 — 持续收集采样点
+        if self._bottom_drawing and self._mouse_mode == MouseMode.DRAW_BOTTOM:
+            px, py = self._screen_to_data(sx, sy)
+            # 限制在数据范围内
+            py = max(0, min(self._n_samples - 1, py))
+            self._bottom_draw_points.append((px, py))
+            self.update()
+            return
 
         if self._panning and self._pan_start:
             dx = sx - self._pan_start[0]
@@ -533,6 +570,15 @@ class EchogramRenderer(QOpenGLWidget):
             self.setCursor(Qt.ArrowCursor)
 
         elif event.button() == Qt.LeftButton:
+            # 自由手绘结束 — 应用绘制结果
+            if self._bottom_drawing and self._mouse_mode == MouseMode.DRAW_BOTTOM:
+                self._bottom_drawing = False
+                self.setCursor(Qt.ArrowCursor)
+                # 应用手绘到底线（分段替换）
+                if self._bottom_draw_points:
+                    self._apply_drawn_segment()
+                return
+
             if self._selecting:
                 self._selecting = False
                 if self._select_start and self._select_end:
@@ -546,26 +592,20 @@ class EchogramRenderer(QOpenGLWidget):
                 self._select_end = None
                 self.update()
 
-            elif self._dragging_node >= 0:
-                # 完成拖拽
-                self._dragging_node = -1
-                self.setCursor(Qt.ArrowCursor)
-                if self._bottom_line is not None:
-                    self.bottom_line_edited.emit(self._bottom_line.copy())
-
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        if self._mouse_mode == MouseMode.DRAW_BOTTOM and self._bottom_draw_points:
-            # 双击结束绘制
-            self._finish_bottom_drawing()
+        # 双击不触发特殊行为（使用右键菜单完成绘制）
+        pass
 
     def keyPressEvent(self, event) -> None:
-        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
-            if self._mouse_mode == MouseMode.DRAW_BOTTOM and self._bottom_draw_points:
-                self._finish_bottom_drawing()
-        elif event.key() == Qt.Key_Escape:
+        if event.key() == Qt.Key_Escape:
+            # 取消当前绘制
             self._bottom_draw_points.clear()
             self._bottom_editing = False
+            self._bottom_drawing = False
             self.update()
+        elif event.key() == Qt.Key_Z and event.modifiers() & Qt.ControlModifier:
+            # Ctrl+Z 撤销底线编辑
+            self._undo_bottom()
 
     # ── 右键菜单 ──────────────────────────────────────────────
 
@@ -613,53 +653,105 @@ class EchogramRenderer(QOpenGLWidget):
         if self._bottom_line is not None:
             menu.addAction("💾 更新底线", lambda: self.update_bottom_requested.emit())
 
+        # ── 底线绘制模式菜单 ──
         if self._mouse_mode == MouseMode.DRAW_BOTTOM:
             menu.addSeparator()
-            menu.addAction("✅ 完成绘制", self._finish_bottom_drawing)
-            menu.addAction("🗑 清除绘制点", self._clear_bottom_drawing)
+            if self._bottom_draw_points:
+                menu.addAction("✅ 完成绘制", self._finish_bottom_drawing)
+                menu.addAction("🗑 清除绘制点", self._clear_bottom_drawing)
+            if self._bottom_undo_stack:
+                menu.addAction("↩ 撤销 (Ctrl+Z)", self._undo_bottom)
 
         menu.exec_(self.mapToGlobal(pos))
 
-    # ── 底线编辑辅助 ──────────────────────────────────────────
+    # ── 底线编辑 ──────────────────────────────────────────────
 
-    def _finish_bottom_drawing(self):
-        """完成手绘底线"""
-        if not self._bottom_draw_points:
+    def _save_bottom_undo(self):
+        """保存当前底线状态到撤销栈"""
+        if self._bottom_line is not None:
+            self._bottom_undo_stack.append(self._bottom_line.copy())
+            # 限制撤销栈大小
+            if len(self._bottom_undo_stack) > 50:
+                self._bottom_undo_stack.pop(0)
+
+    def _undo_bottom(self):
+        """撤销底线编辑"""
+        if not self._bottom_undo_stack:
             return
-        # 将绘制点转换为底线数组
-        points = sorted(self._bottom_draw_points, key=lambda p: p[0])
-        bottom = np.full(self._n_pings, np.nan, dtype=np.float32)
-
-        # 线性插值
-        for i in range(len(points) - 1):
-            p1_ping, p1_sample = points[i]
-            p2_ping, p2_sample = points[i + 1]
-            x1 = max(0, int(round(p1_ping)))
-            x2 = min(self._n_pings, int(round(p2_ping)) + 1)
-            if x2 <= x1:
-                continue
-            for x in range(x1, x2):
-                t = (x - p1_ping) / max(1, p2_ping - p1_ping)
-                bottom[x] = p1_sample + t * (p2_sample - p1_sample)
-
-        # 处理首尾
-        if points:
-            first_ping = int(round(points[0][0]))
-            if first_ping > 0:
-                bottom[:first_ping] = points[0][1]
-            last_ping = int(round(points[-1][0]))
-            if last_ping < self._n_pings - 1:
-                bottom[last_ping + 1:] = points[-1][1]
-
-        self._bottom_line = bottom
+        self._bottom_line = self._bottom_undo_stack.pop()
         self._bottom_draw_points.clear()
         self._bottom_editing = False
-        self.bottom_line_edited.emit(bottom.copy())
+        self.bottom_line_edited.emit(self._bottom_line.copy())
         self.update()
 
-    def _clear_bottom_drawing(self):
+    def _apply_drawn_segment(self):
+        """将手绘的点应用到底线（分段替换）"""
+        if not self._bottom_draw_points:
+            return
+
+        points = self._bottom_draw_points
+        if len(points) < 2:
+            self._bottom_draw_points.clear()
+            return
+
+        # 确定绘制覆盖的 Ping 范围
+        pings = [p[0] for p in points]
+        ping_min = max(0, int(round(min(pings))))
+        ping_max = min(self._n_pings - 1, int(round(max(pings))))
+
+        if ping_min > ping_max:
+            self._bottom_draw_points.clear()
+            return
+
+        # 初始化底线（如果不存在）
+        if self._bottom_line is None:
+            self._bottom_line = np.full(self._n_pings, np.nan, dtype=np.float32)
+
+        # 对绘制点按 ping 排序
+        sorted_points = sorted(points, key=lambda p: p[0])
+
+        # 在覆盖范围内生成密集采样的底线值
+        for ping_idx in range(ping_min, ping_max + 1):
+            # 找到 ping_idx 两侧的绘制点进行线性插值
+            left = None
+            right = None
+            for i, (p, s) in enumerate(sorted_points):
+                if p <= ping_idx:
+                    left = (p, s, i)
+                if p >= ping_idx and right is None:
+                    right = (p, s, i)
+
+            if left is not None and right is not None:
+                if left[2] == right[2]:
+                    # 同一个点
+                    self._bottom_line[ping_idx] = left[1]
+                else:
+                    # 线性插值
+                    t = (ping_idx - left[0]) / max(1e-6, right[0] - left[0])
+                    self._bottom_line[ping_idx] = left[1] + t * (right[1] - left[1])
+            elif left is not None:
+                self._bottom_line[ping_idx] = left[1]
+            elif right is not None:
+                self._bottom_line[ping_idx] = right[1]
+
+        # 清除绘制点
         self._bottom_draw_points.clear()
         self._bottom_editing = False
+
+        # 发送更新信号
+        self.bottom_line_edited.emit(self._bottom_line.copy())
+        self.update()
+
+    def _finish_bottom_drawing(self):
+        """完成手绘底线（右键菜单调用）"""
+        if self._bottom_draw_points:
+            self._apply_drawn_segment()
+
+    def _clear_bottom_drawing(self):
+        """清除当前绘制点"""
+        self._bottom_draw_points.clear()
+        self._bottom_editing = False
+        self._bottom_drawing = False
         self.update()
 
     def _draw_overlay_text(self):

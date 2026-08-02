@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QWidget, QVBoxLayout, QFormLayout,
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
     QTableWidget, QTableWidgetItem, QGroupBox, QScrollArea,
-    QHBoxLayout, QFrame,
+    QHBoxLayout, QFrame, QComboBox,
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -83,6 +83,8 @@ class ProcessingTab(QWidget):
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
     compute_density_clicked = Signal()
+    grid_clicked = Signal()
+    stats_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -201,6 +203,41 @@ class ProcessingTab(QWidget):
 
         self.btn_compute_density.clicked.connect(self.compute_density_clicked)
 
+        # ── 网格分析 ──
+        grid_group = QGroupBox("网格分析")
+        grid_layout = QFormLayout()
+        grid_layout.setSpacing(6)
+        grid_layout.setContentsMargins(8, 12, 8, 8)
+
+        self.combo_grid_v = QComboBox()
+        self.combo_grid_v.addItems(["1m", "2m", "5m"])
+        self.combo_grid_v.setCurrentIndex(1)  # 默认 2m
+        self.combo_grid_v.setToolTip("垂直间隔")
+
+        self.spin_grid_h = QSpinBox()
+        self.spin_grid_h.setRange(1, 10000)
+        self.spin_grid_h.setValue(100)
+        self.spin_grid_h.setToolTip("水平间隔（ping 数）")
+
+        self.combo_grid_h_method = QComboBox()
+        self.combo_grid_h_method.addItems(["Ping", "距离"])
+        self.combo_grid_h_method.setToolTip("水平分段方式")
+
+        self.btn_grid = QPushButton("网格分析")
+        self.btn_grid.clicked.connect(self.grid_clicked)
+
+        grid_layout.addRow("垂直间隔:", self.combo_grid_v)
+        grid_layout.addRow("水平间隔:", self.spin_grid_h)
+        grid_layout.addRow("分段方式:", self.combo_grid_h_method)
+        grid_layout.addRow(self.btn_grid)
+        grid_group.setLayout(grid_layout)
+        layout.addWidget(grid_group)
+
+        # ── 统计按钮 ──
+        self.btn_stats = QPushButton("统计结果")
+        self.btn_stats.clicked.connect(self.stats_clicked)
+        layout.addWidget(self.btn_stats)
+
         layout.addStretch()
         scroll.setWidget(container)
 
@@ -232,6 +269,16 @@ class ProcessingTab(QWidget):
         return {
             "ts_default": self.spin_ts.value(),
             "avg_weight_kg": self.spin_avg_weight.value(),
+        }
+
+    def get_grid_config(self) -> dict:
+        v_text = self.combo_grid_v.currentText()
+        v_interval = float(v_text.replace("m", ""))
+        h_method = "ping" if self.combo_grid_h_method.currentIndex() == 0 else "distance"
+        return {
+            "vertical_interval_m": v_interval,
+            "horizontal_interval": float(self.spin_grid_h.value()),
+            "horizontal_method": h_method,
         }
 
     def load_from_config(self, config: dict):
@@ -343,6 +390,8 @@ class PropertyPanel(QTabWidget):
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
     compute_density_clicked = Signal()
+    grid_clicked = Signal()
+    stats_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -360,3 +409,5 @@ class PropertyPanel(QTabWidget):
         self.processing.surface_line_changed.connect(self.surface_line_changed)
         self.processing.detect_schools_clicked.connect(self.detect_schools_clicked)
         self.processing.compute_density_clicked.connect(self.compute_density_clicked)
+        self.processing.grid_clicked.connect(self.grid_clicked)
+        self.processing.stats_clicked.connect(self.stats_clicked)

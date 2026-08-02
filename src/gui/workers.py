@@ -1,9 +1,13 @@
 """后台处理工作线程"""
 
 import traceback
+import logging
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PySide6.QtCore import QThread, Signal
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def apply_manual_mask(ds, manual_mask):
@@ -224,3 +228,86 @@ class GridWorker(QThread):
             self.finished.emit(df)
         except Exception as e:
             self.error.emit(traceback.format_exc())
+
+
+class BatchProcessWorker(QThread):
+    """批量处理多个 raw 文件（并行处理）
+
+    信号：
+    - file_started(str): 文件开始处理
+    - file_finished(str, object): 文件处理完成
+    - file_error(str, str): 文件处理失败
+    - all_finished(int, int): 全部完成 (成功数, 失败数)
+    - progress(str): 进度信息
+    """
+
+    file_started = Signal(str)
+    file_finished = Signal(str, object)  # (path_str, ds_Sv)
+    file_error = Signal(str, str)  # (path_str, error_msg)
+    all_finished = Signal(int, int)  # (success_count, error_count)
+    progress = Signal(str)
+
+    def __init__(self, raw_files: list[Path], config: dict, max_workers: int = 2):
+        super().__init__()
+        self.raw_files = raw_files
+        self.config = config
+        self.max_workers = max_workers
+        self._cancelled = False
+
+    def cancel(self):
+        """取消批量处理"""
+        self._cancelled = True
+
+    def _process_single_file(self, raw_file: Path) -> tuple[str, object, str]:
+        """处理单个文件（在线程中执行）。"""
+        path_str = str(raw_file)
+        try:
+            from src.core.acoustic import open_single_file, process_single_file
+
+            if self._cancelled:
+                return path_str, None, "已取消"
+
+            echodata = open_single_file(raw_file, self.config)
+
+            if self._cancelled:
+                return path_str, None, "已取消"
+
+            ds_Sv = process_single_file(echodata, self.config)
+            return path_str, ds_Sv, ""
+
+        except Exception as e:
+            return path_str, None, traceback.format_exc()
+
+    def run(self):
+        """并行处理所有文件"""
+        total = len(self.raw_files)
+        success_count = 0
+        error_count = 0
+
+        self.progress.emit(f"开始批量处理 {total} 个文件 (并行度: {self.max_workers})")
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_file = {
+                executor.submit(self._process_single_file, rf): rf
+                for rf in self.raw_files
+            }
+
+            for future in as_completed(future_to_file):
+                if self._cancelled:
+                    self.progress.emit("批量处理已取消")
+                    break
+
+                path_str, ds_Sv, error_msg = future.result()
+                raw_file = future_to_file[future]
+
+                if error_msg:
+                    error_count += 1
+                    self.file_error.emit(path_str, error_msg)
+                    self.progress.emit(f"✗ 失败 [{success_count + error_count}/{total}]: {raw_file.name}")
+                else:
+                    success_count += 1
+                    self.file_finished.emit(path_str, ds_Sv)
+                    self.progress.emit(f"✓ 完成 [{success_count + error_count}/{total}]: {raw_file.name}")
+
+        self.all_finished.emit(success_count, error_count)
+        self.progress.emit(f"批量处理完成: 成功 {success_count}, 失败 {error_count}")

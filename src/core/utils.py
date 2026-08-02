@@ -1,9 +1,10 @@
-"""通用工具：配置加载、日志、路径管理
+"""通用工具：配置加载、日志、路径管理、内存监控
 
 注意：build_analysis_mask 已移至 src.core.region 模块，保留此处的兼容导入。
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,8 @@ import yaml
 # 兼容导入：旧代码可能从 utils 导入 build_analysis_mask
 from src.core.region import build_analysis_mask  # noqa: F401
 
-logger = logging.getLogger(__name__)
+# 核心模块统一使用 "fish_acoustics" logger（见项目约定）
+logger = logging.getLogger("fish_acoustics")
 
 
 def squeeze_sv(sv: np.ndarray) -> np.ndarray:
@@ -144,3 +146,66 @@ def get_output_dir(config: dict) -> Path:
     output_dir = Path(config["output"]["dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
+
+
+# ── 内存监控 ──────────────────────────────────────────────
+
+def get_memory_usage() -> dict:
+    """获取当前进程内存使用情况。
+
+    Returns
+    -------
+    dict
+        - rss_mb: 物理内存使用 (MB)
+        - vms_mb: 虚拟内存使用 (MB)
+        - percent: 内存使用百分比
+    """
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        mem = process.memory_info()
+        return {
+            "rss_mb": mem.rss / 1024 / 1024,
+            "vms_mb": mem.vms / 1024 / 1024,
+            "percent": process.memory_percent(),
+        }
+    except ImportError:
+        # psutil 不可用时返回 0（无数据，不伪造）
+        return {
+            "rss_mb": 0.0,
+            "vms_mb": 0.0,
+            "percent": 0.0,
+        }
+
+
+def log_memory_usage(label: str = "") -> None:
+    """记录内存使用情况到日志。"""
+    mem = get_memory_usage()
+    logger.info(
+        f"[内存{f' {label}' if label else ''}] "
+        f"RSS: {mem['rss_mb']:.1f} MB, "
+        f"VMS: {mem['vms_mb']:.1f} MB, "
+        f"占比: {mem['percent']:.1f}%"
+    )
+
+
+def optimize_array_dtype(arr: np.ndarray, target_dtype=np.float32) -> np.ndarray:
+    """优化数组数据类型以减少内存占用。
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        输入数组
+    target_dtype : np.dtype
+        目标数据类型，默认 float32
+
+    Returns
+    -------
+    np.ndarray
+        转换后的数组
+    """
+    if arr.dtype == target_dtype:
+        return arr
+    if np.issubdtype(arr.dtype, np.floating):
+        return arr.astype(target_dtype)
+    return arr

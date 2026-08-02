@@ -1,17 +1,17 @@
-"""主窗口 — Echoview 风格完整布局
+"""主窗口 — Echoview 专业风格停靠布局
 
 ┌──────────────────────────────────────────────────┐
 │ Menu Bar                                          │
 ├──────────────────────────────────────────────────┤
-│ Toolbar (导入 | 处理 | 导航 | 视图)               │
+│ StandardToolBar | EchogramToolBar                 │
 ├───────────┬──────────────────────┬───────────────┤
-│ Fileset   │                      │  Properties   │
-│ Manager   │    Echogram View     │  ─ 文件信息   │
-│           │    (OpenGL)          │  ─ 处理参数   │
-│ Variable  │                      │  ─ 分析结果   │
-│ List      │                      │               │
+│ [Dock]    │                      │ [Dock]        │
+│ 文件树    │    Echogram (GL)     │ 属性面板      │
+│ 变量列表  │                      │ 信息/参数/结果│
 ├───────────┴──────────────────────┴───────────────┤
-│ Region Table  |  Status Bar                       │
+│ [Dock] 区域表格 (可折叠)                          │
+├──────────────────────────────────────────────────┤
+│ Status Bar                                        │
 └──────────────────────────────────────────────────┘
 """
 
@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QFileDialog, QMessageBox,
-    QWidget, QVBoxLayout, QInputDialog,
+    QWidget, QVBoxLayout, QInputDialog, QDockWidget,
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
@@ -31,13 +31,15 @@ from src.gui.fileset_tree import FilesetTreeWidget, BatchImportDialog
 from src.gui.fileset import Fileset
 from src.gui.variable_list import VariableListWidget
 from src.gui.region_panel import RegionTableWidget
+from src.gui.property_panel import PropertyPanel
 from src.gui.stats_dialog import StatsDialog
 from src.gui.export_dialog import ExportDialog
 from src.gui.status_bar import MainStatusBar
-from src.gui.toolbars import StandardToolBar, EchogramToolBar, ProcessingToolBar, MouseMode
+from src.gui.toolbars import StandardToolBar, EchogramToolBar, MouseMode
 from src.gui.workers import (
     LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
     DetectSeafloorWorker, DetectSchoolsWorker, DensityWorker, GridWorker,
+    BatchProcessWorker,
 )
 from src.core.utils import load_config
 
@@ -76,6 +78,8 @@ class MainWindow(QMainWindow):
         self._schools_df = None
         self._density_df = None
         self._current_worker = None
+        self._batch_worker = None            # 批量处理工作线程
+        self._batch_results: dict[str, object] = {}  # {path_str: ds_Sv}
         self._current_fileset: Fileset = None
         self._current_channel = ""
         self._undo_stack = []
@@ -98,6 +102,7 @@ class MainWindow(QMainWindow):
 
         self._setup_menubar()
         self._setup_ui()
+        self._register_dock_view_actions()
         self._connect_signals()
         self._apply_default_config()
 
@@ -140,10 +145,13 @@ class MainWindow(QMainWindow):
         vm.addAction(self._act_noise)
         vm.addAction(self._act_school)
         vm.addAction(self._act_bottom)
+        vm.addSeparator()
+        # Dock 面板切换（_setup_ui 后由 _register_dock_view_actions 填充）
 
         # ── 处理 ──
         pm = mb.addMenu("处理(&P)")
         pm.addAction(self._act("▶  全部运行", self._run_all, "F5"))
+        pm.addAction(self._act("⚡ 批量处理文件...", self._batch_process_files, "Ctrl+B"))
         pm.addSeparator()
         pm.addAction(self._act("计算 Sv", self._compute_sv, "Ctrl+1"))
         pm.addAction(self._act("噪声去除", self._apply_noise_params, "Ctrl+2"))
@@ -159,6 +167,18 @@ class MainWindow(QMainWindow):
         # ── 帮助 ──
         hm = mb.addMenu("帮助(&H)")
         hm.addAction(self._act("关于", self._show_about))
+
+    def _register_dock_view_actions(self):
+        """将各 Dock 的显示/隐藏切换加入视图菜单"""
+        vm = None
+        for a in self.menuBar().actions():
+            if a.text() == "显示(&V)":
+                vm = a.menu()
+                break
+        if vm is None:
+            return
+        for dock in (self.dock_left, self.dock_right, self.dock_bottom):
+            vm.addAction(dock.toggleViewAction())
 
     def _act(self, text, slot, shortcut=None):
         a = QAction(text, self)
@@ -178,13 +198,12 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════════════════════
 
     def _setup_ui(self):
-        # ── 工具栏 ──
+        # ── 工具栏（2 行紧凑）──
         self.std_toolbar = StandardToolBar(self)
         self.addToolBar(self.std_toolbar)
         self.echo_toolbar = EchogramToolBar(self)
+        self.addToolBarBreak()
         self.addToolBar(self.echo_toolbar)
-        self.proc_toolbar = ProcessingToolBar(self)
-        self.addToolBar(self.proc_toolbar)
 
         # ── 统计对话框 ──
         self.stats_dialog = StatsDialog(self)
@@ -193,36 +212,51 @@ class MainWindow(QMainWindow):
         self.statusbar = MainStatusBar(self)
         self.setStatusBar(self.statusbar)
 
-        # ── 主水平分割：左 | 中 ──
-        main_split = QSplitter(Qt.Horizontal)
+        # ── 中央：仅 Echogram ──
+        self.echogram = EchogramRenderer()
+        self.setCentralWidget(self.echogram)
 
-        # 左侧：文件集 + 变量列表（上下分割）
+        # ── 左侧 Dock：文件树 + 变量列表 ──
         left_split = QSplitter(Qt.Vertical)
         self.fileset_tree = FilesetTreeWidget()
         self.variable_list = VariableListWidget()
         left_split.addWidget(self.fileset_tree)
         left_split.addWidget(self.variable_list)
         left_split.setSizes([350, 150])
-        main_split.addWidget(left_split)
 
-        # 中间：Echogram + 底部区域面板
-        center_widget = QWidget()
-        center_layout = QVBoxLayout(center_widget)
-        center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(0)
+        self.dock_left = QDockWidget("文件集", self)
+        self.dock_left.setObjectName("dockFileset")
+        self.dock_left.setWidget(left_split)
+        self.dock_left.setFeatures(
+            QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
+        )
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_left)
 
-        self.echogram = EchogramRenderer()
-        center_layout.addWidget(self.echogram, 1)
+        # ── 右侧 Dock：属性面板 ──
+        self.property_panel = PropertyPanel()
+        self.dock_right = QDockWidget("属性", self)
+        self.dock_right.setObjectName("dockProperties")
+        self.dock_right.setWidget(self.property_panel)
+        self.dock_right.setFeatures(
+            QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
+        )
+        self.addDockWidget(Qt.RightDockWidgetArea, self.dock_right)
 
+        # ── 底部 Dock：区域表格 ──
         self.region_table = RegionTableWidget()
-        self.region_table.setMaximumHeight(160)
-        center_layout.addWidget(self.region_table)
+        self.region_table.setMaximumHeight(180)
+        self.dock_bottom = QDockWidget("区域", self)
+        self.dock_bottom.setObjectName("dockRegions")
+        self.dock_bottom.setWidget(self.region_table)
+        self.dock_bottom.setFeatures(
+            QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
+        )
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_bottom)
 
-        main_split.addWidget(center_widget)
-
-        main_split.setStretchFactor(0, 1)  # 左侧文件树
-        main_split.setStretchFactor(1, 5)  # 中间 Echogram（主区域）
-        self.setCentralWidget(main_split)
+        # 默认尺寸：左 260px，右 300px，底部 160px
+        self.resizeDocks([self.dock_left], [260], Qt.Horizontal)
+        self.resizeDocks([self.dock_right], [300], Qt.Horizontal)
+        self.resizeDocks([self.dock_bottom], [160], Qt.Vertical)
 
     # ═══════════════════════════════════════════════════════
     # 信号连接
@@ -271,12 +305,13 @@ class MainWindow(QMainWindow):
         # echogram 翻页信号
         self.echogram.file_page_requested.connect(self._switch_file)
 
-        # 处理工具栏
-        self.proc_toolbar.surface_line_changed.connect(self._on_surface_line_changed)
-        self.proc_toolbar.detect_schools_clicked.connect(self._detect_schools)
-        self.proc_toolbar.compute_density_clicked.connect(self._compute_density)
-        self.proc_toolbar.stats_clicked.connect(self._show_stats)
-        self.proc_toolbar.grid_clicked.connect(self._run_grid_analysis)
+        # 属性面板（处理参数）
+        self.property_panel.surface_line_changed.connect(self._on_surface_line_changed)
+        self.property_panel.detect_schools_clicked.connect(self._detect_schools)
+        self.property_panel.compute_density_clicked.connect(self._compute_density)
+        self.property_panel.stats_clicked.connect(self._show_stats)
+        self.property_panel.grid_clicked.connect(self._run_grid_analysis)
+        self.property_panel.noise_params_changed.connect(self._on_noise_params_changed)
 
         # 变量列表
         self.variable_list.variable_selected.connect(self._on_variable_selected)
@@ -326,7 +361,7 @@ class MainWindow(QMainWindow):
             try:
                 self._config = load_config(path)
                 self.statusbar.set_status(f"配置已加载: {path}")
-                self.proc_toolbar.load_from_config(self._config)
+                self.property_panel.processing.load_from_config(self._config)
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"加载失败: {e}")
 
@@ -340,6 +375,79 @@ class MainWindow(QMainWindow):
             with open(path, "w", encoding="utf-8") as f:
                 yaml.dump(self._config, f, allow_unicode=True, default_flow_style=False)
             self.statusbar.set_status(f"配置已保存: {path}")
+
+    # ═══════════════════════════════════════════════════════
+    # 批量处理（并行）
+    # ═══════════════════════════════════════════════════════
+
+    def _batch_process_files(self):
+        """批量处理多个 raw 文件（后台并行）"""
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择要批量处理的 Raw 文件", str(Path.cwd()), "Raw 文件 (*.raw);;所有文件 (*)"
+        )
+        if not paths:
+            return
+        if self._batch_worker is not None and self._batch_worker.isRunning():
+            QMessageBox.information(self, "提示", "批量处理正在进行中")
+            return
+        if self._config is None:
+            self._apply_default_config()
+        assert self._config is not None
+
+        raw_files = [Path(p) for p in paths]
+        self.statusbar.show_progress(f"批量处理 {len(raw_files)} 个文件...")
+        self._batch_results = {}
+
+        worker = BatchProcessWorker(raw_files, self._config, max_workers=2)
+        worker.progress.connect(self.statusbar.set_status)
+        worker.file_finished.connect(self._on_batch_file_finished)
+        worker.file_error.connect(self._on_batch_file_error)
+        worker.all_finished.connect(self._on_batch_all_finished)
+        self._batch_worker = worker
+        worker.start()
+
+    def _on_batch_file_finished(self, path_str: str, ds_Sv):
+        """单个文件处理完成 → 缓存结果"""
+        try:
+            sv = squeeze_sv(ds_Sv["Sv"].values)
+            self._file_cache[path_str] = {
+                "sv": sv.astype(np.float32),
+                "ds": ds_Sv,
+                "bottom": None,
+                "noise_mask": None,
+                "school_mask": None,
+                "surface_depth_m": self._surface_depth_m,
+            }
+            self._batch_results[path_str] = ds_Sv
+        except Exception:
+            logger.exception("批量处理结果缓存失败: %s", path_str)
+
+    def _on_batch_file_error(self, path_str: str, error_msg: str):
+        """单个文件处理失败"""
+        logger.error("批量处理失败 %s:\n%s", path_str, error_msg)
+
+    def _on_batch_all_finished(self, success: int, error: int):
+        """批量处理全部完成 → 更新队列并显示第一个成功文件"""
+        new_paths = [Path(p) for p in self._batch_results]
+        if new_paths:
+            # 当前队列为空 → 设为新队列并显示第一个；否则追加到队尾
+            if not self._raw_file_queue:
+                self._raw_file_queue = list(new_paths)
+                self._raw_queue_index = 0
+                first = self._file_cache[str(self._raw_file_queue[0])]
+                self._apply_sv_to_display(first["ds"], first["sv"])
+            else:
+                for p in new_paths:
+                    if p not in self._raw_file_queue:
+                        self._raw_file_queue.append(p)
+
+        self.statusbar.hide_progress()
+        self._batch_worker = None
+        self._batch_results = {}
+        self.statusbar.set_status(f"批量处理完成: 成功 {success}, 失败 {error}")
+        QMessageBox.information(
+            self, "批量处理完成", f"成功 {success} 个文件，失败 {error} 个文件"
+        )
 
     def _on_fileset_selected(self, fileset: Fileset):
         """选中文件集后自动逐个加载全部 raw 文件，缓存 Sv 数据"""
@@ -499,9 +607,10 @@ class MainWindow(QMainWindow):
 
         # 恢复表线深度
         self._surface_depth_m = cached.get("surface_depth_m", 2.0)
-        self.proc_toolbar.spin_surface.blockSignals(True)
-        self.proc_toolbar.spin_surface.setValue(self._surface_depth_m)
-        self.proc_toolbar.spin_surface.blockSignals(False)
+        spin_surface = self.property_panel.processing.spin_surface
+        spin_surface.blockSignals(True)
+        spin_surface.setValue(self._surface_depth_m)
+        spin_surface.blockSignals(False)
         self._update_surface_line_render()
 
         # 恢复噪声 mask
@@ -626,7 +735,7 @@ class MainWindow(QMainWindow):
             return
         # 从 UI 同步噪声参数到 config
         self._config.setdefault("processing", {})["noise_removal"] = (
-            self.proc_toolbar.get_noise_config()
+            self.property_panel.processing.get_noise_config()
         )
         self.pipeline_step.emit("噪声去除")
         self.statusbar.show_progress("去除噪声...")
@@ -674,7 +783,7 @@ class MainWindow(QMainWindow):
         # 同步 UI 参数到 config
         self._config.setdefault("processing", {})["bottom_detection"] = {
             **self._config.get("processing", {}).get("bottom_detection", {}),
-            **self.proc_toolbar.get_bottom_config(),
+            **self.property_panel.processing.get_bottom_config(),
         }
         self.pipeline_step.emit("底部检测")
         self.statusbar.show_progress("检测底部...")
@@ -773,7 +882,7 @@ class MainWindow(QMainWindow):
         )
         if ok:
             self._surface_depth_m = val
-            self.proc_toolbar.spin_surface.setValue(val)
+            self.property_panel.processing.spin_surface.setValue(val)
             self._update_surface_line_render()
             self._apply_analysis_region_to_ds()
             self.statusbar.set_status(f"表线深度: {val:.1f} m")
@@ -801,7 +910,7 @@ class MainWindow(QMainWindow):
             return
         # 同步 UI 参数到 config
         self._config.setdefault("school_detection", {}).update(
-            self.proc_toolbar.get_school_config()
+            self.property_panel.processing.get_school_config()
         )
         self.pipeline_step.emit("鱼群检测")
         self.statusbar.show_progress("检测鱼群...")
@@ -816,6 +925,7 @@ class MainWindow(QMainWindow):
         self._schools_df = df
         self.echogram.set_school_mask(self._schools_mask)
         self.stats_dialog.update_schools(df)
+        self.property_panel.stats.update_schools(df)
         self.statusbar.hide_progress()
         self.statusbar.set_status(f"检测到 {len(df)} 个鱼群")
 
@@ -840,7 +950,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "请先加载数据")
             return
         # 同步 UI 参数到 config
-        density_ui = self.proc_toolbar.get_density_config()
+        density_ui = self.property_panel.processing.get_density_config()
         self._config.setdefault("density", {}).update(density_ui)
         self.pipeline_step.emit("密度估算")
         schools_df = self._schools_df if self._schools_df is not None else pd.DataFrame()
@@ -854,6 +964,7 @@ class MainWindow(QMainWindow):
     def _on_density_computed(self, df):
         self._density_df = df
         self.stats_dialog.update_density(df)
+        self.property_panel.stats.update_density(df)
         self.statusbar.hide_progress()
         self.statusbar.set_status("密度计算完成")
         self._run_all_chain = False
@@ -876,8 +987,8 @@ class MainWindow(QMainWindow):
         if self._ds_Sv is None or self._config is None:
             QMessageBox.warning(self, "警告", "请先加载数据")
             return
-        grid_cfg = self.proc_toolbar.get_grid_config()
-        density_cfg = self.proc_toolbar.get_density_config()
+        grid_cfg = self.property_panel.processing.get_grid_config()
+        density_cfg = self.property_panel.processing.get_density_config()
         self.statusbar.show_progress("网格分析...")
         self._current_worker = GridWorker(
             self._get_analysis_ds(), self._surface_depth_m, grid_cfg, density_cfg
@@ -909,6 +1020,8 @@ class MainWindow(QMainWindow):
             n_samples = len(ds_Sv["range_sample"])
             info_parts.append(f"{n_samples} samples")
         self.statusbar.set_status(" | ".join(info_parts))
+        # 同步属性面板文件信息
+        self.property_panel.file_info.update_info(ds_Sv)
 
     # ═══════════════════════════════════════════════════════
     # 交互

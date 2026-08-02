@@ -475,16 +475,27 @@ QRadioButton::indicator:hover {
     border-color: #1a73e8;
 }
 
-/* ── 停靠窗口 ── */
+/* ── 停靠窗口（Echoview 紧凑风格）── */
 QDockWidget {
     color: #2c3e50;
+    font-size: 11px;
+    font-weight: bold;
     titlebar-close-icon: none;
 }
 QDockWidget::title {
-    background-color: #ffffff;
-    padding: 6px;
+    background-color: #eef2f7;
+    padding: 4px 8px;
     border-bottom: 1px solid #dce4ec;
-    font-weight: bold;
+    text-align: left;
+}
+QDockWidget::close-button, QDockWidget::float-button {
+    border: none;
+    background: transparent;
+    padding: 2px;
+}
+QDockWidget::close-button:hover, QDockWidget::float-button:hover {
+    background: #d2e3fc;
+    border-radius: 3px;
 }
 
 /* ── 工具提示区域 ── */
