@@ -34,9 +34,10 @@
 
 | 组件 | 说明 |
 |------|------|
-| **主窗口** | Echoview 风格布局：文件树 + 回波图 + 工具栏 |
-| **工具栏** | StandardToolBar + EchogramToolBar + ProcessingToolBar |
-| **OpenGL 渲染器** | 高性能回波图渲染，支持缩放/平移/叠加层 |
+| **主窗口** | Echoview 专业停靠布局：文件树/变量列表/属性面板/区域表格可折叠 Dock |
+| **工具栏** | StandardToolBar + EchogramToolBar（2 行紧凑布局） |
+| **属性面板** | PropertyPanel：处理参数 + 网格分析 + 统计按钮 |
+| **OpenGL 渲染器** | 高性能回波图渲染，支持缩放/平移/叠加层/视口裁剪 |
 | **统计对话框** | 双标签页：鱼群/密度 + 网格统计 |
 | **导出对话框** | 可选格式(netCDF/CSV/Excel/Zarr) + 内容(Sv/鱼群/密度/网格) |
 | **蓝白色主题** | 专业清爽的 UI 配色方案 |
@@ -190,6 +191,7 @@ python -m src.app
 
 - [ ] 多频分析 UI（multifreq.py 已实现，GUI 尚未接入）
 - [ ] 质量检查结果展示（quality.py 已实现，GUI 尚未接入）
-- [x] 底线手动编辑的节点拖拽优化
+- [x] 底线自由手绘编辑（分段替换 + Ctrl+Z 撤销）
+- [x] 批量处理 UI（Ctrl+B，ThreadPoolExecutor 并行）
 - [ ] 网格分析结果可视化（颜色编码）
-- [ ] 批量处理模式（命令行）
+- [ ] 用户文档和使用指南

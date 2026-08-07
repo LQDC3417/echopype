@@ -1,4 +1,11 @@
-"""后台处理工作线程"""
+﻿"""后台处理工作线程（增强版）
+
+功能增强：
+- GridWorker 添加更详细的进度显示
+- 改进错误处理，提供更友好的错误信息
+- 添加进度百分比信号
+- 支持取消操作
+"""
 
 import traceback
 import logging
@@ -144,40 +151,37 @@ class DetectSeafloorWorker(QThread):
             if er is None:
                 er = np.arange(ds.sizes["range_sample"], dtype=float)
 
-            bottom_depth_np = bottom_depth_m.values
-            if bottom_depth_np.ndim > 1:
-                bottom_depth_np = bottom_depth_np[:, 0]
-
-            bottom_indices = bottom_depth_to_sample_indices(bottom_depth_np, er)
+            bottom_indices = bottom_depth_to_sample_indices(bottom_depth_m, er)
             self.finished.emit(bottom_indices)
         except Exception as e:
             self.error.emit(traceback.format_exc())
 
 
 class DetectSchoolsWorker(QThread):
-    """鱼群检测（ds_Sv 已由 MainWindow 按分析区域裁剪）"""
-    finished = Signal(object, object)  # mask, DataFrame
+    """鱼群检测"""
+    finished = Signal(object)  # DataFrame
     error = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, ds_Sv, config: dict):
+    def __init__(self, ds_Sv, bottom_indices, config: dict):
         super().__init__()
         self.ds_Sv = ds_Sv
+        self.bottom_indices = bottom_indices
         self.config = config
 
     def run(self):
         try:
-            from src.core.school import detect_schools, schools_to_dataframe
+            from src.core.school import detect_schools
+            school_cfg = self.config.get("school_detection", {})
             self.progress.emit("检测鱼群...")
-            mask = detect_schools(self.ds_Sv, self.config)
-            df = schools_to_dataframe(mask, self.ds_Sv)
-            self.finished.emit(mask, df)
+            df = detect_schools(self.ds_Sv, self.bottom_indices, school_cfg)
+            self.finished.emit(df)
         except Exception as e:
             self.error.emit(traceback.format_exc())
 
 
-class DensityWorker(QThread):
-    """密度估算（ds_Sv 已由 MainWindow 按分析区域裁剪）"""
+class ComputeDensityWorker(QThread):
+    """密度估算（裁剪）"""
     finished = Signal(object)  # DataFrame
     error = Signal(str)
     progress = Signal(str)
@@ -199,10 +203,21 @@ class DensityWorker(QThread):
 
 
 class GridWorker(QThread):
-    """网格化分析"""
+    """网格化分析（增强版）
+
+    功能增强：
+    - 添加详细的进度显示和百分比
+    - 改进错误处理，提供更友好的错误信息
+    - 支持取消操作
+    - 添加统计指标选择和输出格式支持
+    """
+
+    # 信号
     finished = Signal(object)  # DataFrame
     error = Signal(str)
     progress = Signal(str)
+    progress_percent = Signal(int)  # 进度百分比 (0-100)
+    status_changed = Signal(str)  # 状态变化
 
     def __init__(self, ds_Sv, surface_depth_m, grid_config, density_config):
         super().__init__()
@@ -210,11 +225,43 @@ class GridWorker(QThread):
         self.surface_depth_m = surface_depth_m
         self.grid_config = grid_config
         self.density_config = density_config
+        self._cancelled = False
+        self._current_step = ""
+        self._total_steps = 4  # 总步骤数
+
+    def cancel(self):
+        """取消网格分析"""
+        self._cancelled = True
+        self.status_changed.emit("正在取消...")
+
+    def _check_cancelled(self):
+        """检查是否已取消"""
+        if self._cancelled:
+            raise InterruptedError("用户取消了网格分析")
+
+    def _emit_progress(self, step_name, step_number):
+        """发射进度信号"""
+        self._current_step = step_name
+        progress_percent = int((step_number / self._total_steps) * 100)
+        self.progress.emit(step_name)
+        self.progress_percent.emit(progress_percent)
+        self.status_changed.emit(f"步骤 {step_number}/{self._total_steps}: {step_name}")
 
     def run(self):
+        """执行网格分析"""
         try:
+            # 导入必要的模块
             from src.core.grid import create_grid, compute_grid_density
-            self.progress.emit("创建网格...")
+            
+            # 步骤 1: 参数验证
+            self._emit_progress("验证参数...", 1)
+            self._check_cancelled()
+            self._validate_parameters()
+            
+            # 步骤 2: 创建网格
+            self._emit_progress("创建网格...", 2)
+            self._check_cancelled()
+            
             grid_cells = create_grid(
                 self.ds_Sv,
                 surface_depth_m=self.surface_depth_m,
@@ -222,12 +269,123 @@ class GridWorker(QThread):
                 horizontal_interval=self.grid_config["horizontal_interval"],
                 method=self.grid_config["horizontal_method"],
             )
-            self.progress.emit("计算网格统计...")
+            
+            # 验证网格创建结果
+            if not grid_cells:
+                raise ValueError("网格创建失败：未生成任何网格单元")
+            
+            self.progress.emit(f"创建了 {len(grid_cells)} 个网格单元")
+            
+            # 步骤 3: 计算网格统计
+            self._emit_progress("计算网格统计...", 3)
+            self._check_cancelled()
+            
+            # 准备配置
             config = {"density": self.density_config}
+            
+            # 添加选中的统计指标
+            if "selected_metrics" in self.grid_config:
+                config["selected_metrics"] = self.grid_config["selected_metrics"]
+            
+            # 添加输出格式
+            if "output_format" in self.grid_config:
+                config["output_format"] = self.grid_config["output_format"]
+            
+            # 添加元数据选项
+            if "include_metadata" in self.grid_config:
+                config["include_metadata"] = self.grid_config["include_metadata"]
+            
             df = compute_grid_density(self.ds_Sv, grid_cells, config)
+            
+            # 步骤 4: 完成
+            self._emit_progress("完成", 4)
+            self._check_cancelled()
+            
+            # 验证结果
+            if df is None:
+                raise ValueError("网格统计计算失败：返回了空结果")
+            
+            if df.empty:
+                logger.warning("网格统计结果为空，可能是因为数据不足或参数设置不当")
+            
             self.finished.emit(df)
+            
+        except InterruptedError as e:
+            # 用户取消
+            logger.info(f"网格分析被取消: {str(e)}")
+            self.error.emit(f"网格分析已取消: {str(e)}")
+            
+        except ImportError as e:
+            # 导入错误
+            error_msg = f"缺少必要的模块: {str(e)}\n请检查 echopype 和相关依赖是否正确安装"
+            logger.error(error_msg)
+            self.error.emit(error_msg)
+            
+        except KeyError as e:
+            # 配置键错误
+            error_msg = f"配置参数错误: 缺少必要的参数 {str(e)}\n请检查网格配置是否完整"
+            logger.error(error_msg)
+            self.error.emit(error_msg)
+            
+        except ValueError as e:
+            # 值错误
+            error_msg = f"参数值错误: {str(e)}\n请检查输入参数是否有效"
+            logger.error(error_msg)
+            self.error.emit(error_msg)
+            
+        except MemoryError as e:
+            # 内存错误
+            error_msg = "内存不足：请尝试减小网格间隔或使用更小的数据集"
+            logger.error(error_msg)
+            self.error.emit(error_msg)
+            
         except Exception as e:
-            self.error.emit(traceback.format_exc())
+            # 其他错误
+            error_msg = f"网格分析过程中发生错误: {str(e)}\n\n详细错误信息:\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            self.error.emit(error_msg)
+
+    def _validate_parameters(self):
+        """验证参数有效性"""
+        # 验证数据集
+        if self.ds_Sv is None:
+            raise ValueError("输入数据集为空")
+        
+        # 验证表面深度
+        if self.surface_depth_m < 0:
+            raise ValueError("表面深度不能为负数")
+        
+        # 验证网格配置
+        if "vertical_interval_m" not in self.grid_config:
+            raise KeyError("缺少垂直间隔参数 (vertical_interval_m)")
+        
+        if "horizontal_interval" not in self.grid_config:
+            raise KeyError("缺少水平间隔参数 (horizontal_interval)")
+        
+        if "horizontal_method" not in self.grid_config:
+            raise KeyError("缺少水平分段方法参数 (horizontal_method)")
+        
+        # 验证垂直间隔
+        v_interval = self.grid_config["vertical_interval_m"]
+        if v_interval <= 0:
+            raise ValueError("垂直间隔必须大于0")
+        
+        # 验证水平间隔
+        h_interval = self.grid_config["horizontal_interval"]
+        if h_interval <= 0:
+            raise ValueError("水平间隔必须大于0")
+        
+        # 验证水平分段方法
+        h_method = self.grid_config["horizontal_method"]
+        if h_method not in ["ping", "distance"]:
+            raise ValueError("水平分段方法必须是 'ping' 或 'distance'")
+        
+        # 验证密度配置
+        if "ts_default" not in self.density_config:
+            raise KeyError("缺少默认目标强度参数 (ts_default)")
+        
+        if "avg_weight_kg" not in self.density_config:
+            raise KeyError("缺少平均体重参数 (avg_weight_kg)")
 
 
 class BatchProcessWorker(QThread):
@@ -311,3 +469,83 @@ class BatchProcessWorker(QThread):
 
         self.all_finished.emit(success_count, error_count)
         self.progress.emit(f"批量处理完成: 成功 {success_count}, 失败 {error_count}")
+
+
+class QualityCheckWorker(QThread):
+    """数据质量检查工作线程
+
+    信号：
+    - finished(dict): 质量检查结果
+    - error(str): 错误信息
+    - progress(str): 进度信息
+    """
+    finished = Signal(dict)
+    error = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, ds_Sv, bottom=None):
+        super().__init__()
+        self.ds_Sv = ds_Sv
+        self.bottom = bottom
+
+    def run(self):
+        try:
+            from src.core.quality import check_sv_quality, check_bottom_line
+
+            self.progress.emit("正在检查 Sv 数据质量...")
+            sv_result = check_sv_quality(self.ds_Sv)
+
+            bl_result = None
+            if self.bottom is not None:
+                self.progress.emit("正在检查底线质量...")
+                n_samples = self.ds_Sv.sizes.get("range_sample", 0)
+                bl_result = check_bottom_line(self.bottom, n_samples)
+
+            self.finished.emit({"sv": sv_result, "bottom": bl_result})
+
+        except Exception as e:
+            self.error.emit(traceback.format_exc())
+
+
+class MultifreqAnalysisWorker(QThread):
+    """多频率分析工作线程
+
+    信号：
+    - finished(object): 分析结果 (channel_summary, freq_comparison)
+    - error(str): 错误信息
+    - progress(str): 进度信息
+    """
+    finished = Signal(object)
+    error = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, ds_Sv, config, channels=None):
+        super().__init__()
+        self.ds_Sv = ds_Sv
+        self.config = config
+        self.channels = channels
+
+    def run(self):
+        try:
+            from src.core.multifreq import get_channel_summary, compare_frequencies, list_channels
+
+            self.progress.emit("正在分析通道信息...")
+            channel_summary = get_channel_summary(self.ds_Sv)
+
+            channels = list_channels(self.ds_Sv)
+            freq_comparison = None
+            if len(channels) >= 2:
+                self.progress.emit("正在进行多频率对比...")
+                freq_comparison = compare_frequencies(self.ds_Sv, self.config, self.channels)
+            else:
+                self.progress.emit("仅单通道，跳过频率对比")
+
+            self.finished.emit({
+                "channel_summary": channel_summary,
+                "freq_comparison": freq_comparison,
+                "channels": channels,
+            })
+
+        except Exception as e:
+            self.error.emit(traceback.format_exc())
+

@@ -1,18 +1,21 @@
-"""右侧属性面板：文件信息 + 处理参数 + 统计结果
+﻿"""右侧属性面板：文件信息 + 处理参数 + 统计结果
 
 设计原则：
 - 参数分组清晰，一屏可见
 - 数值输入紧凑，标签左对齐
 - 结果区域突出显示
+- 网格配置增强：统计指标选择、输出格式、输入验证
 """
 
 from PySide6.QtWidgets import (
     QTabWidget, QWidget, QVBoxLayout, QFormLayout,
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
     QTableWidget, QTableWidgetItem, QGroupBox, QScrollArea,
-    QHBoxLayout, QFrame, QComboBox,
+    QHBoxLayout, QFrame, QComboBox, QCheckBox, QLineEdit,
+    QToolTip, QMessageBox, QGridLayout,
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QTimer
+from PySide6.QtGui import QFont, QColor, QPalette
 
 
 class _InfoRow(QWidget):
@@ -35,7 +38,13 @@ class _InfoRow(QWidget):
         layout.addWidget(self.lbl_value, 1)
 
     def set_value(self, value: str):
+        """设置值并更新样式"""
         self.lbl_value.setText(value)
+        # 如果值为空或默认值，使用灰色
+        if value in ["--", "无数据", ""]:
+            self.lbl_value.setStyleSheet("color: #a0aec0; font-size: 11px;")
+        else:
+            self.lbl_value.setStyleSheet("color: #2c3e50; font-size: 11px;")
 
 
 class FileInfoTab(QWidget):
@@ -85,6 +94,12 @@ class ProcessingTab(QWidget):
     compute_density_clicked = Signal()
     grid_clicked = Signal()
     stats_clicked = Signal()
+    quality_check_clicked = Signal()
+    multifreq_clicked = Signal()
+    # ??????
+    detect_bottom_clicked = Signal()
+    draw_bottom_clicked = Signal()
+    update_bottom_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -105,13 +120,18 @@ class ProcessingTab(QWidget):
         self.spin_ping_num = QSpinBox()
         self.spin_ping_num.setRange(1, 100)
         self.spin_ping_num.setValue(5)
+        self.spin_ping_num.setToolTip("用于计算背景噪声的 ping 数量\n推荐值: 5-20")
+
         self.spin_range_num = QSpinBox()
         self.spin_range_num.setRange(1, 100)
         self.spin_range_num.setValue(10)
+        self.spin_range_num.setToolTip("用于计算背景噪声的 range 样本数\n推荐值: 10-50")
+
         self.spin_snr = QDoubleSpinBox()
         self.spin_snr.setRange(0, 30)
         self.spin_snr.setValue(3.0)
         self.spin_snr.setSuffix(" dB")
+        self.spin_snr.setToolTip("信噪比阈值\n低于此阈值的信号将被去除\n推荐值: 2-5 dB")
 
         noise_layout.addRow("Ping 数:", self.spin_ping_num)
         noise_layout.addRow("Range 样本:", self.spin_range_num)
@@ -133,7 +153,7 @@ class ProcessingTab(QWidget):
         self.spin_surface.setRange(0, 50)
         self.spin_surface.setValue(2.0)
         self.spin_surface.setSuffix(" m")
-        self.spin_surface.setToolTip("水面以下多少米绘制表线。分析时仅在表线~底线之间计算。")
+        self.spin_surface.setToolTip("水面以下多少米绘制表线。分析时仅在表线~底线之间计算。\n推荐值: 1-10 米")
         surface_layout.addRow("表线深度:", self.spin_surface)
         surface_group.setLayout(surface_layout)
         layout.addWidget(surface_group)
@@ -152,8 +172,30 @@ class ProcessingTab(QWidget):
         self.spin_bottom_thr.setRange(-70, -20)
         self.spin_bottom_thr.setValue(-40.0)
         self.spin_bottom_thr.setSuffix(" dB")
-        self.spin_bottom_thr.setToolTip("Sv 阈值：低于此值视为底部。推荐 -50 ~ -30 dB")
+        self.spin_bottom_thr.setToolTip("Sv 阈值：低于此值视为底部\n推荐范围: -50 ~ -30 dB\n过大值可能误判，过小值可能漏检")
         bottom_layout.addRow("Sv 阈值:", self.spin_bottom_thr)
+        # 底部检测按钮
+        self.btn_detect_bottom = QPushButton("检测底部")
+        self.btn_detect_bottom.setProperty("cssClass", "primary")
+        self.btn_detect_bottom.setToolTip("点击开始底部检测\n需要先完成噪声去除")
+
+        self.btn_draw_bottom = QPushButton("绘制底线")
+        self.btn_draw_bottom.setToolTip("切换到底线绘制模式\n手动绘制或修改底线")
+
+        self.btn_update_bottom = QPushButton("更新底线")
+        self.btn_update_bottom.setToolTip("保存当前编辑的底线\n更新底线数据")
+
+        # 按钮布局
+        btn_layout = QHBoxLayout()
+        btn_layout.addWidget(self.btn_detect_bottom)
+        btn_layout.addWidget(self.btn_draw_bottom)
+        btn_layout.addWidget(self.btn_update_bottom)
+        bottom_layout.addRow(btn_layout)
+
+        self.btn_detect_bottom.clicked.connect(self.detect_bottom_clicked)
+        self.btn_draw_bottom.clicked.connect(self.draw_bottom_clicked)
+        self.btn_update_bottom.clicked.connect(self.update_bottom_clicked)
+
         bottom_group.setLayout(bottom_layout)
         layout.addWidget(bottom_group)
 
@@ -167,8 +209,11 @@ class ProcessingTab(QWidget):
         self.spin_school_thr.setRange(-100, 0)
         self.spin_school_thr.setValue(-55.0)
         self.spin_school_thr.setSuffix(" dB")
+        self.spin_school_thr.setToolTip("鱼群检测的 Sv 阈值\n高于此值的区域将被视为鱼群\n推荐范围: -60 ~ -45 dB")
+
         self.btn_detect_schools = QPushButton("检测鱼群")
         self.btn_detect_schools.setProperty("cssClass", "primary")
+        self.btn_detect_schools.setToolTip("点击开始鱼群检测\n需要先完成噪声去除和底部检测")
 
         school_layout.addRow("Sv 阈值:", self.spin_school_thr)
         school_layout.addRow(self.btn_detect_schools)
@@ -187,13 +232,17 @@ class ProcessingTab(QWidget):
         self.spin_ts.setRange(-70, -20)
         self.spin_ts.setValue(-30.0)
         self.spin_ts.setSuffix(" dB")
+        self.spin_ts.setToolTip("目标强度 (Target Strength) 默认值\n用于将 Sv 转换为密度\n推荐值: -30 ~ -25 dB")
+
         self.spin_avg_weight = QDoubleSpinBox()
         self.spin_avg_weight.setRange(0.001, 100.0)
         self.spin_avg_weight.setValue(0.5)
         self.spin_avg_weight.setSuffix(" kg")
-        self.spin_avg_weight.setToolTip("单尾平均体重，用于计算生物量 (kg/ha)")
+        self.spin_avg_weight.setToolTip("单尾平均体重，用于计算生物量 (kg/ha)\n推荐值: 0.1-10 kg")
+
         self.btn_compute_density = QPushButton("计算密度")
         self.btn_compute_density.setProperty("cssClass", "primary")
+        self.btn_compute_density.setToolTip("点击开始密度计算\n需要先完成鱼群检测")
 
         density_layout.addRow("TS 默认值:", self.spin_ts)
         density_layout.addRow("平均体重:", self.spin_avg_weight)
@@ -203,40 +252,152 @@ class ProcessingTab(QWidget):
 
         self.btn_compute_density.clicked.connect(self.compute_density_clicked)
 
-        # ── 网格分析 ──
+        # ── 网格分析（增强版）──
         grid_group = QGroupBox("网格分析")
-        grid_layout = QFormLayout()
-        grid_layout.setSpacing(6)
+        grid_layout = QVBoxLayout()
+        grid_layout.setSpacing(8)
         grid_layout.setContentsMargins(8, 12, 8, 8)
 
-        self.combo_grid_v = QComboBox()
-        self.combo_grid_v.addItems(["1m", "2m", "5m"])
-        self.combo_grid_v.setCurrentIndex(1)  # 默认 2m
-        self.combo_grid_v.setToolTip("垂直间隔")
+        # 网格参数网格布局
+        grid_params_layout = QGridLayout()
+        grid_params_layout.setSpacing(6)
 
+        # 垂直间隔
+        lbl_v_interval = QLabel("垂直间隔:")
+        lbl_v_interval.setToolTip("深度方向的网格划分间隔\n间隔越小，分辨率越高，但计算量越大")
+        self.combo_grid_v = QComboBox()
+        self.combo_grid_v.addItems(["0.5m", "1m", "2m", "5m", "10m"])
+        self.combo_grid_v.setCurrentIndex(2)  # 默认 2m
+        self.combo_grid_v.setToolTip("垂直间隔选项\n推荐值: 1-5m")
+        grid_params_layout.addWidget(lbl_v_interval, 0, 0)
+        grid_params_layout.addWidget(self.combo_grid_v, 0, 1)
+
+        # 水平间隔
+        lbl_h_interval = QLabel("水平间隔:")
+        lbl_h_interval.setToolTip("水平方向的网格划分间隔\n间隔越小，分辨率越高，但计算量越大")
         self.spin_grid_h = QSpinBox()
         self.spin_grid_h.setRange(1, 10000)
         self.spin_grid_h.setValue(100)
-        self.spin_grid_h.setToolTip("水平间隔（ping 数）")
+        self.spin_grid_h.setToolTip("水平间隔（ping 数或距离）\n推荐值: 50-500")
+        grid_params_layout.addWidget(lbl_h_interval, 1, 0)
+        grid_params_layout.addWidget(self.spin_grid_h, 1, 1)
 
+        # 水平分段方式
+        lbl_h_method = QLabel("分段方式:")
+        lbl_h_method.setToolTip("水平方向的分段方式\nPing: 按固定 ping 数分段\n距离: 按 GPS 航行距离分段")
         self.combo_grid_h_method = QComboBox()
         self.combo_grid_h_method.addItems(["Ping", "距离"])
-        self.combo_grid_h_method.setToolTip("水平分段方式")
+        self.combo_grid_h_method.setToolTip("水平分段方式\nPing: 按固定 ping 数分段\n距离: 按 GPS 航行距离分段")
+        grid_params_layout.addWidget(lbl_h_method, 2, 0)
+        grid_params_layout.addWidget(self.combo_grid_h_method, 2, 1)
 
+        # 距离单位（仅当选择距离方式时启用）
+        lbl_distance_unit = QLabel("距离单位:")
+        lbl_distance_unit.setToolTip("距离分段时的单位")
+        self.combo_distance_unit = QComboBox()
+        self.combo_distance_unit.addItems(["米 (m)", "公里 (km)", "海里 (nm)"])
+        self.combo_distance_unit.setToolTip("距离分段时的单位\n米: 米\n公里: 千米\n海里: 海里")
+        self.combo_distance_unit.setEnabled(False)
+        grid_params_layout.addWidget(lbl_distance_unit, 3, 0)
+        grid_params_layout.addWidget(self.combo_distance_unit, 3, 1)
+
+        grid_layout.addLayout(grid_params_layout)
+
+        # 统计指标选择
+        stats_group = QGroupBox("统计指标")
+        stats_layout = QVBoxLayout()
+        stats_layout.setSpacing(4)
+        stats_layout.setContentsMargins(8, 12, 8, 8)
+
+        self.chk_mean_sv = QCheckBox("平均 Sv")
+        self.chk_mean_sv.setChecked(True)
+        self.chk_mean_sv.setToolTip("计算网格内的平均体积反向散射强度")
+
+        self.chk_abc = QCheckBox("ABC (面积背散射系数)")
+        self.chk_abc.setChecked(True)
+        self.chk_abc.setToolTip("计算面积背散射系数")
+
+        self.chk_density = QCheckBox("密度 (ind/ha)")
+        self.chk_density.setChecked(True)
+        self.chk_density.setToolTip("计算每公顷个体密度")
+
+        self.chk_biomass = QCheckBox("生物量 (kg/ha)")
+        self.chk_biomass.setChecked(True)
+        self.chk_biomass.setToolTip("计算每公顷生物量")
+
+        self.chk_valid_pixels = QCheckBox("有效像素数")
+        self.chk_valid_pixels.setChecked(True)
+        self.chk_valid_pixels.setToolTip("计算网格内的有效像素数量")
+
+        stats_layout.addWidget(self.chk_mean_sv)
+        stats_layout.addWidget(self.chk_abc)
+        stats_layout.addWidget(self.chk_density)
+        stats_layout.addWidget(self.chk_biomass)
+        stats_layout.addWidget(self.chk_valid_pixels)
+        stats_group.setLayout(stats_layout)
+        grid_layout.addWidget(stats_group)
+
+        # 输出格式选择
+        output_group = QGroupBox("输出设置")
+        output_layout = QFormLayout()
+        output_layout.setSpacing(6)
+        output_layout.setContentsMargins(8, 12, 8, 8)
+
+        self.combo_output_format = QComboBox()
+        self.combo_output_format.addItems(["DataFrame", "CSV", "Excel", "JSON"])
+        self.combo_output_format.setToolTip("网格统计结果的输出格式\nDataFrame: 内存中的数据框\nCSV: 逗号分隔值文件\nExcel: Excel 文件\nJSON: JSON 格式")
+
+        self.chk_include_metadata = QCheckBox("包含元数据")
+        self.chk_include_metadata.setChecked(True)
+        self.chk_include_metadata.setToolTip("在输出中包含网格配置信息和统计参数")
+
+        self.chk_include_summary = QCheckBox("包含摘要统计")
+        self.chk_include_summary.setChecked(True)
+        self.chk_include_summary.setToolTip("在输出中包含整体摘要统计信息")
+
+        output_layout.addRow("输出格式:", self.combo_output_format)
+        output_layout.addRow(self.chk_include_metadata)
+        output_layout.addRow(self.chk_include_summary)
+        output_group.setLayout(output_layout)
+        grid_layout.addWidget(output_group)
+
+        # 网格分析按钮
         self.btn_grid = QPushButton("网格分析")
-        self.btn_grid.clicked.connect(self.grid_clicked)
+        self.btn_grid.setProperty("cssClass", "primary")
+        self.btn_grid.setToolTip("点击开始网格分析\n需要先完成噪声去除和底部检测")
+        self.btn_grid.clicked.connect(self._on_grid_clicked)
 
-        grid_layout.addRow("垂直间隔:", self.combo_grid_v)
-        grid_layout.addRow("水平间隔:", self.spin_grid_h)
-        grid_layout.addRow("分段方式:", self.combo_grid_h_method)
-        grid_layout.addRow(self.btn_grid)
+        # 统计结果按钮
+        self.btn_stats = QPushButton("统计结果")
+        self.btn_stats.setToolTip("查看详细的统计结果\n包括网格统计、鱼群统计等")
+
+        # 按钮布局
+        btn_layout = QHBoxLayout()
+        btn_layout.addWidget(self.btn_grid)
+        btn_layout.addWidget(self.btn_stats)
+        grid_layout.addLayout(btn_layout)
+
         grid_group.setLayout(grid_layout)
         layout.addWidget(grid_group)
 
-        # ── 统计按钮 ──
-        self.btn_stats = QPushButton("统计结果")
+        # 连接信号
+        self.combo_grid_h_method.currentIndexChanged.connect(self._on_h_method_changed)
         self.btn_stats.clicked.connect(self.stats_clicked)
-        layout.addWidget(self.btn_stats)
+
+        # ── 质量检查 ──
+        self.btn_quality = QPushButton("🔍 数据质量检查")
+        self.btn_quality.setToolTip("检查 Sv 数据和底线的质量\n验证数据完整性和合理性")
+        self.btn_quality.clicked.connect(self.quality_check_clicked)
+
+        # ── 多频分析 ──
+        self.btn_multifreq = QPushButton("📊 多频分析")
+        self.btn_multifreq.setToolTip("多频率通道信息和对比分析\n需要数据包含多个通道")
+        self.btn_multifreq.clicked.connect(self.multifreq_clicked)
+
+        btn_layout2 = QHBoxLayout()
+        btn_layout2.addWidget(self.btn_quality)
+        btn_layout2.addWidget(self.btn_multifreq)
+        layout.addLayout(btn_layout2)
 
         layout.addStretch()
         scroll.setWidget(container)
@@ -244,6 +405,39 @@ class ProcessingTab(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(scroll)
+
+    def _on_h_method_changed(self, index):
+        """水平分段方式改变时更新距离单位的启用状态"""
+        self.combo_distance_unit.setEnabled(index == 1)
+
+    def _on_grid_clicked(self):
+        """网格分析按钮点击时进行输入验证"""
+        # 验证垂直间隔
+        v_text = self.combo_grid_v.currentText()
+        try:
+            v_interval = float(v_text.replace("m", ""))
+            if v_interval <= 0:
+                QMessageBox.warning(self, "输入错误", "垂直间隔必须大于0")
+                return
+        except ValueError:
+            QMessageBox.warning(self, "输入错误", "垂直间隔格式错误")
+            return
+
+        # 验证水平间隔
+        h_interval = self.spin_grid_h.value()
+        if h_interval <= 0:
+            QMessageBox.warning(self, "输入错误", "水平间隔必须大于0")
+            return
+
+        # 验证统计指标至少选择一个
+        if not (self.chk_mean_sv.isChecked() or self.chk_abc.isChecked() or 
+                self.chk_density.isChecked() or self.chk_biomass.isChecked() or 
+                self.chk_valid_pixels.isChecked()):
+            QMessageBox.warning(self, "输入错误", "请至少选择一个统计指标")
+            return
+
+        # 验证通过，发射信号
+        self.grid_clicked.emit()
 
     def _emit_noise_params(self):
         self.noise_params_changed.emit({
@@ -272,13 +466,33 @@ class ProcessingTab(QWidget):
         }
 
     def get_grid_config(self) -> dict:
+        """获取网格配置（增强版）"""
         v_text = self.combo_grid_v.currentText()
         v_interval = float(v_text.replace("m", ""))
         h_method = "ping" if self.combo_grid_h_method.currentIndex() == 0 else "distance"
+        
+        # 获取选中的统计指标
+        selected_metrics = []
+        if self.chk_mean_sv.isChecked():
+            selected_metrics.append("mean_sv")
+        if self.chk_abc.isChecked():
+            selected_metrics.append("abc")
+        if self.chk_density.isChecked():
+            selected_metrics.append("density")
+        if self.chk_biomass.isChecked():
+            selected_metrics.append("biomass")
+        if self.chk_valid_pixels.isChecked():
+            selected_metrics.append("valid_pixels")
+        
         return {
             "vertical_interval_m": v_interval,
             "horizontal_interval": float(self.spin_grid_h.value()),
             "horizontal_method": h_method,
+            "distance_unit": self.combo_distance_unit.currentText() if h_method == "distance" else None,
+            "selected_metrics": selected_metrics,
+            "output_format": self.combo_output_format.currentText(),
+            "include_metadata": self.chk_include_metadata.isChecked(),
+            "include_summary": self.chk_include_summary.isChecked(),
         }
 
     def load_from_config(self, config: dict):
@@ -392,6 +606,12 @@ class PropertyPanel(QTabWidget):
     compute_density_clicked = Signal()
     grid_clicked = Signal()
     stats_clicked = Signal()
+    quality_check_clicked = Signal()
+    multifreq_clicked = Signal()
+    # ??????
+    detect_bottom_clicked = Signal()
+    draw_bottom_clicked = Signal()
+    update_bottom_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -411,3 +631,8 @@ class PropertyPanel(QTabWidget):
         self.processing.compute_density_clicked.connect(self.compute_density_clicked)
         self.processing.grid_clicked.connect(self.grid_clicked)
         self.processing.stats_clicked.connect(self.stats_clicked)
+        self.processing.detect_bottom_clicked.connect(self.detect_bottom_clicked)
+        self.processing.draw_bottom_clicked.connect(self.draw_bottom_clicked)
+        self.processing.update_bottom_clicked.connect(self.update_bottom_clicked)
+        self.processing.quality_check_clicked.connect(self.quality_check_clicked)
+        self.processing.multifreq_clicked.connect(self.multifreq_clicked)

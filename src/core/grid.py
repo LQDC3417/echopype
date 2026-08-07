@@ -1,4 +1,4 @@
-"""网格化分析模块：垂直分层 × 水平分段的网格统计
+﻿"""网格化分析模块：垂直分层 × 水平分段的网格统计
 
 职责：
 - 垂直方向：以表线为起点，按 1m/2m/5m 间隔划分深度层
@@ -7,6 +7,7 @@
 """
 
 import logging
+from typing import Callable, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -19,8 +20,15 @@ logger = logging.getLogger("fish_acoustics")
 
 # ── 垂直分层 ──────────────────────────────────────────────
 
-def _split_vertical(ds_Sv: xr.Dataset, surface_depth_m: float, interval_m: float) -> list[tuple[float, float]]:
-    """从表线深度开始，按 interval_m 划分深度层。
+def _split_vertical(
+    ds_Sv: xr.Dataset,
+    surface_depth_m: float,
+    interval_m: float,
+    mode: str = "linear",
+    depth_bins: Optional[list[float]] = None,
+    max_depth: Optional[float] = None,
+) -> list[tuple[float, float]]:
+    """从表线深度开始，按指定模式划分深度层。
 
     Parameters
     ----------
@@ -29,28 +37,76 @@ def _split_vertical(ds_Sv: xr.Dataset, surface_depth_m: float, interval_m: float
         表线深度（米）
     interval_m : float
         垂直间隔（米）
+    mode : str, optional
+        分层模式: "linear"（等间隔）、"logarithmic"（对数间隔）、"custom"（自定义边界）
+        默认为 "linear"
+    depth_bins : list[float], optional
+        自定义深度边界列表，当 mode="custom" 时使用
+    max_depth : float, optional
+        最大深度限制，超过此深度的数据将被忽略
 
     Returns
     -------
     list[tuple[float, float]]
         [(d_lo, d_hi), ...] 深度层列表
     """
+    # 参数验证
+    if interval_m <= 0:
+        raise ValueError(f"interval_m 必须为正数，当前值: {interval_m}")
+    
     depth = get_vertical_coords(ds_Sv)
     d_max = float(np.nanmax(depth))
-
-    # 从表线开始，向上取整到 interval_m 的倍数
-    d_start = surface_depth_m
-    bins = np.arange(d_start, d_max + interval_m, interval_m)
-
+    
+    # 应用最大深度限制
+    if max_depth is not None and max_depth > 0:
+        d_max = min(d_max, max_depth)
+    
+    # 根据模式生成深度边界
+    if mode == "custom":
+        if depth_bins is None or len(depth_bins) < 2:
+            raise ValueError("自定义模式需要至少提供2个深度边界")
+        bins = np.array(depth_bins)
+        # 确保边界有序
+        bins = np.sort(bins)
+        # 确保包含最大深度
+        if bins[-1] < d_max:
+            bins = np.append(bins, d_max)
+    elif mode == "logarithmic":
+        # 对数间隔：从表线开始，按对数尺度分层
+        # 确保起始深度大于0
+        if surface_depth_m <= 0:
+            surface_depth_m = 0.1
+        # 使用对数间隔，从 log10(surface_depth_m) 到 log10(d_max)
+        log_start = np.log10(surface_depth_m)
+        log_end = np.log10(d_max)
+        # 每层在对数尺度上间隔相等
+        n_layers = max(1, int((log_end - log_start) / np.log10(interval_m + 1)))
+        bins = np.logspace(log_start, log_end, n_layers + 1)
+    else:  # linear
+        # 线性间隔（原有逻辑）
+        d_start = surface_depth_m
+        bins = np.arange(d_start, d_max + interval_m, interval_m)
+    
+    # 生成深度层
     layers = []
     for i in range(len(bins) - 1):
         d_lo = float(bins[i])
         d_hi = float(bins[i + 1])
+        
+        # 确保深度层有效（d_hi > d_lo）
+        if d_hi <= d_lo:
+            continue
+        
         # 检查该深度层是否有数据
         if np.any((depth >= d_lo) & (depth < d_hi)):
             layers.append((d_lo, d_hi))
-
-    logger.info(f"垂直分层完成: {len(layers)} 层, 起点={surface_depth_m}m, 间隔={interval_m}m")
+    
+    # 如果没有任何层，添加一个默认层
+    if not layers:
+        layers.append((surface_depth_m, d_max))
+        logger.warning(f"未找到有效深度层，添加默认层: {surface_depth_m}m - {d_max}m")
+    
+    logger.info(f"垂直分层完成: {len(layers)} 层, 起点={surface_depth_m}m, 间隔={interval_m}m, 模式={mode}")
     return layers
 
 
@@ -70,12 +126,18 @@ def _split_by_ping(ds_Sv: xr.Dataset, pings_per_segment: int) -> list[tuple[int,
     list[tuple[int, int]]
         [(ping_start, ping_end), ...]
     """
+    # 参数验证
+    if pings_per_segment <= 0:
+        raise ValueError(f"pings_per_segment 必须为正整数，当前值: {pings_per_segment}")
+    
     n_pings = ds_Sv.sizes["ping_time"]
-    segments = []
-    for i in range(0, n_pings, pings_per_segment):
-        end = min(i + pings_per_segment, n_pings)
-        segments.append((i, end))
-
+    
+    # 使用列表推导式优化性能
+    segments = [
+        (i, min(i + pings_per_segment, n_pings))
+        for i in range(0, n_pings, pings_per_segment)
+    ]
+    
     logger.info(f"水平分段完成: {len(segments)} 段, 每段 {pings_per_segment} pings")
     return segments
 
@@ -94,25 +156,41 @@ def _split_by_distance(ds_Sv: xr.Dataset, distance_m: float) -> list[tuple[int, 
     list[tuple[int, int]]
         [(ping_start, ping_end), ...]
     """
+    # 参数验证
+    if distance_m <= 0:
+        raise ValueError(f"distance_m 必须为正数，当前值: {distance_m}")
+    
     cumulative_dist = _get_cumulative_distance(ds_Sv)
     if cumulative_dist is None:
         logger.warning("无 GPS 数据，回退到按 ping 数分段（每段 100 ping）")
         return _split_by_ping(ds_Sv, 100)
 
     n_pings = len(cumulative_dist)
+    
+    # 使用向量化操作优化性能
+    # 计算每个点到起始点的距离
+    dist_from_start = cumulative_dist - cumulative_dist[0]
+    
+    # 计算每个点应该属于哪个分段
+    segment_indices = np.floor(dist_from_start / distance_m).astype(int)
+    
+    # 获取唯一分段索引
+    unique_segments = np.unique(segment_indices)
+    
     segments = []
-    seg_start_idx = 0
-
-    for i in range(1, n_pings):
-        if cumulative_dist[i] - cumulative_dist[seg_start_idx] >= distance_m:
-            segments.append((seg_start_idx, i))
-            seg_start_idx = i
-
-    # 最后一段
-    if seg_start_idx < n_pings:
-        segments.append((seg_start_idx, n_pings))
-
-    total_dist = cumulative_dist[-1]
+    for seg_idx in unique_segments:
+        # 找到该分段的所有 ping 索引
+        ping_indices = np.where(segment_indices == seg_idx)[0]
+        if len(ping_indices) > 0:
+            start_idx = ping_indices[0]
+            end_idx = ping_indices[-1] + 1  # 包含最后一个 ping
+            segments.append((start_idx, end_idx))
+    
+    # 确保最后一个分段覆盖到末尾
+    if segments and segments[-1][1] < n_pings:
+        segments.append((segments[-1][1], n_pings))
+    
+    total_dist = cumulative_dist[-1] - cumulative_dist[0]
     logger.info(f"水平分段完成: {len(segments)} 段, 每段 {distance_m}m, 总距离 {total_dist:.0f}m")
     return segments
 
@@ -138,12 +216,25 @@ def _get_cumulative_distance(ds_Sv: xr.Dataset) -> np.ndarray | None:
         return None
 
     # 向量化计算相邻点距离
-    distances = np.zeros(len(lat))
+    # 创建掩码，只对有效点计算距离
     mask = np.isfinite(lat) & np.isfinite(lon)
-    for i in range(1, len(lat)):
-        if mask[i] and mask[i-1]:
-            distances[i] = _haversine(lat[i-1], lon[i-1], lat[i], lon[i])
-
+    
+    # 初始化距离数组
+    distances = np.zeros(len(lat))
+    
+    # 向量化计算相邻点距离
+    # 找到有效点的索引
+    valid_indices = np.where(mask)[0]
+    
+    if len(valid_indices) < 2:
+        return None
+    
+    # 计算有效点之间的距离
+    for i in range(1, len(valid_indices)):
+        idx_prev = valid_indices[i-1]
+        idx_curr = valid_indices[i]
+        distances[idx_curr] = _haversine(lat[idx_prev], lon[idx_prev], lat[idx_curr], lon[idx_curr])
+    
     return np.cumsum(distances)
 
 
@@ -205,6 +296,9 @@ def create_grid(
     vertical_interval_m: float,
     horizontal_interval: float,
     method: str = "ping",
+    vertical_mode: str = "linear",
+    depth_bins: Optional[list[float]] = None,
+    max_depth: Optional[float] = None,
 ) -> list[dict]:
     """创建网格划分。
 
@@ -220,13 +314,22 @@ def create_grid(
     method : str
         "ping" — 按 ping 数
         "distance" — 按 GPS 航行距离
+    vertical_mode : str, optional
+        垂直分层模式: "linear"、"logarithmic"、"custom"
+    depth_bins : list[float], optional
+        自定义深度边界列表，当 vertical_mode="custom" 时使用
+    max_depth : float, optional
+        最大深度限制
 
     Returns
     -------
     list[dict]
         网格单元列表，每个包含 ping_start, ping_end, depth_lo, depth_hi
     """
-    vertical_layers = _split_vertical(ds_Sv, surface_depth_m, vertical_interval_m)
+    vertical_layers = _split_vertical(
+        ds_Sv, surface_depth_m, vertical_interval_m,
+        mode=vertical_mode, depth_bins=depth_bins, max_depth=max_depth
+    )
 
     if method == "ping":
         horizontal_segments = _split_by_ping(ds_Sv, int(horizontal_interval))
@@ -254,6 +357,7 @@ def create_grid(
 def compute_grid_stats(
     ds_Sv: xr.Dataset,
     grid_cells: list[dict],
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> pd.DataFrame:
     """计算每个网格单元的统计指标。
 
@@ -262,13 +366,19 @@ def compute_grid_stats(
     ds_Sv : xr.Dataset
     grid_cells : list[dict]
         由 create_grid 返回的网格单元列表
+    progress_callback : callable, optional
+        进度回调函数，接受 (current, total) 参数
 
     Returns
     -------
     pd.DataFrame
         每行一个网格单元，包含 cell_id, ping_start, ping_end, depth_lo, depth_hi,
-        mean_sv, median_sv, std_sv, n_valid, abc
+        mean_sv, median_sv, std_sv, n_valid, abc, 以及额外的统计指标
     """
+    if not grid_cells:
+        logger.warning("没有网格单元需要处理")
+        return pd.DataFrame()
+    
     Sv = get_sv_array(ds_Sv)  # (n_pings, n_samples)
     depth = get_vertical_coords(ds_Sv)  # (n_samples,)
     ping_time = ds_Sv["ping_time"].values
@@ -286,6 +396,8 @@ def compute_grid_stats(
         dr = np.ones_like(Sv)
 
     records = []
+    total_cells = len(grid_cells)
+    
     for i, cell in enumerate(grid_cells):
         p_start = cell["ping_start"]
         p_end = cell["ping_end"]
@@ -296,6 +408,7 @@ def compute_grid_stats(
         d_mask = (depth >= d_lo) & (depth < d_hi)
         if not np.any(d_mask):
             records.append(_empty_cell(i, p_start, p_end, d_lo, d_hi, ping_time))
+            _update_progress(progress_callback, i + 1, total_cells)
             continue
 
         # 提取子数组
@@ -308,12 +421,34 @@ def compute_grid_stats(
         valid_mask = np.isfinite(sv_cell)
         if not np.any(valid_mask):
             records.append(_empty_cell(i, p_start, p_end, d_lo, d_hi, ping_time))
+            _update_progress(progress_callback, i + 1, total_cells)
             continue
 
         sv_valid = sv_cell[valid_mask]
-        # ABC = 4π × ∫ Sv_linear × dr（向量化：先线性化，再乘 dr，NaN 位置置零后求和）
-        abc = float(4 * np.pi * np.nansum(sv_to_linear(sv_cell) * dr_cell))
-
+        
+        # 向量化计算统计指标
+        # 计算线性值用于 ABC
+        # 优化内存使用：直接计算线性值，避免临时数组
+        sv_linear = np.nan_to_num(sv_cell, nan=0.0, posinf=0.0, neginf=0.0)
+        sv_linear = np.power(10, sv_linear / 10, out=sv_linear)
+        abc = float(4 * np.pi * np.nansum(sv_linear * dr_cell))
+        
+        # 计算更多统计指标
+        mean_sv = float(np.mean(sv_valid))
+        median_sv = float(np.median(sv_valid))
+        std_sv = float(np.std(sv_valid))
+        
+        # 计算百分位数（25%，75%）
+        p25 = float(np.percentile(sv_valid, 25))
+        p75 = float(np.percentile(sv_valid, 75))
+        
+        # 计算变异系数（标准差/均值）
+        cv = std_sv / abs(mean_sv) if mean_sv != 0 and np.isfinite(mean_sv) else np.nan
+        
+        # 计算数据覆盖率
+        total_cells_in_grid = sv_cell.size
+        coverage = len(sv_valid) / total_cells_in_grid if total_cells_in_grid > 0 else 0.0
+        
         records.append({
             "cell_id": i,
             "ping_start": int(p_start),
@@ -322,17 +457,39 @@ def compute_grid_stats(
             "ping_time_end": str(ping_time[min(p_end-1, len(ping_time)-1)])[:19] if p_end > 0 else "",
             "depth_lo": d_lo,
             "depth_hi": d_hi,
-            "mean_sv": float(np.mean(sv_valid)),
-            "median_sv": float(np.median(sv_valid)),
-            "std_sv": float(np.std(sv_valid)),
+            "mean_sv": mean_sv,
+            "median_sv": median_sv,
+            "std_sv": std_sv,
+            "p25_sv": p25,
+            "p75_sv": p75,
+            "cv_sv": cv,
             "n_pings": p_end - p_start,
             "n_valid": len(sv_valid),
+            "coverage": coverage,
             "abc": abc,
         })
+        
+        _update_progress(progress_callback, i + 1, total_cells)
 
     result = pd.DataFrame(records)
+    
+    # 添加元数据
+    result.attrs["grid_cells_count"] = len(grid_cells)
+    result.attrs["total_pings"] = ds_Sv.sizes["ping_time"]
+    result.attrs["total_samples"] = len(depth)
+    result.attrs["depth_range"] = (float(np.nanmin(depth)), float(np.nanmax(depth)))
+    
     logger.info(f"网格统计完成: {len(result)} 个单元")
     return result
+
+
+def _update_progress(callback: Optional[Callable[[int, int], None]], current: int, total: int):
+    """更新进度回调。"""
+    if callback is not None:
+        try:
+            callback(current, total)
+        except Exception as e:
+            logger.warning(f"进度回调执行失败: {e}")
 
 
 def _empty_cell(cell_id, p_start, p_end, d_lo, d_hi, ping_time):
@@ -348,8 +505,12 @@ def _empty_cell(cell_id, p_start, p_end, d_lo, d_hi, ping_time):
         "mean_sv": np.nan,
         "median_sv": np.nan,
         "std_sv": np.nan,
+        "p25_sv": np.nan,
+        "p75_sv": np.nan,
+        "cv_sv": np.nan,
         "n_pings": p_end - p_start,
         "n_valid": 0,
+        "coverage": 0.0,
         "abc": np.nan,
     }
 
@@ -358,6 +519,7 @@ def compute_grid_density(
     ds_Sv: xr.Dataset,
     grid_cells: list[dict],
     config: dict,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> pd.DataFrame:
     """计算每个网格单元的密度估算。
 
@@ -366,6 +528,8 @@ def compute_grid_density(
     ds_Sv : xr.Dataset
     grid_cells : list[dict]
     config : dict
+    progress_callback : callable, optional
+        进度回调函数
 
     Returns
     -------
@@ -377,33 +541,29 @@ def compute_grid_density(
     avg_weight_kg = density_cfg.get("avg_weight_kg", 0.5)
     sigma_bs = 10 ** (ts_default / 10)
 
-    stats_df = compute_grid_stats(ds_Sv, grid_cells)
+    stats_df = compute_grid_stats(ds_Sv, grid_cells, progress_callback)
 
-    records = []
-    for _, row in stats_df.iterrows():
-        abc = row["abc"]
-        if np.isnan(abc):
-            density_m2 = np.nan
-            density_ha = np.nan
-            biomass = np.nan
-        else:
-            density_m2 = abc / (4 * np.pi * sigma_bs)
-            density_ha = density_m2 * 10000
-            biomass = density_ha * avg_weight_kg
+    # 使用向量化操作计算密度
+    abc_values = stats_df["abc"].values
+    valid_mask = ~np.isnan(abc_values)
+    
+    # 初始化结果数组
+    density_m2 = np.full(len(stats_df), np.nan)
+    density_ha = np.full(len(stats_df), np.nan)
+    biomass = np.full(len(stats_df), np.nan)
+    
+    # 向量化计算
+    if np.any(valid_mask):
+        density_m2[valid_mask] = abc_values[valid_mask] / (4 * np.pi * sigma_bs)
+        density_ha[valid_mask] = density_m2[valid_mask] * 10000
+        biomass[valid_mask] = density_ha[valid_mask] * avg_weight_kg
 
-        records.append({
-            "cell_id": row["cell_id"],
-            "ping_start": row["ping_start"],
-            "ping_end": row["ping_end"],
-            "depth_lo": row["depth_lo"],
-            "depth_hi": row["depth_hi"],
-            "mean_sv": row["mean_sv"],
-            "abc": abc,
-            "density_ind_m2": density_m2,
-            "density_ind_ha": density_ha,
-            "biomass_kg_ha": biomass,
-        })
-
-    result = pd.DataFrame(records)
+    # 创建结果 DataFrame
+    result = stats_df[["cell_id", "ping_start", "ping_end", "depth_lo", "depth_hi", "mean_sv", "abc"]].copy()
+    result["density_ind_m2"] = density_m2
+    result["density_ind_ha"] = density_ha
+    result["biomass_kg_ha"] = biomass
+    
     logger.info(f"网格密度估算完成: {len(result)} 个单元")
     return result
+

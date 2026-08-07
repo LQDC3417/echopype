@@ -38,8 +38,8 @@ from src.gui.status_bar import MainStatusBar
 from src.gui.toolbars import StandardToolBar, EchogramToolBar, MouseMode
 from src.gui.workers import (
     LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
-    DetectSeafloorWorker, DetectSchoolsWorker, DensityWorker, GridWorker,
-    BatchProcessWorker,
+    DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker as DensityWorker, GridWorker,
+    BatchProcessWorker, QualityCheckWorker, MultifreqAnalysisWorker,
 )
 from src.core.utils import load_config
 
@@ -312,6 +312,8 @@ class MainWindow(QMainWindow):
         self.property_panel.stats_clicked.connect(self._show_stats)
         self.property_panel.grid_clicked.connect(self._run_grid_analysis)
         self.property_panel.noise_params_changed.connect(self._on_noise_params_changed)
+        self.property_panel.quality_check_clicked.connect(self._run_quality_check)
+        self.property_panel.multifreq_clicked.connect(self._run_multifreq_analysis)
 
         # 变量列表
         self.variable_list.variable_selected.connect(self._on_variable_selected)
@@ -1003,8 +1005,102 @@ class MainWindow(QMainWindow):
         self.stats_dialog.update_grid(df)
         self.statusbar.hide_progress()
         self.statusbar.set_status(f"网格分析完成: {len(df)} 个单元")
+        # 网格颜色叠加到回波图
+        self.echogram.set_grid_data(df, self._ds_Sv, color_by="mean_sv")
         # 显示统计对话框
         self._show_stats()
+
+    # ═══════════════════════════════════════════════════════
+    # 质量检查
+    # ═══════════════════════════════════════════════════════
+
+    def _run_quality_check(self):
+        """运行数据质量检查"""
+        if self._ds_Sv is None:
+            QMessageBox.warning(self, "警告", "请先加载数据")
+            return
+        self.statusbar.show_progress("正在检查数据质量...")
+        self._current_worker = QualityCheckWorker(
+            self._get_analysis_ds(), self._bottom_line
+        )
+        self._current_worker.finished.connect(self._on_quality_done)
+        self._current_worker.error.connect(self._on_worker_error)
+        self._current_worker.progress.connect(self.statusbar.set_status)
+        self._current_worker.start()
+
+    def _on_quality_done(self, result):
+        """质量检查完成 → 弹窗显示结果"""
+        self.statusbar.hide_progress()
+        sv_check = result.get("sv", {})
+        bl_check = result.get("bottom")
+
+        lines = ["═══ 数据质量检查报告 ═══\n"]
+
+        # Sv 检查
+        valid_icon = "✅" if sv_check.get("valid") else "⚠️"
+        lines.append(f"{valid_icon} Sv 数据: {sv_check.get('total_pings', 0)} pings × {sv_check.get('total_samples', 0)} samples")
+        sv_range = sv_check.get("sv_range", (0, 0))
+        lines.append(f"   Sv 范围: [{sv_range[0]:.1f}, {sv_range[1]:.1f}] dB")
+        lines.append(f"   NaN 比例: {sv_check.get('nan_ratio', 0):.1%}")
+        for w in sv_check.get("warnings", []):
+            lines.append(f"   ⚠ {w}")
+
+        # 底线检查
+        if bl_check:
+            lines.append("")
+            bl_icon = "✅" if bl_check.get("valid") else "⚠️"
+            lines.append(f"{bl_icon} 底线: {bl_check.get('valid_pings', 0)} 个有效 ping")
+            lines.append(f"   NaN 比例: {bl_check.get('nan_ratio', 0):.1%}")
+            for w in bl_check.get("warnings", []):
+                lines.append(f"   ⚠ {w}")
+
+        all_valid = sv_check.get("valid", False) and (bl_check is None or bl_check.get("valid", False))
+        title = "质量检查通过 ✅" if all_valid else "质量检查发现问题 ⚠️"
+        QMessageBox.information(self, title, "\n".join(lines))
+
+    # ═══════════════════════════════════════════════════════
+    # 多频分析
+    # ═══════════════════════════════════════════════════════
+
+    def _run_multifreq_analysis(self):
+        """运行多频率分析"""
+        if self._ds_Sv is None or self._config is None:
+            QMessageBox.warning(self, "警告", "请先加载数据")
+            return
+        self.statusbar.show_progress("正在分析多频率通道...")
+        self._current_worker = MultifreqAnalysisWorker(
+            self._ds_Sv, self._config
+        )
+        self._current_worker.finished.connect(self._on_multifreq_done)
+        self._current_worker.error.connect(self._on_worker_error)
+        self._current_worker.progress.connect(self.statusbar.set_status)
+        self._current_worker.start()
+
+    def _on_multifreq_done(self, result):
+        """多频分析完成 → 弹窗显示结果"""
+        self.statusbar.hide_progress()
+        channel_summary = result.get("channel_summary")
+        freq_comparison = result.get("freq_comparison")
+        channels = result.get("channels", [])
+
+        lines = ["═══ 多频率分析报告 ═══\n"]
+        lines.append(f"通道数: {len(channels)}\n")
+
+        # 通道摘要
+        if channel_summary is not None and not channel_summary.empty:
+            lines.append("── 通道信息 ──")
+            for _, row in channel_summary.iterrows():
+                freq_mhz = row.get("frequency_Hz", 0) / 1e6 if row.get("frequency_Hz") else 0
+                lines.append(f"  {row['channel']}: {freq_mhz:.1f} MHz, {row.get('n_pings', 0)} pings")
+
+        # 频率对比
+        if freq_comparison is not None and not freq_comparison.empty:
+            lines.append("\n── 频率对比（ABC）──")
+            for _, row in freq_comparison.iterrows():
+                freq_mhz = row.get("frequency_Hz", 0) / 1e6 if row.get("frequency_Hz") else 0
+                lines.append(f"  {row['channel']}: mean_abc={row.get('mean_abc', 0):.4f}")
+
+        QMessageBox.information(self, "多频率分析", "\n".join(lines))
 
     def _update_file_info(self, ds_Sv):
         """更新状态栏文件信息"""

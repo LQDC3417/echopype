@@ -17,6 +17,7 @@ import matplotlib.cm as cm
 from OpenGL.GL import (
     GL_BLEND, GL_CLAMP_TO_EDGE, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT,
     GL_LINEAR, GL_LINES, GL_LINE_STRIP, GL_LINE_STIPPLE,
+    GL_LINE_SMOOTH, GL_LINE_SMOOTH_HINT, GL_NICEST, GL_DONT_CARE,
     GL_MAX_TEXTURE_SIZE, GL_MODELVIEW, GL_NEAREST,
     GL_ONE_MINUS_SRC_ALPHA, GL_PROJECTION, GL_QUADS, GL_RGBA,
     GL_SRC_ALPHA, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
@@ -24,7 +25,7 @@ from OpenGL.GL import (
     GL_UNPACK_ALIGNMENT, GL_UNSIGNED_BYTE,
     glBindTexture, glBlendFunc, glClear, glClearColor, glColor4f,
     glDisable, glEnable, glEnd, glGenTextures, glGetIntegerv,
-    glLineStipple, glLineWidth, glLoadIdentity, glMatrixMode, glOrtho,
+    glHint, glLineStipple, glLineWidth, glLoadIdentity, glMatrixMode, glOrtho,
     glPixelStorei, glTexCoord2f, glTexImage2D, glTexParameteri,
     glVertex2f, glViewport, glBegin,
 )
@@ -66,6 +67,27 @@ class EchogramRenderer(QOpenGLWidget):
         self._surface_line = None  # float — 表线深度(in sample index units)
         self._school_mask = None
 
+        # 网格叠加
+        self._grid_cells = None   # list[dict] — ping_start/end, depth_lo/hi (sample index)
+        self._grid_values = None  # np.ndarray — 每格的着色值（如 mean_sv）
+        self._grid_vmin = -70.0
+        self._grid_vmax = -20.0
+
+        # ??????????
+        self._bottom_line_color = (0.8, 0.6, 0.0, 1.0)  # ???
+        self._bottom_line_width = 2.0
+        self._surface_line_color = (0.2, 1.0, 0.4, 0.8)  # ???
+        self._surface_line_width = 1.5
+        self._preview_line_color = (1.0, 0.5, 0.0, 0.8)  # ??
+        self._preview_line_width = 2.0
+        
+        # ??????
+        self._draw_precision = 1.0  # ???????1.0?????
+        self._smooth_window_size = 5  # ??????
+        self._enable_smoothing = True  # ????????
+
+
+
         # 鼠标模式
         self._mouse_mode = MouseMode.NAVIGATE
 
@@ -73,7 +95,10 @@ class EchogramRenderer(QOpenGLWidget):
         self._bottom_editing = False
         self._bottom_drawing = False  # 是否正在按住左键绘制
         self._bottom_draw_points = []  # 手绘模式收集的点 [(ping, sample), ...]
-        self._bottom_undo_stack = []  # 撤销栈：保存底线历史状态
+        self._bottom_undo_stack = []  # ????????????
+        self._bottom_redo_stack = []  # ?????????????
+        self._max_undo_steps = 50  # ??????
+
 
         # 颜色映射
         self._cmap_name = "jet"
@@ -163,6 +188,72 @@ class EchogramRenderer(QOpenGLWidget):
             self._school_mask = mask.astype(bool)
         self.update()
 
+    def set_grid_data(self, grid_df, ds_Sv=None, color_by: str = "mean_sv") -> None:
+        """设置网格叠加数据。
+
+        Parameters
+        ----------
+        grid_df : pd.DataFrame
+            网格分析结果，含 ping_start/end, depth_lo/hi, mean_sv 等列
+        ds_Sv : xr.Dataset, optional
+            用于将深度米转换为 sample index
+        color_by : str
+            着色指标列名，默认 "mean_sv"
+        """
+        if grid_df is None or grid_df.empty:
+            self._grid_cells = None
+            self._grid_values = None
+            self.update()
+            return
+
+        cells = []
+        values = []
+
+        # 尝试获取深度→sample 转换信息
+        echo_range = None
+        if ds_Sv is not None and "echo_range" in ds_Sv:
+            echo_range = ds_Sv["echo_range"].values
+            if echo_range.ndim == 2:
+                echo_range = echo_range[0]  # 取第一 ping
+
+        for _, row in grid_df.iterrows():
+            ping_start = int(row["ping_start"])
+            ping_end = int(row["ping_end"])
+
+            # 深度 → sample index 转换
+            if echo_range is not None:
+                depth_lo = float(row["depth_lo"])
+                depth_hi = float(row["depth_hi"])
+                sample_start = int(np.searchsorted(echo_range, depth_lo))
+                sample_end = int(np.searchsorted(echo_range, depth_hi))
+            else:
+                # 无除数据时用 ping_start/end 直接作为索引
+                sample_start = int(row.get("depth_lo", 0))
+                sample_end = int(row.get("depth_hi", self._n_samples))
+
+            cells.append({
+                "ping_start": ping_start,
+                "ping_end": ping_end,
+                "sample_start": sample_start,
+                "sample_end": sample_end,
+            })
+            values.append(float(row.get(color_by, 0)))
+
+        self._grid_cells = cells
+        self._grid_values = np.array(values, dtype=np.float32)
+        if len(values) > 0:
+            self._grid_vmin = float(np.nanmin(self._grid_values))
+            self._grid_vmax = float(np.nanmax(self._grid_values))
+            if self._grid_vmin == self._grid_vmax:
+                self._grid_vmax = self._grid_vmin + 1.0
+        self.update()
+
+    def clear_grid_overlay(self) -> None:
+        """清除网格叠加"""
+        self._grid_cells = None
+        self._grid_values = None
+        self.update()
+
     def set_colormap(self, name: str = "jet", vmin: float = -70.0, vmax: float = -20.0) -> None:
         self._cmap_name = "gray" if name == "grayscale" else name
         self._vmin = vmin
@@ -194,8 +285,13 @@ class EchogramRenderer(QOpenGLWidget):
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+        
+        # ???????
+        glEnable(GL_LINE_SMOOTH)
+        glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
+        
         self._texture_id = int(glGenTextures(1))
-        # 查询 GPU 实际支持的最大纹理尺寸
+        # ?? GPU ???????????
         max_size = glGetIntegerv(GL_MAX_TEXTURE_SIZE)
         self._max_tex_size = int(max_size) if max_size else self.MAX_TEX_SIZE_FALLBACK
 
@@ -223,6 +319,8 @@ class EchogramRenderer(QOpenGLWidget):
             self._draw_surface_line()
         if self._school_mask is not None:
             self._draw_school_overlay()
+        if self._grid_cells is not None:
+            self._draw_grid_overlay()
         if self._selecting and self._select_start and self._select_end:
             self._draw_selection_rect()
 
@@ -369,14 +467,25 @@ class EchogramRenderer(QOpenGLWidget):
             glEnd()
 
     def _draw_bottom_line(self) -> None:
+        """???? ? ???????????????"""
         bl = self._bottom_line
         if bl is None or bl.ndim == 0:
             return
-        glColor4f(0.8, 0.6, 0.0, 1.0)  # 深黄色，Echoview 风格底线
-        glLineWidth(2.0)
+        
+        # ?????????????????????
+        base_width = 2.0
+        zoom_factor = min(self._zoom_x, self._zoom_y)
+        line_width = base_width * min(2.0, max(0.5, zoom_factor * 0.5))
+        
+        # ?????????Echoview ??
+        glColor4f(0.8, 0.6, 0.0, 1.0)
+        glLineWidth(line_width)
+        
+        # ??GL_LINE_STRIP??????
         glBegin(GL_LINE_STRIP)
         for i, val in enumerate(bl):
             if np.isnan(val):
+                # ??NaN???????????????
                 glEnd()
                 glBegin(GL_LINE_STRIP)
                 continue
@@ -386,31 +495,114 @@ class EchogramRenderer(QOpenGLWidget):
         glEnd()
 
     def _draw_surface_line(self) -> None:
-        """绘制表线 — 亮绿色虚线横跨全宽"""
+        """???? ? ???????????????"""
         sl = self._surface_line
         if sl is None:
             return
+        
+        # ?????????????
+        base_width = 1.5
+        zoom_factor = min(self._zoom_x, self._zoom_y)
+        line_width = base_width * min(2.0, max(0.5, zoom_factor * 0.5))
+        
+        # ??????
         glEnable(GL_LINE_STIPPLE)
-        glLineStipple(4, 0x0F0F)  # 虚线模式
+        glLineStipple(4, 0x0F0F)  # ?????4?????0x0F0F??
+        
+        # ????????????
         glColor4f(0.2, 1.0, 0.4, 0.8)
-        glLineWidth(1.5)
+        glLineWidth(line_width)
+        
+        # ???????????
         y = self._offset_y + sl * self._zoom_y
         x0 = self._offset_x
         x1 = self._offset_x + self._n_pings * self._zoom_x
+        
+        # ??????
         glBegin(GL_LINES)
         glVertex2f(x0, y)
         glVertex2f(x1, y)
         glEnd()
+        
         glDisable(GL_LINE_STIPPLE)
 
+    def _draw_grid_overlay(self) -> None:
+        """绘制网格单元叠加（半透明彩色矩形 + 边框）"""
+        if not self._grid_cells or self._grid_values is None:
+            return
+
+        try:
+            from matplotlib import colormaps
+            cmap = colormaps[self._cmap_name]
+        except (ImportError, AttributeError):
+            from matplotlib import cm
+            cmap = cm.get_cmap(self._cmap_name)
+
+        span = self._grid_vmax - self._grid_vmin
+        if span == 0:
+            span = 1.0
+
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        # 绘制填充矩形（半透明）
+        glBegin(GL_QUADS)
+        for i, cell in enumerate(self._grid_cells):
+            val = self._grid_values[i]
+            norm = np.clip((val - self._grid_vmin) / span, 0, 1)
+            r, g, b, _ = cmap(norm)
+            glColor4f(r, g, b, 0.35)
+
+            x0 = self._offset_x + cell["ping_start"] * self._zoom_x
+            x1 = self._offset_x + cell["ping_end"] * self._zoom_x
+            y0 = self._offset_y + cell["sample_start"] * self._zoom_y
+            y1 = self._offset_y + cell["sample_end"] * self._zoom_y
+
+            glVertex2f(x0, y0)
+            glVertex2f(x1, y0)
+            glVertex2f(x1, y1)
+            glVertex2f(x0, y1)
+        glEnd()
+
+        # 绘制边框（深色实线）
+        glColor4f(0.2, 0.2, 0.2, 0.6)
+        glLineWidth(1.0)
+        glBegin(GL_LINES)
+        for cell in self._grid_cells:
+            x0 = self._offset_x + cell["ping_start"] * self._zoom_x
+            x1 = self._offset_x + cell["ping_end"] * self._zoom_x
+            y0 = self._offset_y + cell["sample_start"] * self._zoom_y
+            y1 = self._offset_y + cell["sample_end"] * self._zoom_y
+            # 上
+            glVertex2f(x0, y0); glVertex2f(x1, y0)
+            # 下
+            glVertex2f(x0, y1); glVertex2f(x1, y1)
+            # 左
+            glVertex2f(x0, y0); glVertex2f(x0, y1)
+            # 右
+            glVertex2f(x1, y0); glVertex2f(x1, y1)
+        glEnd()
+
     def _draw_bottom_preview(self) -> None:
-        """绘制手绘底线预览 — 橙色连线"""
+        """???????? ? ??????????"""
         if not self._bottom_draw_points:
             return
-        glColor4f(1.0, 0.5, 0.0, 1.0)
-        glLineWidth(2.0)
+        
+        # ??????????
+        points = self._smooth_draw_points(self._bottom_draw_points, window_size=3)
+        
+        # ??????????????
+        base_width = 2.0
+        zoom_factor = min(self._zoom_x, self._zoom_y)
+        line_width = base_width * min(2.0, max(0.5, zoom_factor * 0.5))
+        
+        # ???????????
+        glColor4f(1.0, 0.5, 0.0, 0.8)
+        glLineWidth(line_width)
+        
+        # ?????????
         glBegin(GL_LINE_STRIP)
-        for ping, sample in self._bottom_draw_points:
+        for ping, sample in points:
             x = self._offset_x + ping * self._zoom_x
             y = self._offset_y + sample * self._zoom_y
             glVertex2f(x, y)
@@ -598,16 +790,17 @@ class EchogramRenderer(QOpenGLWidget):
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Escape:
-            # 取消当前绘制
+            # ??????
             self._bottom_draw_points.clear()
             self._bottom_editing = False
             self._bottom_drawing = False
             self.update()
         elif event.key() == Qt.Key_Z and event.modifiers() & Qt.ControlModifier:
-            # Ctrl+Z 撤销底线编辑
+            # Ctrl+Z ??????
             self._undo_bottom()
-
-    # ── 右键菜单 ──────────────────────────────────────────────
+        elif event.key() == Qt.Key_Y and event.modifiers() & Qt.ControlModifier:
+            # Ctrl+Y ??????
+            self._redo_bottom()
 
     def contextMenuEvent(self, event) -> None:
         """Qt 右键事件 → 显示上下文菜单"""
@@ -667,52 +860,111 @@ class EchogramRenderer(QOpenGLWidget):
     # ── 底线编辑 ──────────────────────────────────────────────
 
     def _save_bottom_undo(self):
-        """保存当前底线状态到撤销栈"""
+        """???????????????????"""
         if self._bottom_line is not None:
+            # ??????????
             self._bottom_undo_stack.append(self._bottom_line.copy())
-            # 限制撤销栈大小
-            if len(self._bottom_undo_stack) > 50:
+            
+            # ???????
+            if len(self._bottom_undo_stack) > self._max_undo_steps:
                 self._bottom_undo_stack.pop(0)
+            
+            # ????????????????????
+            self._bottom_redo_stack.clear()
 
     def _undo_bottom(self):
-        """撤销底线编辑"""
+        """??????????????????"""
         if not self._bottom_undo_stack:
             return
+        
+        # ??????????
+        if self._bottom_line is not None:
+            self._bottom_redo_stack.append(self._bottom_line.copy())
+        
+        # ????????
         self._bottom_line = self._bottom_undo_stack.pop()
         self._bottom_draw_points.clear()
         self._bottom_editing = False
         self.bottom_line_edited.emit(self._bottom_line.copy())
         self.update()
 
+    def _redo_bottom(self):
+        """???????????????"""
+        if not self._bottom_redo_stack:
+            return
+        
+        # ??????????
+        if self._bottom_line is not None:
+            self._bottom_undo_stack.append(self._bottom_line.copy())
+        
+        # ????????
+        self._bottom_line = self._bottom_redo_stack.pop()
+        self._bottom_draw_points.clear()
+        self._bottom_editing = False
+        self.bottom_line_edited.emit(self._bottom_line.copy())
+        self.update()
+
+    def _smooth_draw_points(self, points, window_size=None):
+        """???????????????"""
+        # ???????????
+        if window_size is None:
+            window_size = self._smooth_window_size
+        
+        # ?????????????????
+        if not self._enable_smoothing:
+            return points
+        
+        # ????????????
+        adjusted_window = max(3, int(window_size * self._draw_precision))
+        
+        if len(points) < adjusted_window:
+            return points
+        
+        # ??????????
+        smoothed = []
+        for i in range(len(points)):
+            # ??????
+            start = max(0, i - adjusted_window // 2)
+            end = min(len(points), i + adjusted_window // 2 + 1)
+            
+            # ??????????
+            avg_ping = sum(p[0] for p in points[start:end]) / (end - start)
+            avg_sample = sum(p[1] for p in points[start:end]) / (end - start)
+            smoothed.append((avg_ping, avg_sample))
+        
+        return smoothed
+
     def _apply_drawn_segment(self):
-        """将手绘的点应用到底线（分段替换）"""
+        """????????????????"""
         if not self._bottom_draw_points:
             return
-
-        points = self._bottom_draw_points
+        
+        # ???????????????
+        points = self._smooth_draw_points(self._bottom_draw_points, window_size=5)
+        
         if len(points) < 2:
             self._bottom_draw_points.clear()
             return
-
-        # 确定绘制覆盖的 Ping 范围
+        
+        # ??????? Ping ??
         pings = [p[0] for p in points]
         ping_min = max(0, int(round(min(pings))))
         ping_max = min(self._n_pings - 1, int(round(max(pings))))
-
+        
         if ping_min > ping_max:
             self._bottom_draw_points.clear()
             return
-
-        # 初始化底线（如果不存在）
+        
+        # ????????????
         if self._bottom_line is None:
             self._bottom_line = np.full(self._n_pings, np.nan, dtype=np.float32)
-
-        # 对绘制点按 ping 排序
+        
+        # ????? ping ??
         sorted_points = sorted(points, key=lambda p: p[0])
-
-        # 在覆盖范围内生成密集采样的底线值
+        
+        # ????????????????
         for ping_idx in range(ping_min, ping_max + 1):
-            # 找到 ping_idx 两侧的绘制点进行线性插值
+            # ?? ping_idx ????????????
             left = None
             right = None
             for i, (p, s) in enumerate(sorted_points):
@@ -720,25 +972,25 @@ class EchogramRenderer(QOpenGLWidget):
                     left = (p, s, i)
                 if p >= ping_idx and right is None:
                     right = (p, s, i)
-
+            
             if left is not None and right is not None:
                 if left[2] == right[2]:
-                    # 同一个点
+                    # ????
                     self._bottom_line[ping_idx] = left[1]
                 else:
-                    # 线性插值
+                    # ????
                     t = (ping_idx - left[0]) / max(1e-6, right[0] - left[0])
                     self._bottom_line[ping_idx] = left[1] + t * (right[1] - left[1])
             elif left is not None:
                 self._bottom_line[ping_idx] = left[1]
             elif right is not None:
                 self._bottom_line[ping_idx] = right[1]
-
-        # 清除绘制点
+        
+        # ?????
         self._bottom_draw_points.clear()
         self._bottom_editing = False
-
-        # 发送更新信号
+        
+        # ??????
         self.bottom_line_edited.emit(self._bottom_line.copy())
         self.update()
 
