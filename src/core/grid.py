@@ -338,18 +338,69 @@ def create_grid(
     else:
         raise ValueError(f"不支持的水平分段方法: {method}")
 
+    # 提取 GPS 坐标，用于计算每段的中心经纬度
+    lat_arr, lon_arr = _extract_gps(ds_Sv)
+
     grid_cells = []
+    cell_id = 0
     for h_start, h_end in horizontal_segments:
+        # 计算该水平段的中心经纬度
+        center_lat, center_lon = _segment_center_gps(lat_arr, lon_arr, h_start, h_end)
+
         for v_lo, v_hi in vertical_layers:
             grid_cells.append({
+                "cell_id": cell_id,
                 "ping_start": h_start,
                 "ping_end": h_end,
                 "depth_lo": v_lo,
                 "depth_hi": v_hi,
+                "latitude": center_lat,
+                "longitude": center_lon,
             })
+            cell_id += 1
 
     logger.info(f"网格创建完成: {len(horizontal_segments)} × {len(vertical_layers)} = {len(grid_cells)} 个单元")
     return grid_cells
+
+
+def _segment_center_gps(
+    lat: np.ndarray | None,
+    lon: np.ndarray | None,
+    ping_start: int,
+    ping_end: int,
+) -> tuple[float | None, float | None]:
+    """计算水平段内有效 GPS 坐标的中心点。
+
+    Parameters
+    ----------
+    lat, lon : np.ndarray or None
+        全量 GPS 坐标数组
+    ping_start, ping_end : int
+        该水平段的 ping 索引范围 [start, end)
+
+    Returns
+    -------
+    tuple[float or None, float or None]
+        (latitude, longitude) 中心点；无有效数据时返回 (None, None)
+    """
+    if lat is None or lon is None:
+        return None, None
+
+    # 安全截取，防止越界
+    s = max(0, ping_start)
+    e = min(len(lat), ping_end)
+    if s >= e:
+        return None, None
+
+    seg_lat = lat[s:e]
+    seg_lon = lon[s:e]
+
+    # 只取有限值的坐标求均值
+    valid = np.isfinite(seg_lat) & np.isfinite(seg_lon)
+    if not np.any(valid):
+        return None, None
+
+    return float(np.mean(seg_lat[valid])), float(np.mean(seg_lon[valid]))
 
 
 # ── 网格统计 ──────────────────────────────────────────────
@@ -373,7 +424,7 @@ def compute_grid_stats(
     -------
     pd.DataFrame
         每行一个网格单元，包含 cell_id, ping_start, ping_end, depth_lo, depth_hi,
-        mean_sv, median_sv, std_sv, n_valid, abc, 以及额外的统计指标
+        latitude, longitude, mean_sv, median_sv, std_sv, n_valid, abc, 以及额外的统计指标
     """
     if not grid_cells:
         logger.warning("没有网格单元需要处理")
@@ -382,6 +433,9 @@ def compute_grid_stats(
     Sv = get_sv_array(ds_Sv)  # (n_pings, n_samples)
     depth = get_vertical_coords(ds_Sv)  # (n_samples,)
     ping_time = ds_Sv["ping_time"].values
+
+    # 提取 GPS 坐标，用于每段中心经纬度
+    lat_arr, lon_arr = _extract_gps(ds_Sv)
 
     # 深度分辨率（与 density.py 统一使用 region.get_echo_range_1d）
     from src.core.region import get_echo_range_1d
@@ -404,10 +458,18 @@ def compute_grid_stats(
         d_lo = cell["depth_lo"]
         d_hi = cell["depth_hi"]
 
+        # 优先使用 grid_cells 中预计算的 GPS 坐标，否则实时计算
+        if "latitude" in cell:
+            center_lat = cell.get("latitude")
+            center_lon = cell.get("longitude")
+        else:
+            center_lat, center_lon = _segment_center_gps(lat_arr, lon_arr, p_start, p_end)
+
         # 深度掩码
         d_mask = (depth >= d_lo) & (depth < d_hi)
         if not np.any(d_mask):
-            records.append(_empty_cell(i, p_start, p_end, d_lo, d_hi, ping_time))
+            records.append(_empty_cell(i, p_start, p_end, d_lo, d_hi, ping_time,
+                                       latitude=center_lat, longitude=center_lon))
             _update_progress(progress_callback, i + 1, total_cells)
             continue
 
@@ -420,35 +482,36 @@ def compute_grid_stats(
         # 统计
         valid_mask = np.isfinite(sv_cell)
         if not np.any(valid_mask):
-            records.append(_empty_cell(i, p_start, p_end, d_lo, d_hi, ping_time))
+            records.append(_empty_cell(i, p_start, p_end, d_lo, d_hi, ping_time,
+                                       latitude=center_lat, longitude=center_lon))
             _update_progress(progress_callback, i + 1, total_cells)
             continue
 
         sv_valid = sv_cell[valid_mask]
-        
+
         # 向量化计算统计指标
         # 计算线性值用于 ABC
         # 优化内存使用：直接计算线性值，避免临时数组
         sv_linear = np.nan_to_num(sv_cell, nan=0.0, posinf=0.0, neginf=0.0)
         sv_linear = np.power(10, sv_linear / 10, out=sv_linear)
         abc = float(4 * np.pi * np.nansum(sv_linear * dr_cell))
-        
+
         # 计算更多统计指标
         mean_sv = float(np.mean(sv_valid))
         median_sv = float(np.median(sv_valid))
         std_sv = float(np.std(sv_valid))
-        
+
         # 计算百分位数（25%，75%）
         p25 = float(np.percentile(sv_valid, 25))
         p75 = float(np.percentile(sv_valid, 75))
-        
+
         # 计算变异系数（标准差/均值）
         cv = std_sv / abs(mean_sv) if mean_sv != 0 and np.isfinite(mean_sv) else np.nan
-        
+
         # 计算数据覆盖率
         total_cells_in_grid = sv_cell.size
         coverage = len(sv_valid) / total_cells_in_grid if total_cells_in_grid > 0 else 0.0
-        
+
         records.append({
             "cell_id": i,
             "ping_start": int(p_start),
@@ -457,6 +520,8 @@ def compute_grid_stats(
             "ping_time_end": str(ping_time[min(p_end-1, len(ping_time)-1)])[:19] if p_end > 0 else "",
             "depth_lo": d_lo,
             "depth_hi": d_hi,
+            "latitude": center_lat,
+            "longitude": center_lon,
             "mean_sv": mean_sv,
             "median_sv": median_sv,
             "std_sv": std_sv,
@@ -492,7 +557,8 @@ def _update_progress(callback: Optional[Callable[[int, int], None]], current: in
             logger.warning(f"进度回调执行失败: {e}")
 
 
-def _empty_cell(cell_id, p_start, p_end, d_lo, d_hi, ping_time):
+def _empty_cell(cell_id, p_start, p_end, d_lo, d_hi, ping_time,
+                latitude=None, longitude=None):
     """空网格单元的默认值。"""
     return {
         "cell_id": cell_id,
@@ -502,6 +568,8 @@ def _empty_cell(cell_id, p_start, p_end, d_lo, d_hi, ping_time):
         "ping_time_end": str(ping_time[min(p_end-1, len(ping_time)-1)])[:19] if p_end > 0 else "",
         "depth_lo": d_lo,
         "depth_hi": d_hi,
+        "latitude": latitude,
+        "longitude": longitude,
         "mean_sv": np.nan,
         "median_sv": np.nan,
         "std_sv": np.nan,
@@ -534,7 +602,8 @@ def compute_grid_density(
     Returns
     -------
     pd.DataFrame
-        每行一个网格单元，包含 density_ind_m2, density_ind_ha, biomass_kg_ha
+        每行一个网格单元，包含 cell_id, ping_start, ping_end, depth_lo, depth_hi,
+        latitude, longitude, mean_sv, abc, density_ind_m2, density_ind_ha, biomass_kg_ha
     """
     density_cfg = config.get("density", {})
     ts_default = density_cfg.get("ts_default", -30.0)
@@ -558,8 +627,10 @@ def compute_grid_density(
         density_ha[valid_mask] = density_m2[valid_mask] * 10000
         biomass[valid_mask] = density_ha[valid_mask] * avg_weight_kg
 
-    # 创建结果 DataFrame
-    result = stats_df[["cell_id", "ping_start", "ping_end", "depth_lo", "depth_hi", "mean_sv", "abc"]].copy()
+    # 创建结果 DataFrame（包含经纬度）
+    export_cols = ["cell_id", "ping_start", "ping_end", "depth_lo", "depth_hi",
+                   "latitude", "longitude", "mean_sv", "abc"]
+    result = stats_df[export_cols].copy()
     result["density_ind_m2"] = density_m2
     result["density_ind_ha"] = density_ha
     result["biomass_kg_ha"] = biomass

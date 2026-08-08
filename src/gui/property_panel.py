@@ -96,6 +96,7 @@ class ProcessingTab(QWidget):
     stats_clicked = Signal()
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
+    single_target_clicked = Signal()
     # ??????
     detect_bottom_clicked = Signal()
     draw_bottom_clicked = Signal()
@@ -394,10 +395,19 @@ class ProcessingTab(QWidget):
         self.btn_multifreq.setToolTip("多频率通道信息和对比分析\n需要数据包含多个通道")
         self.btn_multifreq.clicked.connect(self.multifreq_clicked)
 
+        # ── 单体目标检测 ──
+        self.btn_single_target = QPushButton("🎯 单体目标检测")
+        self.btn_single_target.setToolTip("检测水体中单个鱼类目标\n估算目标强度（TS）")
+        self.btn_single_target.clicked.connect(self.single_target_clicked)
+
         btn_layout2 = QHBoxLayout()
         btn_layout2.addWidget(self.btn_quality)
         btn_layout2.addWidget(self.btn_multifreq)
         layout.addLayout(btn_layout2)
+
+        btn_layout3 = QHBoxLayout()
+        btn_layout3.addWidget(self.btn_single_target)
+        layout.addLayout(btn_layout3)
 
         layout.addStretch()
         scroll.setWidget(container)
@@ -608,6 +618,7 @@ class PropertyPanel(QTabWidget):
     stats_clicked = Signal()
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
+    single_target_clicked = Signal()
     # ??????
     detect_bottom_clicked = Signal()
     draw_bottom_clicked = Signal()
@@ -636,3 +647,4 @@ class PropertyPanel(QTabWidget):
         self.processing.update_bottom_clicked.connect(self.update_bottom_clicked)
         self.processing.quality_check_clicked.connect(self.quality_check_clicked)
         self.processing.multifreq_clicked.connect(self.multifreq_clicked)
+        self.processing.single_target_clicked.connect(self.single_target_clicked)

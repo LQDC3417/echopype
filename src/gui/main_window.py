@@ -40,6 +40,7 @@ from src.gui.workers import (
     LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
     DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker as DensityWorker, GridWorker,
     BatchProcessWorker, QualityCheckWorker, MultifreqAnalysisWorker,
+    SingleTargetWorker,
 )
 from src.core.utils import load_config
 
@@ -314,6 +315,7 @@ class MainWindow(QMainWindow):
         self.property_panel.noise_params_changed.connect(self._on_noise_params_changed)
         self.property_panel.quality_check_clicked.connect(self._run_quality_check)
         self.property_panel.multifreq_clicked.connect(self._run_multifreq_analysis)
+        self.property_panel.single_target_clicked.connect(self._run_single_target_detection)
 
         # 变量列表
         self.variable_list.variable_selected.connect(self._on_variable_selected)
@@ -1101,6 +1103,44 @@ class MainWindow(QMainWindow):
                 lines.append(f"  {row['channel']}: mean_abc={row.get('mean_abc', 0):.4f}")
 
         QMessageBox.information(self, "多频率分析", "\n".join(lines))
+
+    # ═══════════════════════════════════════════════════════
+    # 单体目标检测
+    # ═══════════════════════════════════════════════════════
+
+    def _run_single_target_detection(self):
+        """运行单体目标检测"""
+        if self._ds_Sv is None or self._config is None:
+            QMessageBox.warning(self, "警告", "请先加载数据")
+            return
+        self.statusbar.show_progress("正在检测单体目标...")
+        self._current_worker = SingleTargetWorker(
+            self._get_analysis_ds(), self._config
+        )
+        self._current_worker.finished.connect(self._on_single_target_done)
+        self._current_worker.error.connect(self._on_worker_error)
+        self._current_worker.progress.connect(self.statusbar.set_status)
+        self._current_worker.start()
+
+    def _on_single_target_done(self, targets_df):
+        """单体目标检测完成"""
+        self.statusbar.hide_progress()
+        n = len(targets_df) if targets_df is not None and not targets_df.empty else 0
+        if n == 0:
+            QMessageBox.information(self, "单体目标检测", "未检测到单体目标\n尝试降低 sv_threshold_db 参数")
+            return
+        lines = [f"═══ 单体目标检测结果 ═══\n", f"检测到 {n} 个目标\n"]
+        if not targets_df.empty:
+            ts_col = "ts_db" if "ts_db" in targets_df.columns else None
+            if ts_col:
+                ts_valid = targets_df[ts_col].dropna()
+                if len(ts_valid) > 0:
+                    lines.append(f"TS 统计:")
+                    lines.append(f"  均值: {ts_valid.mean():.1f} dB")
+                    lines.append(f"  中位: {ts_valid.median():.1f} dB")
+                    lines.append(f"  范围: [{ts_valid.min():.1f}, {ts_valid.max():.1f}] dB")
+            lines.append(f"\n目标列: {', '.join(targets_df.columns[:8])}")
+        QMessageBox.information(self, "单体目标检测", "\n".join(lines))
 
     def _update_file_info(self, ds_Sv):
         """更新状态栏文件信息"""
