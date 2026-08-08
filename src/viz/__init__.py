@@ -18,7 +18,7 @@ plt.rcParams["axes.unicode_minus"] = False
 
 def plot_echogram(
     ds_Sv: xr.Dataset,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
     vmin: float = -80,
     vmax: float = -40,
     title: str = "Echogram (Sv)",
@@ -85,7 +85,7 @@ def plot_echogram(
 def plot_school_overlay(
     ds_Sv: xr.Dataset,
     mask: xr.DataArray,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> plt.Figure:
     """
     绘制 echogram + 鱼群标记叠加图
@@ -107,7 +107,7 @@ def plot_school_overlay(
 
 def plot_density_profile(
     density_df: pd.DataFrame,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> plt.Figure:
     """
     绘制密度剖面图

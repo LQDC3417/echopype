@@ -13,8 +13,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from src.core.utils import get_sv_array, get_vertical_coords
-
 logger = logging.getLogger("fish_acoustics")
 
 
@@ -240,7 +238,6 @@ def compute_sv_per_channel(
     dict[str, xr.Dataset]
         {channel_name: single_channel_ds_Sv}
     """
-    from src.core.acoustic import compute_sv
 
     channels = list_channels(ds_Sv)
     result = {}

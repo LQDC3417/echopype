@@ -11,29 +11,65 @@
 """
 
 import logging
-import numpy as np
-import matplotlib.cm as cm
 
+import numpy as np
+from matplotlib import cm
 from OpenGL.GL import (
-    GL_BLEND, GL_CLAMP_TO_EDGE, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT,
-    GL_LINEAR, GL_LINES, GL_LINE_STRIP, GL_LINE_STIPPLE,
-    GL_LINE_SMOOTH, GL_LINE_SMOOTH_HINT, GL_NICEST, GL_DONT_CARE,
-    GL_MAX_TEXTURE_SIZE, GL_MODELVIEW, GL_NEAREST,
-    GL_ONE_MINUS_SRC_ALPHA, GL_PROJECTION, GL_QUADS, GL_RGBA,
-    GL_SRC_ALPHA, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
-    GL_TEXTURE_MIN_FILTER, GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T,
-    GL_UNPACK_ALIGNMENT, GL_UNSIGNED_BYTE,
-    glBindTexture, glBlendFunc, glClear, glClearColor, glColor4f,
-    glDisable, glEnable, glEnd, glGenTextures, glGetIntegerv,
-    glHint, glLineStipple, glLineWidth, glLoadIdentity, glMatrixMode, glOrtho,
-    glPixelStorei, glTexCoord2f, glTexImage2D, glTexParameteri,
-    glVertex2f, glViewport, glBegin,
+    GL_BLEND,
+    GL_CLAMP_TO_EDGE,
+    GL_COLOR_BUFFER_BIT,
+    GL_DEPTH_BUFFER_BIT,
+    GL_LINE_SMOOTH,
+    GL_LINE_SMOOTH_HINT,
+    GL_LINE_STIPPLE,
+    GL_LINE_STRIP,
+    GL_LINEAR,
+    GL_LINES,
+    GL_MAX_TEXTURE_SIZE,
+    GL_MODELVIEW,
+    GL_NEAREST,
+    GL_NICEST,
+    GL_ONE_MINUS_SRC_ALPHA,
+    GL_PROJECTION,
+    GL_QUADS,
+    GL_RGBA,
+    GL_SRC_ALPHA,
+    GL_TEXTURE_2D,
+    GL_TEXTURE_MAG_FILTER,
+    GL_TEXTURE_MIN_FILTER,
+    GL_TEXTURE_WRAP_S,
+    GL_TEXTURE_WRAP_T,
+    GL_UNPACK_ALIGNMENT,
+    GL_UNSIGNED_BYTE,
+    glBegin,
+    glBindTexture,
+    glBlendFunc,
+    glClear,
+    glClearColor,
+    glColor4f,
+    glDisable,
+    glEnable,
+    glEnd,
+    glGenTextures,
+    glGetIntegerv,
+    glHint,
+    glLineStipple,
+    glLineWidth,
+    glLoadIdentity,
+    glMatrixMode,
+    glOrtho,
+    glPixelStorei,
+    glTexCoord2f,
+    glTexImage2D,
+    glTexParameteri,
+    glVertex2f,
+    glViewport,
 )
 
 logger = logging.getLogger(__name__)
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QMouseEvent, QWheelEvent, QPainter, QFont, QColor
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QMenu
 

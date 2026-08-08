@@ -1,10 +1,12 @@
 """区域列表面板 — 底部可折叠面板，显示分析区域"""
 
-from PySide6.QtWidgets import (
-    QTableWidget, QTableWidgetItem, QHeaderView, QMenu,
-)
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
+    QMenu,
+    QTableWidget,
+    QTableWidgetItem,
+)
 
 
 class RegionTableWidget(QTableWidget):

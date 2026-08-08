@@ -7,14 +7,13 @@ import os
 os.environ["PYTHONUTF8"] = "1"
 
 from pathlib import Path
-from typing import List
 
 import xarray as xr
 
 logger = logging.getLogger("fish_acoustics")
 
 
-def load_raw_files(config: dict) -> List[Path]:
+def load_raw_files(config: dict) -> list[Path]:
     """加载 raw 文件列表"""
     raw_dir = Path(config["input"]["raw_dir"])
     pattern = config["input"].get("pattern", "*.raw")

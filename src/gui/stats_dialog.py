@@ -7,20 +7,33 @@
 - 添加数据过滤和排序功能
 """
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
-    QGroupBox, QTabWidget, QWidget, QHBoxLayout, QPushButton, QFileDialog,
-    QComboBox, QLineEdit, QHeaderView, QAbstractItemView, QMessageBox,
-    QMenu, QApplication, QProgressBar, QSplitter,
-)
-from PySide6.QtCore import Qt, Signal, QTimer, QSortFilterProxyModel
-from PySide6.QtGui import QColor, QBrush, QFont, QAction
-import pandas as pd
-import numpy as np
-import math
-import json
 import csv
-from pathlib import Path
+import json
+import math
+
+import pandas as pd
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction, QBrush, QColor
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class StatsDialog(QDialog):
@@ -617,7 +630,7 @@ class StatsDialog(QDialog):
             
             QMessageBox.information(self, "导出成功", f"数据已导出到: {file_path}")
         except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出数据时出错: {str(e)}")
+            QMessageBox.critical(self, "导出失败", f"导出数据时出错: {e!s}")
 
     # ── 底部按钮功能 ──
 
@@ -671,7 +684,7 @@ class StatsDialog(QDialog):
             
             QMessageBox.information(self, "导出成功", f"所有数据已导出到: {file_path}")
         except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出数据时出错: {str(e)}")
+            QMessageBox.critical(self, "导出失败", f"导出数据时出错: {e!s}")
 
     def _on_copy_clicked(self):
         """复制当前表格到剪贴板"""
@@ -707,7 +720,7 @@ class StatsDialog(QDialog):
             
             QMessageBox.information(self, "导出成功", f"{default_name}已导出到: {file_path}")
         except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出数据时出错: {str(e)}")
+            QMessageBox.critical(self, "导出失败", f"导出数据时出错: {e!s}")
 
 
 def _isnan(val):

@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from src.core.utils import get_sv_array, get_vertical_coords, sv_to_linear
 from src.core.region import get_echo_range_1d
+from src.core.utils import get_sv_array, get_vertical_coords, sv_to_linear
 
 logger = logging.getLogger("fish_acoustics")
 

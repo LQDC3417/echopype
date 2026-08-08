@@ -5,8 +5,9 @@
 
 import math
 from datetime import datetime
-from PySide6.QtWidgets import QStatusBar, QProgressBar, QLabel, QWidget, QHBoxLayout
-from PySide6.QtCore import Qt, QTimer
+
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QLabel, QProgressBar, QStatusBar
 
 
 class MainStatusBar(QStatusBar):

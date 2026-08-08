@@ -6,7 +6,6 @@
 import logging
 import os
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import xarray as xr

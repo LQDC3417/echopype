@@ -1,20 +1,28 @@
 """Fileset 树形面板 + 批量导入对话框 — Echoview 风格"""
 
 from pathlib import Path
-from typing import Optional
 
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QLabel, QDialog, QFileDialog, QProgressBar,
-    QDialogButtonBox, QCheckBox, QHeaderView, QMessageBox,
-    QSplitter, QListWidget, QListWidgetItem, QMenu, QLineEdit,
-    QFormLayout, QGroupBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Signal, Qt, QThread
-from PySide6.QtGui import QAction, QIcon
 
 from src.gui.fileset import Fileset, FilesetStore, RawFileInfo
-
 
 # ═══════════════════════════════════════════════════════════════
 # Probe Worker — 后台探测 raw 文件元信息
@@ -201,7 +209,7 @@ class BatchImportDialog(QDialog):
         self.fileset_created.emit(fileset)
         self.accept()
 
-    def get_fileset(self) -> Optional[Fileset]:
+    def get_fileset(self) -> Fileset | None:
         if not self._files:
             return None
         name = self.edit_name.text().strip() or "新建文件集"
@@ -224,7 +232,7 @@ class FilesetTreeWidget(QWidget):
         super().__init__(parent)
         self._store = FilesetStore()
         self._filesets: dict[str, Fileset] = {}
-        self._current_fileset: Optional[Fileset] = None
+        self._current_fileset: Fileset | None = None
         self._setup_ui()
         self._load_saved()
 
@@ -416,7 +424,7 @@ class FilesetTreeWidget(QWidget):
         # 立刻触发加载（不依赖 tree selection 信号）
         self.fileset_selected.emit(fileset)
 
-    def get_current_fileset(self) -> Optional[Fileset]:
+    def get_current_fileset(self) -> Fileset | None:
         return self._current_fileset
 
     def refresh(self):

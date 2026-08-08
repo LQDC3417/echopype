@@ -15,34 +15,50 @@
 └──────────────────────────────────────────────────┘
 """
 
-from pathlib import Path
 import logging
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-from PySide6.QtWidgets import (
-    QMainWindow, QSplitter, QFileDialog, QMessageBox,
-    QWidget, QVBoxLayout, QInputDialog, QDockWidget,
-)
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
-
-from src.viz.opengl_renderer import EchogramRenderer
-from src.gui.fileset_tree import FilesetTreeWidget, BatchImportDialog
-from src.gui.fileset import Fileset
-from src.gui.variable_list import VariableListWidget
-from src.gui.region_panel import RegionTableWidget
-from src.gui.property_panel import PropertyPanel
-from src.gui.stats_dialog import StatsDialog
-from src.gui.export_dialog import ExportDialog
-from src.gui.status_bar import MainStatusBar
-from src.gui.toolbars import StandardToolBar, EchogramToolBar, MouseMode
-from src.gui.workers import (
-    LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
-    DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker as DensityWorker, GridWorker,
-    BatchProcessWorker, QualityCheckWorker, MultifreqAnalysisWorker,
-    SingleTargetWorker, SvStatsWorker, TransectSplitWorker,
+from PySide6.QtWidgets import (
+    QDockWidget,
+    QFileDialog,
+    QInputDialog,
+    QMainWindow,
+    QMessageBox,
+    QSplitter,
 )
+
 from src.core.utils import load_config
+from src.gui.export_dialog import ExportDialog
+from src.gui.fileset import Fileset
+from src.gui.fileset_tree import BatchImportDialog, FilesetTreeWidget
+from src.gui.property_panel import PropertyPanel
+from src.gui.region_panel import RegionTableWidget
+from src.gui.stats_dialog import StatsDialog
+from src.gui.status_bar import MainStatusBar
+from src.gui.toolbars import EchogramToolBar, MouseMode, StandardToolBar
+from src.gui.variable_list import VariableListWidget
+from src.gui.workers import (
+    BatchProcessWorker,
+    ComputeSvWorker,
+    DetectSchoolsWorker,
+    DetectSeafloorWorker,
+    GridWorker,
+    LoadFileWorker,
+    MultifreqAnalysisWorker,
+    NoiseRemovalWorker,
+    QualityCheckWorker,
+    SingleTargetWorker,
+    SvStatsWorker,
+    TransectSplitWorker,
+)
+from src.gui.workers import (
+    ComputeDensityWorker as DensityWorker,
+)
+from src.viz.opengl_renderer import EchogramRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -516,7 +532,7 @@ class MainWindow(QMainWindow):
 
     def _apply_sv_to_display(self, ds_Sv, sv):
         """将 Sv 数据应用到显示：优化内存 + 更新渲染器"""
-        from src.core.utils import optimize_array_dtype, log_memory_usage
+        from src.core.utils import log_memory_usage, optimize_array_dtype
         # 内存优化：float64 → float32
         sv = optimize_array_dtype(sv)
         self._ds_Sv = ds_Sv
@@ -1151,13 +1167,13 @@ class MainWindow(QMainWindow):
         if n == 0:
             QMessageBox.information(self, "单体目标检测", "未检测到单体目标\n尝试降低 sv_threshold_db 参数")
             return
-        lines = [f"═══ 单体目标检测结果 ═══\n", f"检测到 {n} 个目标\n"]
+        lines = ["═══ 单体目标检测结果 ═══\n", f"检测到 {n} 个目标\n"]
         if not targets_df.empty:
             ts_col = "ts_db" if "ts_db" in targets_df.columns else None
             if ts_col:
                 ts_valid = targets_df[ts_col].dropna()
                 if len(ts_valid) > 0:
-                    lines.append(f"TS 统计:")
+                    lines.append("TS 统计:")
                     lines.append(f"  均值: {ts_valid.mean():.1f} dB")
                     lines.append(f"  中位: {ts_valid.median():.1f} dB")
                     lines.append(f"  范围: [{ts_valid.min():.1f}, {ts_valid.max():.1f}] dB")
@@ -1386,7 +1402,10 @@ class MainWindow(QMainWindow):
         if dlg.exec() != ExportDialog.Accepted:
             return
 
-        from src.core.export import export_all, export_density_to_csv, export_schools_to_csv
+        from src.core.export import (
+            export_density_to_csv,
+            export_schools_to_csv,
+        )
         from src.core.utils import get_output_dir
 
         formats = dlg.get_formats()
@@ -1400,7 +1419,11 @@ class MainWindow(QMainWindow):
 
         # 按内容导出
         if content.get("sv") and self._ds_Sv is not None:
-            from src.core.export import export_to_netcdf, export_sv_to_csv, export_to_excel
+            from src.core.export import (
+                export_sv_to_csv,
+                export_to_excel,
+                export_to_netcdf,
+            )
             if "netcdf" in formats:
                 exported.append(export_to_netcdf(self._get_analysis_ds(), output_dir / "sv_data.nc"))
             if "csv" in formats:

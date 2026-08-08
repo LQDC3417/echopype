@@ -1,8 +1,9 @@
 """左侧文件树组件"""
 
 from pathlib import Path
-from PySide6.QtWidgets import QTreeView, QFileSystemModel
+
 from PySide6.QtCore import QDir, Signal
+from PySide6.QtWidgets import QFileSystemModel, QTreeView
 
 
 class FileTree(QTreeView):

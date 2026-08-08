@@ -8,12 +8,15 @@
 """
 
 from enum import Enum
+
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QToolBar, QComboBox, QLabel, QSlider, QSpinBox, QDoubleSpinBox,
-    QPushButton, QToolButton, QButtonGroup, QFrame,
+    QComboBox,
+    QLabel,
+    QSlider,
+    QToolBar,
 )
-from PySide6.QtGui import QAction, QIcon, QFont
-from PySide6.QtCore import Signal, Qt, QSize
 
 
 class MouseMode(Enum):

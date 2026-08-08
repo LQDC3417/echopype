@@ -7,15 +7,27 @@
 - 网格配置增强：统计指标选择、输出格式、输入验证
 """
 
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QTabWidget, QWidget, QVBoxLayout, QFormLayout,
-    QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
-    QTableWidget, QTableWidgetItem, QGroupBox, QScrollArea,
-    QHBoxLayout, QFrame, QComboBox, QCheckBox, QLineEdit,
-    QToolTip, QMessageBox, QGridLayout,
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Signal, Qt, QTimer
-from PySide6.QtGui import QFont, QColor, QPalette
 
 
 class _InfoRow(QWidget):

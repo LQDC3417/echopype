@@ -1,7 +1,7 @@
 """变量列表组件 — 显示可用的声学变量"""
 
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QListWidget
-from PySide6.QtCore import Signal, Qt
 
 
 class VariableListWidget(QListWidget):

@@ -7,12 +7,13 @@
 - 支持取消操作
 """
 
-import traceback
 import logging
-import numpy as np
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from PySide6.QtCore import QThread, Signal
 from pathlib import Path
+
+import numpy as np
+from PySide6.QtCore import QThread, Signal
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class LoadFileWorker(QThread):
             self.progress.emit(f"加载文件: {self.raw_file.name}")
             echodata = open_single_file(self.raw_file, self.config)
             self.finished.emit(echodata)
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -74,7 +75,7 @@ class ComputeSvWorker(QThread):
             self.progress.emit("计算 Sv...")
             ds_Sv = compute_sv(self.echodata, self.config)
             self.finished.emit(ds_Sv)
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -103,7 +104,7 @@ class NoiseRemovalWorker(QThread):
             )
             ds = apply_manual_mask(ds, self.manual_mask)
             self.finished.emit(ds)
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -121,7 +122,11 @@ class DetectSeafloorWorker(QThread):
     def run(self):
         try:
             from echopype.mask import detect_seafloor
-            from src.core.region import get_echo_range_1d, bottom_depth_to_sample_indices
+
+            from src.core.region import (
+                bottom_depth_to_sample_indices,
+                get_echo_range_1d,
+            )
 
             bottom_cfg = self.config.get("processing", {}).get("bottom_detection", {})
             threshold = bottom_cfg.get("threshold", -50.0)
@@ -153,7 +158,7 @@ class DetectSeafloorWorker(QThread):
 
             bottom_indices = bottom_depth_to_sample_indices(bottom_depth_m, er)
             self.finished.emit(bottom_indices)
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -175,7 +180,7 @@ class DetectSchoolsWorker(QThread):
             self.progress.emit("检测鱼群...")
             df = detect_schools(self.ds_Sv, school_cfg)
             self.finished.emit(df)
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -197,7 +202,7 @@ class ComputeDensityWorker(QThread):
             self.progress.emit("计算密度...")
             df = estimate_density(self.schools_df, self.ds_Sv, self.config)
             self.finished.emit(df)
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -250,7 +255,7 @@ class GridWorker(QThread):
         """执行网格分析"""
         try:
             # 导入必要的模块
-            from src.core.grid import create_grid, compute_grid_density
+            from src.core.grid import compute_grid_density, create_grid
             
             # 步骤 1: 参数验证
             self._emit_progress("验证参数...", 1)
@@ -311,28 +316,28 @@ class GridWorker(QThread):
             
         except InterruptedError as e:
             # 用户取消
-            logger.info(f"网格分析被取消: {str(e)}")
-            self.error.emit(f"网格分析已取消: {str(e)}")
+            logger.info(f"网格分析被取消: {e!s}")
+            self.error.emit(f"网格分析已取消: {e!s}")
             
         except ImportError as e:
             # 导入错误
-            error_msg = f"缺少必要的模块: {str(e)}\n请检查 echopype 和相关依赖是否正确安装"
+            error_msg = f"缺少必要的模块: {e!s}\n请检查 echopype 和相关依赖是否正确安装"
             logger.error(error_msg)
             self.error.emit(error_msg)
             
         except KeyError as e:
             # 配置键错误
-            error_msg = f"配置参数错误: 缺少必要的参数 {str(e)}\n请检查网格配置是否完整"
+            error_msg = f"配置参数错误: 缺少必要的参数 {e!s}\n请检查网格配置是否完整"
             logger.error(error_msg)
             self.error.emit(error_msg)
             
         except ValueError as e:
             # 值错误
-            error_msg = f"参数值错误: {str(e)}\n请检查输入参数是否有效"
+            error_msg = f"参数值错误: {e!s}\n请检查输入参数是否有效"
             logger.error(error_msg)
             self.error.emit(error_msg)
             
-        except MemoryError as e:
+        except MemoryError:
             # 内存错误
             error_msg = "内存不足：请尝试减小网格间隔或使用更小的数据集"
             logger.error(error_msg)
@@ -340,7 +345,7 @@ class GridWorker(QThread):
             
         except Exception as e:
             # 其他错误
-            error_msg = f"网格分析过程中发生错误: {str(e)}\n\n详细错误信息:\n{traceback.format_exc()}"
+            error_msg = f"网格分析过程中发生错误: {e!s}\n\n详细错误信息:\n{traceback.format_exc()}"
             logger.error(error_msg)
             self.error.emit(error_msg)
 
@@ -432,7 +437,7 @@ class BatchProcessWorker(QThread):
             ds_Sv = process_single_file(echodata, self.config)
             return path_str, ds_Sv, ""
 
-        except Exception as e:
+        except Exception:
             return path_str, None, traceback.format_exc()
 
     def run(self):
@@ -489,7 +494,7 @@ class QualityCheckWorker(QThread):
 
     def run(self):
         try:
-            from src.core.quality import check_sv_quality, check_bottom_line
+            from src.core.quality import check_bottom_line, check_sv_quality
 
             self.progress.emit("正在检查 Sv 数据质量...")
             sv_result = check_sv_quality(self.ds_Sv)
@@ -502,7 +507,7 @@ class QualityCheckWorker(QThread):
 
             self.finished.emit({"sv": sv_result, "bottom": bl_result})
 
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -526,7 +531,11 @@ class MultifreqAnalysisWorker(QThread):
 
     def run(self):
         try:
-            from src.core.multifreq import get_channel_summary, compare_frequencies, list_channels
+            from src.core.multifreq import (
+                compare_frequencies,
+                get_channel_summary,
+                list_channels,
+            )
 
             self.progress.emit("正在分析通道信息...")
             channel_summary = get_channel_summary(self.ds_Sv)
@@ -545,7 +554,7 @@ class MultifreqAnalysisWorker(QThread):
                 "channels": channels,
             })
 
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -574,7 +583,7 @@ class SingleTargetWorker(QThread):
             targets_df = detect_and_compute_ts(self.ds_Sv, self.config)
             self.finished.emit(targets_df)
 
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -594,7 +603,7 @@ class SvStatsWorker(QThread):
             self.progress.emit("计算 Sv 统计...")
             result = sv_statistics_summary(self.ds_Sv)
             self.finished.emit(result)
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -612,7 +621,7 @@ class TransectSplitWorker(QThread):
 
     def run(self):
         try:
-            from src.core.multifreq import split_transects, get_channel_summary
+            from src.core.multifreq import get_channel_summary, split_transects
             self.progress.emit("分段中...")
             transect_ids = split_transects(self.ds_Sv, method=self.method, max_gap_s=self.max_gap_s)
             n_transects = int(transect_ids.max()) + 1 if len(transect_ids) > 0 else 0
@@ -622,7 +631,7 @@ class TransectSplitWorker(QThread):
                 "n_transects": n_transects,
                 "channel_summary": summary,
             })
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
     """单体目标检测工作线程
 
@@ -648,6 +657,6 @@ class TransectSplitWorker(QThread):
             targets_df = detect_and_compute_ts(self.ds_Sv, self.config)
             self.finished.emit(targets_df)
 
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 

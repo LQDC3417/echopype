@@ -5,14 +5,11 @@
 
 from __future__ import annotations
 
-import os
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
-import numpy as np
 import pandas as pd
 import yaml
 
@@ -27,14 +24,14 @@ class RawFileInfo:
     channels: list[str] = field(default_factory=list)
     frequencies: list[float] = field(default_factory=list)
     ping_count: int = 0
-    time_start: Optional[datetime] = None
-    time_end: Optional[datetime] = None
+    time_start: datetime | None = None
+    time_end: datetime | None = None
     sonar_model: str = "EK80"
     is_valid: bool = False
     error_msg: str = ""
 
     @classmethod
-    def probe(cls, path: Path, fast: bool = False) -> "RawFileInfo":
+    def probe(cls, path: Path, fast: bool = False) -> RawFileInfo:
         """探测 raw 文件元信息（快速模式只读文件头，不做全量解析）"""
         info = cls(path=path, size_mb=path.stat().st_size / 1e6 if path.exists() else 0)
         if fast:
@@ -70,7 +67,7 @@ class RawFileInfo:
         return info
 
 
-def _to_datetime(val) -> Optional[datetime]:
+def _to_datetime(val) -> datetime | None:
     """numpy datetime64 → Python datetime"""
     try:
         ts = pd.Timestamp(val)
@@ -121,7 +118,7 @@ class Fileset:
 
     @classmethod
     def from_folder(cls, folder: Path, name: str = None,
-                    pattern: str = "*.raw") -> "Fileset":
+                    pattern: str = "*.raw") -> Fileset:
         """从文件夹创建文件集"""
         folder = Path(folder)
         files = sorted(folder.glob(pattern))
@@ -130,7 +127,7 @@ class Fileset:
         return cls(name=name or folder.name, files=list(files))
 
     @classmethod
-    def from_paths(cls, paths: list[Path], name: str = "新建文件集") -> "Fileset":
+    def from_paths(cls, paths: list[Path], name: str = "新建文件集") -> Fileset:
         """从文件路径列表创建文件集"""
         return cls(name=name, files=[Path(p) for p in paths])
 
@@ -143,7 +140,7 @@ class Fileset:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Fileset":
+    def from_dict(cls, d: dict) -> Fileset:
         fs = cls(
             name=d["name"],
             files=[Path(p) for p in d.get("files", [])],
@@ -165,7 +162,7 @@ def _freq_sort_key(ch: str) -> float:
 class FilesetStore:
     """文件集持久化存储"""
 
-    def __init__(self, store_dir: Optional[Path] = None):
+    def __init__(self, store_dir: Path | None = None):
         self.store_dir = store_dir or Path.home() / ".echogram"
         self.store_dir.mkdir(parents=True, exist_ok=True)
         self._index_path = self.store_dir / "filesets.yaml"
@@ -178,7 +175,7 @@ class FilesetStore:
             data = yaml.safe_load(f) or {}
         return list(data.keys())
 
-    def load(self, name: str) -> Optional[Fileset]:
+    def load(self, name: str) -> Fileset | None:
         """加载文件集"""
         if not self._index_path.exists():
             return None
