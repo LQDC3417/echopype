@@ -163,10 +163,9 @@ class DetectSchoolsWorker(QThread):
     error = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, ds_Sv, bottom_indices, config: dict):
+    def __init__(self, ds_Sv, config: dict):
         super().__init__()
         self.ds_Sv = ds_Sv
-        self.bottom_indices = bottom_indices
         self.config = config
 
     def run(self):
@@ -174,7 +173,7 @@ class DetectSchoolsWorker(QThread):
             from src.core.school import detect_schools
             school_cfg = self.config.get("school_detection", {})
             self.progress.emit("检测鱼群...")
-            df = detect_schools(self.ds_Sv, self.bottom_indices, school_cfg)
+            df = detect_schools(self.ds_Sv, school_cfg)
             self.finished.emit(df)
         except Exception as e:
             self.error.emit(traceback.format_exc())

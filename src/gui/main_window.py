@@ -316,6 +316,9 @@ class MainWindow(QMainWindow):
         self.property_panel.quality_check_clicked.connect(self._run_quality_check)
         self.property_panel.multifreq_clicked.connect(self._run_multifreq_analysis)
         self.property_panel.single_target_clicked.connect(self._run_single_target_detection)
+        self.property_panel.detect_bottom_clicked.connect(self._detect_bottom)
+        self.property_panel.draw_bottom_clicked.connect(self._start_draw_bottom)
+        self.property_panel.update_bottom_clicked.connect(self._on_update_bottom)
 
         # 变量列表
         self.variable_list.variable_selected.connect(self._on_variable_selected)
@@ -828,6 +831,14 @@ class MainWindow(QMainWindow):
         self._save_file_state()
         self._apply_analysis_region_to_ds()
         self.statusbar.set_status("底线已手动更新")
+
+    def _start_draw_bottom(self):
+        """切换到绘制底线模式"""
+        self.echo_toolbar.mode_combo.blockSignals(True)
+        self.echo_toolbar.mode_combo.setCurrentIndex(2)  # DRAW_BOTTOM
+        self.echo_toolbar.mode_combo.blockSignals(False)
+        self.echogram.set_mouse_mode(MouseMode.DRAW_BOTTOM.value)
+        self.statusbar.set_status("绘制底线模式：左键拖动绘制，右键完成")
 
     def _on_update_bottom(self):
         """右键 → 更新底线：显式保存当前底线状态"""
