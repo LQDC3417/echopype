@@ -7,13 +7,13 @@
 """
 
 import logging
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 
-from src.core.utils import get_sv_array, get_vertical_coords, sv_to_linear
+from src.core.utils import get_sv_array, get_vertical_coords
 
 logger = logging.getLogger("fish_acoustics")
 
@@ -25,8 +25,8 @@ def _split_vertical(
     surface_depth_m: float,
     interval_m: float,
     mode: str = "linear",
-    depth_bins: Optional[list[float]] = None,
-    max_depth: Optional[float] = None,
+    depth_bins: list[float] | None = None,
+    max_depth: float | None = None,
 ) -> list[tuple[float, float]]:
     """从表线深度开始，按指定模式划分深度层。
 
@@ -257,7 +257,7 @@ def _extract_gps(ds_Sv: xr.Dataset) -> tuple[np.ndarray | None, np.ndarray | Non
     # 处理多维坐标（取第一个 channel）
     if lat.ndim > 1:
         # 优先用 xarray 维度名判断；否则回退到 shape 启发式
-        lat_arr = ds_Sv["latitude"] if "latitude" in ds_Sv else None
+        lat_arr = ds_Sv.get("latitude", None)
         if lat_arr is not None and "channel" in lat_arr.dims:
             ch_dim = list(lat_arr.dims).index("channel")
             idx = [0] * lat.ndim
@@ -297,8 +297,8 @@ def create_grid(
     horizontal_interval: float,
     method: str = "ping",
     vertical_mode: str = "linear",
-    depth_bins: Optional[list[float]] = None,
-    max_depth: Optional[float] = None,
+    depth_bins: list[float] | None = None,
+    max_depth: float | None = None,
 ) -> list[dict]:
     """创建网格划分。
 
@@ -408,7 +408,7 @@ def _segment_center_gps(
 def compute_grid_stats(
     ds_Sv: xr.Dataset,
     grid_cells: list[dict],
-    progress_callback: Optional[Callable[[int, int], None]] = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> pd.DataFrame:
     """计算每个网格单元的统计指标。
 
@@ -548,12 +548,12 @@ def compute_grid_stats(
     return result
 
 
-def _update_progress(callback: Optional[Callable[[int, int], None]], current: int, total: int):
+def _update_progress(callback: Callable[[int, int], None] | None, current: int, total: int):
     """更新进度回调。"""
     if callback is not None:
         try:
             callback(current, total)
-        except Exception as e:
+        except (TypeError, ValueError, RuntimeError) as e:
             logger.warning(f"进度回调执行失败: {e}")
 
 
@@ -587,7 +587,7 @@ def compute_grid_density(
     ds_Sv: xr.Dataset,
     grid_cells: list[dict],
     config: dict,
-    progress_callback: Optional[Callable[[int, int], None]] = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> pd.DataFrame:
     """计算每个网格单元的密度估算。
 
