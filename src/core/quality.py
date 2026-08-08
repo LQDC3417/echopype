@@ -60,13 +60,13 @@ def check_sv_quality(ds_Sv: xr.Dataset) -> dict:
     sv_min = float(np.nanmin(sv_valid))
     sv_max = float(np.nanmax(sv_valid))
 
-    # 合理性检查
-    if sv_min < -100:
-        warnings_list.append(f"Sv 最小值 {sv_min:.1f} dB 异常偏小（<-100 dB）")
-    if sv_max > 0:
-        warnings_list.append(f"Sv 最大值 {sv_max:.1f} dB 异常偏大（>0 dB）")
-    if nan_ratio > 0.5:
-        warnings_list.append(f"NaN 比例 {nan_ratio:.1%} 过高（>50%）")
+    # 合理性检查（阈值适配真实 EK80 数据）
+    if sv_min < -120:
+        warnings_list.append(f"Sv 最小值 {sv_min:.1f} dB 异常偏小（<-120 dB）")
+    if sv_max > 10:
+        warnings_list.append(f"Sv 最大值 {sv_max:.1f} dB 异常偏大（>10 dB，可能为近距离强反射）")
+    if nan_ratio > 0.98:
+        warnings_list.append(f"NaN 比例 {nan_ratio:.1%} 过高（>98%，数据几乎全空）")
     if n_pings < 10:
         warnings_list.append(f"Ping 数过少（{n_pings}），统计结果可能不可靠")
 
@@ -113,9 +113,9 @@ def check_bottom_line(bottom: np.ndarray, n_samples: int) -> dict:
 
     bottom_valid = bottom[np.isfinite(bottom)]
 
-    # 检查底线是否在合理范围
-    if np.any(bottom_valid < 0):
-        warnings_list.append("底线存在负值")
+    # 检查底线是否在合理范围（允许小负值，表线偏移正常）
+    if np.any(bottom_valid < -1.0):
+        warnings_list.append(f"底线异常负值: {bottom_valid.min():.2f}")
     if np.any(bottom_valid >= n_samples):
         warnings_list.append("底线超出采样范围")
 
