@@ -4,7 +4,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from src.core.utils import load_config, validate_config
+from src.core.utils import validate_config
 
 
 @pytest.mark.skipif(

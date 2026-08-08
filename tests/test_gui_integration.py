@@ -241,7 +241,7 @@ def main():
     echodata = int_echodata(config)
     ds_sv = int_ds_sv(echodata, config)
     sv = int_sv(ds_sv)
-    ds_clean = int_ds_clean(ds_sv, config)
+    int_ds_clean(ds_sv, config)
     bottom = int_bottom(sv)
     mask = int_schools_mask(ds_sv, config)
     schools_df = int_schools_df(mask, ds_sv)

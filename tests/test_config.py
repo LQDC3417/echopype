@@ -1,7 +1,6 @@
 """配置加载测试"""
 
 import pytest
-import yaml
 
 from src.core.utils import load_config, validate_config
 

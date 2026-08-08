@@ -2,12 +2,10 @@
 
 import sys
 import os
-import numpy as np
 
 os.environ["PYTHONUTF8"] = "1"
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QTimer
 from src.gui.main_window import MainWindow
 from src.gui.theme import DARK_THEME
 from pathlib import Path

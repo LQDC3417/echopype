@@ -10,7 +10,6 @@ class TestBottomDrawing:
     def test_apply_drawn_segment_basic(self):
         """基本手绘：两个点之间的线性插值"""
         n_pings = 100
-        n_samples = 500
         bottom = np.full(n_pings, np.nan, dtype=np.float32)
 
         # 模拟绘制点：(ping, sample)
@@ -123,8 +122,6 @@ class TestBottomDrawing:
     def test_draw_points_boundary(self):
         """绘制点边界检查"""
         n_pings = 100
-        n_samples = 500
-        bottom = np.full(n_pings, np.nan, dtype=np.float32)
 
         # 超出范围的点
         draw_points = [(-5, 100.0), (105, 200.0)]

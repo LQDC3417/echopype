@@ -84,7 +84,7 @@ def run_all_tests():
             report("bottom_depth", "OK", f"有效值: {len(valid)}/{len(bottom)}")
         else:
             report("bottom_depth", "FAIL", "bottom_depth 不存在")
-    except Exception as e:
+    except Exception:
         report("process_single_file", "FAIL", traceback.format_exc())
         return
 
@@ -102,7 +102,7 @@ def run_all_tests():
             bl_check = check_bottom_line(ds_Sv["bottom_depth"].values, ds_Sv.sizes.get("range_sample", 0))
             report("check_bottom_line", "OK" if bl_check["valid"] else "WARN",
                    f"valid={bl_check['valid']}, warnings={bl_check['warnings']}")
-    except Exception as e:
+    except Exception:
         report("quality_check", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
@@ -124,7 +124,7 @@ def run_all_tests():
                 report("crop_sv_by_region", "OK", f"裁剪后尺寸: {dict(ds_cropped.sizes)}")
             else:
                 report("crop_sv_by_region", "WARN", "无有效底线，跳过裁剪")
-    except Exception as e:
+    except Exception:
         report("region_crop", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
@@ -139,7 +139,7 @@ def run_all_tests():
             report("detect_schools", "OK", f"类型: {type(school_mask).__name__}, 鱼群像素: {n_schools}")
         else:
             report("detect_schools", "OK", f"返回类型: {type(school_mask).__name__}")
-    except Exception as e:
+    except Exception:
         report("detect_schools", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
@@ -150,7 +150,7 @@ def run_all_tests():
         from src.core.density import estimate_density
         density_df = estimate_density(pd.DataFrame(), ds_Sv, config.get("density", {}))
         report("estimate_density", "OK", f"结果: {len(density_df)} 行, 列: {list(density_df.columns)[:5]}")
-    except Exception as e:
+    except Exception:
         report("estimate_density", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
@@ -170,7 +170,7 @@ def run_all_tests():
         has_cell_id = "cell_id" in cols
         report("compute_grid_density", "OK",
                f"cell_id={has_cell_id}, lat={has_lat}, lon={has_lon}, abc={has_abc}, 行数={len(grid_df)}")
-    except Exception as e:
+    except Exception:
         report("grid_analysis", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
@@ -185,7 +185,7 @@ def run_all_tests():
                    f"目标数: {len(targets)}, 列: {list(targets.columns)[:8]}")
         else:
             report("single_target", "WARN", "未检测到目标")
-    except Exception as e:
+    except Exception:
         report("single_target", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
@@ -207,7 +207,7 @@ def run_all_tests():
         transect_ids = split_transects(ds_Sv)
         n_transects = int(transect_ids.max()) + 1 if len(transect_ids) > 0 else 0
         report("split_transects", "OK", f"分段数: {n_transects}")
-    except Exception as e:
+    except Exception:
         report("multifreq", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
@@ -218,7 +218,7 @@ def run_all_tests():
         from src.core.density import sv_statistics_summary
         stats = sv_statistics_summary(ds_Sv)
         report("sv_statistics_summary", "OK", f"统计行数: {len(stats)}")
-    except Exception as e:
+    except Exception:
         report("sv_statistics_summary", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
@@ -234,7 +234,7 @@ def run_all_tests():
             for p in paths:
                 size = p.stat().st_size
                 report(f"  {p.name}", "OK", f"{size/1024:.0f} KB")
-    except Exception as e:
+    except Exception:
         report("export", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════

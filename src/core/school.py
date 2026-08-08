@@ -53,6 +53,9 @@ def detect_schools(
     channel = str(ds_Sv["channel"].values[0]) if "channel" in ds_Sv.dims else None
     ping_time = ds_Sv["ping_time"].values
 
+    # 优先使用去噪数据
+    var_name = "Sv_corrected" if "Sv_corrected" in ds_Sv else "Sv"
+
     # 垂直坐标
     idim_center = get_vertical_coords(ds_Sv)
 
@@ -72,9 +75,6 @@ def detect_schools(
 
     idim = _build_edge_coords(idim_center)
     jdim = _build_edge_coords(jdim_center)
-
-    # 优先使用去噪数据
-    var_name = "Sv_corrected" if "Sv_corrected" in ds_Sv else "Sv"
 
     params = {
         "var_name": var_name,

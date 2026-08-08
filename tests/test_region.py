@@ -1,15 +1,12 @@
 """分析区域模块测试"""
 
 import numpy as np
-import pytest
 import xarray as xr
 
 from src.core.region import (
     depth_to_sample_index,
     bottom_depth_to_sample_indices,
     get_echo_range_1d,
-    get_surface_sample,
-    get_bottom_samples,
     build_analysis_mask,
     crop_sv_by_region,
 )

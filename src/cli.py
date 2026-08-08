@@ -1,6 +1,5 @@
 """CLI 入口 — fish-acoustics 命令行工具"""
 
-import sys
 import os
 
 os.environ["PYTHONUTF8"] = "1"

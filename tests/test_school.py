@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 import xarray as xr
 
 from src.core.school import detect_schools, schools_to_dataframe

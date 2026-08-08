@@ -1,10 +1,8 @@
 """声学处理模块测试"""
 
-import numpy as np
 import pytest
-import xarray as xr
 
-from src.core.acoustic import load_raw_files, process_single_file
+from src.core.acoustic import load_raw_files
 
 
 def test_load_raw_files_not_found(tmp_path):

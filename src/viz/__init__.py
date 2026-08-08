@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
+
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -72,7 +72,7 @@ def plot_echogram(
     ax.set_ylabel("Range Sample")
     ax.set_title(title)
 
-    cbar = fig.colorbar(im, ax=ax, label="Sv (dB)")
+    fig.colorbar(im, ax=ax, label="Sv (dB)")
 
     if save_path:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
