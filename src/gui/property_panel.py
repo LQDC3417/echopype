@@ -97,6 +97,8 @@ class ProcessingTab(QWidget):
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
     single_target_clicked = Signal()
+    sv_stats_clicked = Signal()
+    transect_split_clicked = Signal()
     # ??????
     detect_bottom_clicked = Signal()
     draw_bottom_clicked = Signal()
@@ -409,6 +411,21 @@ class ProcessingTab(QWidget):
         btn_layout3.addWidget(self.btn_single_target)
         layout.addLayout(btn_layout3)
 
+        # ── Sv 统计摘要 ──
+        self.btn_sv_stats = QPushButton("📈 Sv 统计摘要")
+        self.btn_sv_stats.setToolTip("按 transect 统计 Sv 均值/中位/分位数/NaN 比例")
+        self.btn_sv_stats.clicked.connect(self.sv_stats_clicked)
+
+        # ── Transect 分段 ──
+        self.btn_transect = QPushButton("✂ Transect 分段")
+        self.btn_transect.setToolTip("按时间间隔或固定 ping 数分割 transect")
+        self.btn_transect.clicked.connect(self.transect_split_clicked)
+
+        btn_layout4 = QHBoxLayout()
+        btn_layout4.addWidget(self.btn_sv_stats)
+        btn_layout4.addWidget(self.btn_transect)
+        layout.addLayout(btn_layout4)
+
         layout.addStretch()
         scroll.setWidget(container)
 
@@ -619,6 +636,8 @@ class PropertyPanel(QTabWidget):
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
     single_target_clicked = Signal()
+    sv_stats_clicked = Signal()
+    transect_split_clicked = Signal()
     # ??????
     detect_bottom_clicked = Signal()
     draw_bottom_clicked = Signal()
@@ -648,3 +667,5 @@ class PropertyPanel(QTabWidget):
         self.processing.quality_check_clicked.connect(self.quality_check_clicked)
         self.processing.multifreq_clicked.connect(self.multifreq_clicked)
         self.processing.single_target_clicked.connect(self.single_target_clicked)
+        self.processing.sv_stats_clicked.connect(self.sv_stats_clicked)
+        self.processing.transect_split_clicked.connect(self.transect_split_clicked)

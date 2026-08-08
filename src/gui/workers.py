@@ -577,3 +577,77 @@ class SingleTargetWorker(QThread):
         except Exception as e:
             self.error.emit(traceback.format_exc())
 
+
+class SvStatsWorker(QThread):
+    """Sv 统计摘要工作线程"""
+    finished = Signal(object)
+    error = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, ds_Sv):
+        super().__init__()
+        self.ds_Sv = ds_Sv
+
+    def run(self):
+        try:
+            from src.core.density import sv_statistics_summary
+            self.progress.emit("计算 Sv 统计...")
+            result = sv_statistics_summary(self.ds_Sv)
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(traceback.format_exc())
+
+
+class TransectSplitWorker(QThread):
+    """Transect 分段工作线程"""
+    finished = Signal(object)
+    error = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, ds_Sv, method="time_gap", max_gap_s=60.0):
+        super().__init__()
+        self.ds_Sv = ds_Sv
+        self.method = method
+        self.max_gap_s = max_gap_s
+
+    def run(self):
+        try:
+            from src.core.multifreq import split_transects, get_channel_summary
+            self.progress.emit("分段中...")
+            transect_ids = split_transects(self.ds_Sv, method=self.method, max_gap_s=self.max_gap_s)
+            n_transects = int(transect_ids.max()) + 1 if len(transect_ids) > 0 else 0
+            summary = get_channel_summary(self.ds_Sv)
+            self.finished.emit({
+                "transect_ids": transect_ids,
+                "n_transects": n_transects,
+                "channel_summary": summary,
+            })
+        except Exception as e:
+            self.error.emit(traceback.format_exc())
+    """单体目标检测工作线程
+
+    信号：
+    - finished(object): 检测结果 DataFrame
+    - error(str): 错误信息
+    - progress(str): 进度信息
+    """
+    finished = Signal(object)
+    error = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, ds_Sv, config):
+        super().__init__()
+        self.ds_Sv = ds_Sv
+        self.config = config
+
+    def run(self):
+        try:
+            from src.core.single_target import detect_and_compute_ts
+
+            self.progress.emit("正在检测单体目标...")
+            targets_df = detect_and_compute_ts(self.ds_Sv, self.config)
+            self.finished.emit(targets_df)
+
+        except Exception as e:
+            self.error.emit(traceback.format_exc())
+

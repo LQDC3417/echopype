@@ -40,7 +40,7 @@ from src.gui.workers import (
     LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
     DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker as DensityWorker, GridWorker,
     BatchProcessWorker, QualityCheckWorker, MultifreqAnalysisWorker,
-    SingleTargetWorker,
+    SingleTargetWorker, SvStatsWorker, TransectSplitWorker,
 )
 from src.core.utils import load_config
 
@@ -316,6 +316,8 @@ class MainWindow(QMainWindow):
         self.property_panel.quality_check_clicked.connect(self._run_quality_check)
         self.property_panel.multifreq_clicked.connect(self._run_multifreq_analysis)
         self.property_panel.single_target_clicked.connect(self._run_single_target_detection)
+        self.property_panel.sv_stats_clicked.connect(self._run_sv_stats)
+        self.property_panel.transect_split_clicked.connect(self._run_transect_split)
         self.property_panel.detect_bottom_clicked.connect(self._detect_bottom)
         self.property_panel.draw_bottom_clicked.connect(self._start_draw_bottom)
         self.property_panel.update_bottom_clicked.connect(self._on_update_bottom)
@@ -367,6 +369,11 @@ class MainWindow(QMainWindow):
         if path:
             try:
                 self._config = load_config(path)
+                # 配置验证
+                from src.core.utils import validate_config
+                errors = validate_config(self._config)
+                if errors:
+                    QMessageBox.warning(self, "配置警告", "\n".join(errors))
                 self.statusbar.set_status(f"配置已加载: {path}")
                 self.property_panel.processing.load_from_config(self._config)
             except Exception as e:
@@ -508,12 +515,16 @@ class MainWindow(QMainWindow):
         self._current_worker.start()
 
     def _apply_sv_to_display(self, ds_Sv, sv):
-        """将 Sv 数据应用到显示：更新变量列表、渲染器、文件信息、表线。"""
+        """将 Sv 数据应用到显示：优化内存 + 更新渲染器"""
+        from src.core.utils import optimize_array_dtype, log_memory_usage
+        # 内存优化：float64 → float32
+        sv = optimize_array_dtype(sv)
         self._ds_Sv = ds_Sv
         self._update_variable_list(ds_Sv, sv)
         self.echogram.set_data(sv)
         self._update_file_info(ds_Sv)
         self._update_surface_line_render()
+        log_memory_usage("数据加载")
 
     def _on_cached_sv_computed(self, ds_Sv, path: Path):
         """Sv 计算完成 → 缓存 → 显示 → 自动加载下一个"""
@@ -1152,6 +1163,56 @@ class MainWindow(QMainWindow):
                     lines.append(f"  范围: [{ts_valid.min():.1f}, {ts_valid.max():.1f}] dB")
             lines.append(f"\n目标列: {', '.join(targets_df.columns[:8])}")
         QMessageBox.information(self, "单体目标检测", "\n".join(lines))
+
+    # ═══════════════════════════════════════════════════════
+    # Sv 统计摘要
+    # ═══════════════════════════════════════════════════════
+
+    def _run_sv_stats(self):
+        """Sv 统计摘要"""
+        if self._ds_Sv is None:
+            QMessageBox.warning(self, "警告", "请先加载数据")
+            return
+        self.statusbar.show_progress("计算 Sv 统计...")
+        self._current_worker = SvStatsWorker(self._get_analysis_ds())
+        self._current_worker.finished.connect(self._on_sv_stats_done)
+        self._current_worker.error.connect(self._on_worker_error)
+        self._current_worker.progress.connect(self.statusbar.set_status)
+        self._current_worker.start()
+
+    def _on_sv_stats_done(self, result):
+        self.statusbar.hide_progress()
+        if result is None or result.empty:
+            QMessageBox.information(self, "Sv 统计", "无统计结果")
+            return
+        lines = ["═══ Sv 统计摘要 ═══\n"]
+        for _, row in result.iterrows():
+            lines.append(f"Transect {row.get('transect_id', '?')}: {row.get('n_pings', 0)} pings")
+            lines.append(f"  均值: {row.get('mean_sv', 0):.1f} dB, 中位: {row.get('median_sv', 0):.1f} dB")
+            lines.append(f"  P5~P95: [{row.get('p5_sv', 0):.1f}, {row.get('p95_sv', 0):.1f}] dB")
+            lines.append(f"  NaN: {row.get('nan_ratio', 0):.1%}")
+        QMessageBox.information(self, "Sv 统计", "\n".join(lines))
+
+    # ═══════════════════════════════════════════════════════
+    # Transect 分段
+    # ═══════════════════════════════════════════════════════
+
+    def _run_transect_split(self):
+        """Transect 分段"""
+        if self._ds_Sv is None:
+            QMessageBox.warning(self, "警告", "请先加载数据")
+            return
+        self.statusbar.show_progress("分段中...")
+        self._current_worker = TransectSplitWorker(self._get_analysis_ds())
+        self._current_worker.finished.connect(self._on_transect_split_done)
+        self._current_worker.error.connect(self._on_worker_error)
+        self._current_worker.progress.connect(self.statusbar.set_status)
+        self._current_worker.start()
+
+    def _on_transect_split_done(self, result):
+        self.statusbar.hide_progress()
+        n = result.get("n_transects", 0)
+        QMessageBox.information(self, "Transect 分段", f"分段完成：共 {n} 个 transect")
 
     def _update_file_info(self, ds_Sv):
         """更新状态栏文件信息"""
