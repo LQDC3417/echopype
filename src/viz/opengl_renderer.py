@@ -303,6 +303,9 @@ class EchogramRenderer(QOpenGLWidget):
         self.update()
 
     def set_mouse_mode(self, mode) -> None:
+        # 支持 int 和 MouseMode 两种输入
+        if isinstance(mode, int):
+            mode = MouseMode(mode)
         self._mouse_mode = mode
         # 退出正在进行的编辑
         if mode != MouseMode.DRAW_BOTTOM:
