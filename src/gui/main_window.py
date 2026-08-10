@@ -802,6 +802,10 @@ class MainWindow(QMainWindow):
             self.echogram.set_data(sv_raw)
             self.statusbar.set_status("噪声去除完成")
 
+        # 恢复手动编辑的底线（set_data 不清除底线，但重新渲染可能需要恢复）
+        if self._bottom_line is not None:
+            self.echogram.set_bottom_line(self._bottom_line)
+
         # 同步更新缓存中当前文件的 ds
         if self._raw_file_queue and self._raw_queue_index < len(self._raw_file_queue):
             key = str(self._raw_file_queue[self._raw_queue_index])
