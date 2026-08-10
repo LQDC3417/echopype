@@ -89,6 +89,7 @@ class MainWindow(QMainWindow):
         self._ds_Sv_analysis = None   # 分析区域裁剪后的 Sv（表线~底线）
         self._noise_mask_manual = None
         self._bottom_line = None
+        self._bottom_manually_edited = False  # 底线是否被手动编辑过
         self._surface_depth_m = 2.0  # 表线深度（米）
         self._analysis_region_enabled = False  # 分析区域限定
         self._schools_mask = None
@@ -814,6 +815,10 @@ class MainWindow(QMainWindow):
         if self._ds_Sv is None or self._config is None:
             QMessageBox.warning(self, "警告", "请先加载数据")
             return
+        # 手动编辑过的底线不自动覆盖
+        if self._bottom_manually_edited and self._bottom_line is not None:
+            self.statusbar.set_status("底线已手动编辑，跳过自动检测")
+            return
         # 同步 UI 参数到 config
         self._config.setdefault("processing", {})["bottom_detection"] = {
             **self._config.get("processing", {}).get("bottom_detection", {}),
@@ -851,6 +856,7 @@ class MainWindow(QMainWindow):
 
     def _on_bottom_line_edited(self, bottom):
         self._bottom_line = bottom
+        self._bottom_manually_edited = True  # 标记手动编辑
         self.echogram.set_bottom_line(bottom)
         self._save_file_state()
         self._apply_analysis_region_to_ds()
