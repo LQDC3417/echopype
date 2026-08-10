@@ -249,8 +249,9 @@ class EchogramRenderer(QOpenGLWidget):
         echo_range = None
         if ds_Sv is not None and "echo_range" in ds_Sv:
             echo_range = ds_Sv["echo_range"].values
-            if echo_range.ndim == 2:
-                echo_range = echo_range[0]  # 取第一 ping
+            # 降维到 1D：(channel, ping, sample) → (sample,)
+            while echo_range.ndim > 1:
+                echo_range = echo_range[0]  # 逐维取第一个元素
 
         for _, row in grid_df.iterrows():
             ping_start = int(row["ping_start"])
