@@ -957,14 +957,14 @@ class MainWindow(QMainWindow):
         self._current_worker.error.connect(self._on_worker_error)
         self._current_worker.start()
 
-    def _on_schools_detected(self, mask, df):
-        self._schools_mask = mask.values
-        self._schools_df = df
+    def _on_schools_detected(self, mask):
+        self._schools_mask = mask.values if hasattr(mask, 'values') else mask
         self.echogram.set_school_mask(self._schools_mask)
-        self.stats_dialog.update_schools(df)
-        self.property_panel.stats.update_schools(df)
+        n_pixels = int(np.sum(self._schools_mask)) if self._schools_mask.dtype == bool else 0
+        self.stats_dialog.update_schools(pd.DataFrame())
+        self.property_panel.stats.update_schools(pd.DataFrame())
         self.statusbar.hide_progress()
-        self.statusbar.set_status(f"检测到 {len(df)} 个鱼群")
+        self.statusbar.set_status(f"鱼群检测完成: {n_pixels} 个鱼群像素")
 
         # 缓存鱼群状态
         self._save_file_state()
