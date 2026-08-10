@@ -842,12 +842,9 @@ class MainWindow(QMainWindow):
 
         self.statusbar.set_status("底部检测完成 — 分析区域已启用，已进入绘制底线模式")
 
-        # 自动切换到绘制底线模式（blockSignals 避免干扰链式处理）
+        # 自动切换到绘制底线模式（不阻塞信号，让 mode_changed 正常触发）
         if not getattr(self, "_run_all_chain", False):
-            self.echo_toolbar.mode_combo.blockSignals(True)
             self.echo_toolbar.mode_combo.setCurrentIndex(2)  # DRAW_BOTTOM
-            self.echo_toolbar.mode_combo.blockSignals(False)
-            self.echogram.set_mouse_mode(MouseMode.DRAW_BOTTOM.value)
 
         if getattr(self, "_run_all_chain", False):
             QTimer.singleShot(200, self._detect_schools)
@@ -861,10 +858,8 @@ class MainWindow(QMainWindow):
 
     def _start_draw_bottom(self):
         """切换到绘制底线模式"""
-        self.echo_toolbar.mode_combo.blockSignals(True)
         self.echo_toolbar.mode_combo.setCurrentIndex(2)  # DRAW_BOTTOM
-        self.echo_toolbar.mode_combo.blockSignals(False)
-        self.echogram.set_mouse_mode(MouseMode.DRAW_BOTTOM.value)
+        # 不阻塞信号，让 mode_changed 正常触发，确保 _on_mode_changed 和 set_mouse_mode 都被调用
         self.statusbar.set_status("绘制底线模式：左键拖动绘制，右键完成")
 
     def _on_update_bottom(self):

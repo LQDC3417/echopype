@@ -368,6 +368,10 @@ class EchogramRenderer(QOpenGLWidget):
         if self._channel_text or self._cmap_name:
             self._draw_overlay_text()
 
+        # 右侧渐变色图例（colorbar）
+        if self._sv_data is not None:
+            self._draw_colorbar()
+
     # ── 纹理生成与渲染 ────────────────────────────────────────
 
     def _sv_to_rgba(self, ping_start: int = 0, ping_end: int = -1,
@@ -1056,6 +1060,85 @@ class EchogramRenderer(QOpenGLWidget):
             y += 20
         if self._cmap_name:
             painter.drawText(10, y, f"Colormap: {self._cmap_name}  [{self._vmin:.0f}, {self._vmax:.0f}] dB")
+        painter.end()
+
+    def _draw_colorbar(self) -> None:
+        """在 echogram 右侧绘制渐变色图例（colorbar）
+
+        布局：
+        - 色条位于右侧边缘，与 echogram 等高
+        - 右侧标注刻度值（Sv dB）
+        """
+        if self._sv_data is None:
+            return
+
+        # ── 布局参数 ──
+        margin_right = 55   # 色条右侧留给刻度文字的宽度
+        bar_width = 20      # 色条宽度（像素）
+        bar_margin = 8      # 色条与 echogram 右边缘的间距
+
+        w = self.width()
+        h = self.height()
+
+        # 色条位置：紧贴 echogram 右侧
+        bar_x = self._offset_x + self._n_pings * self._zoom_x + bar_margin
+        bar_y = self._offset_y
+        bar_h = self._n_samples * self._zoom_y
+
+        # 安全裁剪：确保色条不超出窗口
+        bar_x = max(bar_x, 0)
+        if bar_x + bar_width > w - margin_right:
+            return  # 空间不足，跳过绘制
+
+        # ── 获取 colormap ──
+        try:
+            from matplotlib import colormaps
+            cmap = colormaps[self._cmap_name]
+        except (ImportError, AttributeError):
+            cmap = cm.get_cmap(self._cmap_name)
+
+        # ── 用 QPainter 绘制渐变色条（比逐像素 OpenGL quad 更简洁）──
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # 绘制渐变色条：从上到下，采样 colormap
+        n_steps = max(int(bar_h), 1)
+        for i in range(n_steps):
+            # 归一化坐标：top=vmax, bottom=vmin（与 echogram Y 轴一致）
+            t = 1.0 - i / max(n_steps - 1, 1)  # 顶部=1(vmax), 底部=0(vmin)
+            r, g, b, _ = cmap(t)
+            painter.setPen(QColor(int(r * 255), int(g * 255), int(b * 255)))
+            painter.drawLine(int(bar_x), int(bar_y + i), int(bar_x + bar_width), int(bar_y + i))
+
+        # ── 绘制刻度文字 ──
+        font = QFont("Segoe UI", 9)
+        painter.setFont(font)
+        painter.setPen(QColor(0, 0, 0))  # 黑色文字
+
+        # 自动计算刻度数量（目标每 60~80 像素一个刻度）
+        target_spacing = 70
+        n_ticks = max(2, min(10, int(bar_h / target_spacing) + 1))
+
+        for i in range(n_ticks):
+            t = i / (n_ticks - 1)  # 0=底部(vmin), 1=顶部(vmax)
+            value = self._vmin + t * (self._vmax - self._vmin)
+            tick_y = bar_y + bar_h - t * bar_h  # 底部=vmin, 顶部=vmax
+
+            # 刻度线
+            painter.drawLine(
+                int(bar_x + bar_width), int(tick_y),
+                int(bar_x + bar_width + 4), int(tick_y)
+            )
+
+            # 刻度标签
+            label = f"{value:.0f}"
+            painter.drawText(int(bar_x + bar_width + 7), int(tick_y + 4), label)
+
+        # ── 标注单位 ──
+        unit_font = QFont("Segoe UI", 8, QFont.Bold)
+        painter.setFont(unit_font)
+        painter.drawText(int(bar_x), int(bar_y - 8), "Sv (dB)")
+
         painter.end()
 
     def _fit_to_view_and_update(self):
