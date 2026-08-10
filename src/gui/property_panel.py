@@ -278,14 +278,16 @@ class ProcessingTab(QWidget):
         grid_params_layout.setSpacing(6)
 
         # 垂直间隔
-        lbl_v_interval = QLabel("垂直间隔:")
+        lbl_v_interval = QLabel("垂直间隔(m):")
         lbl_v_interval.setToolTip("深度方向的网格划分间隔\n间隔越小，分辨率越高，但计算量越大")
-        self.combo_grid_v = QComboBox()
-        self.combo_grid_v.addItems(["0.5m", "1m", "2m", "5m", "10m"])
-        self.combo_grid_v.setCurrentIndex(2)  # 默认 2m
-        self.combo_grid_v.setToolTip("垂直间隔选项\n推荐值: 1-5m")
+        self.spin_grid_v = QDoubleSpinBox()
+        self.spin_grid_v.setRange(0.1, 100.0)
+        self.spin_grid_v.setValue(2.0)
+        self.spin_grid_v.setSingleStep(0.5)
+        self.spin_grid_v.setDecimals(1)
+        self.spin_grid_v.setToolTip("垂直间隔（米）\n推荐值: 1-5m")
         grid_params_layout.addWidget(lbl_v_interval, 0, 0)
-        grid_params_layout.addWidget(self.combo_grid_v, 0, 1)
+        grid_params_layout.addWidget(self.spin_grid_v, 0, 1)
 
         # 水平间隔
         lbl_h_interval = QLabel("水平间隔:")
@@ -506,8 +508,7 @@ class ProcessingTab(QWidget):
 
     def get_grid_config(self) -> dict:
         """获取网格配置（增强版）"""
-        v_text = self.combo_grid_v.currentText()
-        v_interval = float(v_text.replace("m", ""))
+        v_interval = self.spin_grid_v.value()
         h_method = "ping" if self.combo_grid_h_method.currentIndex() == 0 else "distance"
         
         # 获取选中的统计指标
