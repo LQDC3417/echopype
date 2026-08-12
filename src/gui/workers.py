@@ -109,7 +109,7 @@ class NoiseRemovalWorker(QThread):
 
 
 class DetectSeafloorWorker(QThread):
-    """底部检测 — 使用 echopype detect_seafloor API"""
+    """底部检测 — 支持 basic/enhanced/afsc 三种方法"""
     finished = Signal(object)  # np.ndarray (n_pings,) — sample indices
     error = Signal(str)
     progress = Signal(str)
@@ -121,40 +121,43 @@ class DetectSeafloorWorker(QThread):
 
     def run(self):
         try:
-            from echopype.mask import detect_seafloor
-
+            from src.core.bottom_detection import detect_bottom
             from src.core.region import (
                 bottom_depth_to_sample_indices,
                 get_echo_range_1d,
             )
 
             bottom_cfg = self.config.get("processing", {}).get("bottom_detection", {})
-            threshold = bottom_cfg.get("threshold", -50.0)
-            offset_m = bottom_cfg.get("offset_m", 0.5)
-            bin_skip = bottom_cfg.get("bin_skip_from_surface", 200)
             method = bottom_cfg.get("method", "basic")
+            offset_m = bottom_cfg.get("offset_m", 0.5)
 
-            ds = self.ds_Sv
-            var_name = "Sv_corrected" if "Sv_corrected" in ds else "Sv"
+            self.progress.emit(f"底部检测 (方法={method})...")
 
-            channel = str(ds["channel"].values[0]) if "channel" in ds else None
+            # 调用统一底部检测接口
+            bottom_depth_m = detect_bottom(
+                self.ds_Sv,
+                method=method,
+                offset_m=offset_m,
+                # basic 参数
+                threshold=bottom_cfg.get("threshold", -50.0),
+                bin_skip_from_surface=bottom_cfg.get("bin_skip_from_surface", 200),
+                # enhanced 参数
+                peak_threshold=bottom_cfg.get("peak_threshold", -40.0),
+                discrimination_threshold=bottom_cfg.get("discrimination_threshold", -50.0),
+                saturation_threshold=bottom_cfg.get("saturation_threshold", -60.0),
+                validation_window=bottom_cfg.get("validation_window", 15),
+                validation_threshold=bottom_cfg.get("validation_threshold", 3.0),
+                smoothing_window=bottom_cfg.get("smoothing_window", 11),
+                # afsc 参数
+                search_min=bottom_cfg.get("search_min", 10.0),
+                window_len=bottom_cfg.get("window_len", 11),
+                backstep=bottom_cfg.get("backstep", 35.0),
+            )
 
-            params = {
-                "var_name": var_name,
-                "threshold": threshold,
-                "offset_m": offset_m,
-                "bin_skip_from_surface": bin_skip,
-            }
-            if channel:
-                params["channel"] = channel
-
-            self.progress.emit("echopype detect_seafloor ...")
-            bottom_depth_m = detect_seafloor(ds, method=method, params=params)
-
-            # 使用后端函数转换：深度(m) → sample index
-            er = get_echo_range_1d(ds)
+            # 转换：深度(m) → sample index
+            er = get_echo_range_1d(self.ds_Sv)
             if er is None:
-                er = np.arange(ds.sizes["range_sample"], dtype=float)
+                er = np.arange(self.ds_Sv.sizes["range_sample"], dtype=float)
 
             bottom_indices = bottom_depth_to_sample_indices(bottom_depth_m, er)
             self.finished.emit(bottom_indices)
@@ -223,12 +226,13 @@ class GridWorker(QThread):
     progress_percent = Signal(int)  # 进度百分比 (0-100)
     status_changed = Signal(str)  # 状态变化
 
-    def __init__(self, ds_Sv, surface_depth_m, grid_config, density_config):
+    def __init__(self, ds_Sv, surface_depth_m, grid_config, density_config, bottom_depth_m=None):
         super().__init__()
         self.ds_Sv = ds_Sv
         self.surface_depth_m = surface_depth_m
         self.grid_config = grid_config
         self.density_config = density_config
+        self.bottom_depth_m = bottom_depth_m
         self._cancelled = False
         self._current_step = ""
         self._total_steps = 4  # 总步骤数
@@ -272,6 +276,7 @@ class GridWorker(QThread):
                 vertical_interval_m=self.grid_config["vertical_interval_m"],
                 horizontal_interval=self.grid_config["horizontal_interval"],
                 method=self.grid_config["horizontal_method"],
+                max_depth=self.bottom_depth_m,
             )
             
             # 验证网格创建结果
@@ -299,7 +304,7 @@ class GridWorker(QThread):
             if "include_metadata" in self.grid_config:
                 config["include_metadata"] = self.grid_config["include_metadata"]
             
-            df = compute_grid_density(self.ds_Sv, grid_cells, config)
+            df = compute_grid_density(self.ds_Sv, grid_cells, config, bottom_depth_m=self.bottom_depth_m)
             
             # 步骤 4: 完成
             self._emit_progress("完成", 4)

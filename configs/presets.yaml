@@ -1,0 +1,119 @@
+# 预设配置文件
+# 包含不同调查场景的默认参数
+
+presets:
+  # 水库调查预设
+  reservoir:
+    name: "水库调查"
+    description: "适用于淡水水库的中小型鱼类调查"
+    processing:
+      sonar_model: "EK80"
+      noise_removal:
+        mode: "de_robertis"
+        ping_num: 5
+        range_sample_num: 10
+        SNR_threshold: "3.0dB"
+        noise_max: -125.0
+        low_Sv_dB: -150.0
+      bottom_detection:
+        method: "enhanced"
+        threshold: -40.0
+        offset_m: 0.5
+        peak_threshold: -40.0
+        discrimination_threshold: -50.0
+        validation_window: 15
+        smoothing_window: 11
+    school_detection:
+      method: "advanced"
+      thr: -55.0
+      min_threshold: -60.0
+      max_depth_distance: 0.1
+      min_shoal_pings: 3
+    density:
+      ts_default: -30.0
+      avg_weight_kg: 0.5
+
+  # 河流调查预设
+  river:
+    name: "河流调查"
+    description: "适用于流动水体的鱼类调查"
+    processing:
+      sonar_model: "EK80"
+      noise_removal:
+        mode: "de_robertis"
+        ping_num: 10
+        range_sample_num: 15
+        SNR_threshold: "4.0dB"
+        noise_max: -120.0
+        low_Sv_dB: -150.0
+      bottom_detection:
+        method: "enhanced"
+        threshold: -35.0
+        offset_m: 0.5
+        peak_threshold: -35.0
+        discrimination_threshold: -45.0
+        validation_window: 20
+        smoothing_window: 15
+    school_detection:
+      method: "advanced"
+      thr: -50.0
+      min_threshold: -55.0
+      max_depth_distance: 0.15
+      min_shoal_pings: 5
+    density:
+      ts_default: -28.0
+      avg_weight_kg: 0.3
+
+  # 海洋调查预设
+  ocean:
+    name: "海洋调查"
+    description: "适用于海洋环境的大型鱼类和鱼群调查"
+    processing:
+      sonar_model: "EK80"
+      noise_removal:
+        mode: "de_robertis"
+        ping_num: 20
+        range_sample_num: 20
+        SNR_threshold: "3.0dB"
+        noise_max: -130.0
+        low_Sv_dB: -150.0
+      bottom_detection:
+        method: "afsc"
+        threshold: -45.0
+        offset_m: 1.0
+        search_min: 15.0
+        window_len: 15
+        backstep: 40.0
+    school_detection:
+      method: "advanced"
+      thr: -60.0
+      min_threshold: -65.0
+      max_depth_distance: 0.2
+      min_shoal_pings: 5
+    density:
+      ts_default: -25.0
+      avg_weight_kg: 2.0
+
+  # 默认预设
+  default:
+    name: "默认配置"
+    description: "通用默认参数"
+    processing:
+      sonar_model: "EK80"
+      noise_removal:
+        mode: "de_robertis"
+        ping_num: 5
+        range_sample_num: 10
+        SNR_threshold: "3.0dB"
+        noise_max: -125.0
+        low_Sv_dB: -150.0
+      bottom_detection:
+        method: "basic"
+        threshold: -40.0
+        offset_m: 0.5
+    school_detection:
+      method: "echoview"
+      thr: -55.0
+    density:
+      ts_default: -30.0
+      avg_weight_kg: 0.5

@@ -181,24 +181,33 @@ def process_single_file(echodata, config: dict) -> xr.Dataset:
         logger.info("噪声去除完成，Sv_corrected 已生成（原始 Sv 保留）")
 
     # 3. 底部检测（优先使用去噪后的数据）
-    bottom_cfg = proc_cfg.get("bottom_detection", {})
-    logger.info("检测底部...")
+    from src.core.bottom_detection import detect_bottom
 
-    channel = str(ds_Sv["channel"].values[0])
-    var_for_bottom = "Sv_corrected" if "Sv_corrected" in ds_Sv else "Sv"
-    bottom_params = {
-        "var_name": var_for_bottom,
-        "channel": channel,
-        "threshold": bottom_cfg.get("threshold", -50.0),
-        "offset_m": bottom_cfg.get("offset_m", 0.5),
-        "bin_skip_from_surface": bottom_cfg.get("bin_skip_from_surface", 200),
-    }
-    bottom_depth = detect_seafloor(
+    bottom_cfg = proc_cfg.get("bottom_detection", {})
+    bottom_method = bottom_cfg.get("method", "basic")
+    logger.info(f"检测底部 (方法={bottom_method})...")
+
+    # 调用统一底部检测接口
+    bottom_depth = detect_bottom(
         ds_Sv,
-        method=bottom_cfg.get("method", "basic"),
-        params=bottom_params,
+        method=bottom_method,
+        offset_m=bottom_cfg.get("offset_m", 0.5),
+        # basic 方法参数
+        threshold=bottom_cfg.get("threshold", -50.0),
+        bin_skip_from_surface=bottom_cfg.get("bin_skip_from_surface", 200),
+        # enhanced 方法参数
+        peak_threshold=bottom_cfg.get("peak_threshold", -40.0),
+        discrimination_threshold=bottom_cfg.get("discrimination_threshold", -50.0),
+        saturation_threshold=bottom_cfg.get("saturation_threshold", -60.0),
+        validation_window=bottom_cfg.get("validation_window", 15),
+        validation_threshold=bottom_cfg.get("validation_threshold", 3.0),
+        smoothing_window=bottom_cfg.get("smoothing_window", 11),
+        # afsc 方法参数
+        search_min=bottom_cfg.get("search_min", 10.0),
+        window_len=bottom_cfg.get("window_len", 11),
+        backstep=bottom_cfg.get("backstep", 35.0),
     )
-    ds_Sv["bottom_depth"] = bottom_depth
+    ds_Sv["bottom_depth"] = ("ping_time", bottom_depth)
 
     logger.info("处理完成")
     return ds_Sv

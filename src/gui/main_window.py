@@ -234,15 +234,19 @@ class MainWindow(QMainWindow):
         self.echogram = EchogramRenderer()
         self.setCentralWidget(self.echogram)
 
-        # ── 左侧 Dock：文件树 + 变量列表 ──
-        left_split = QSplitter(Qt.Vertical)
+        # ── 左侧 Dock：Matecho风格综合面板 ──
+        from src.gui.left_panel import LeftPanel
+        self.left_panel = LeftPanel()
         self.fileset_tree = FilesetTreeWidget()
-        self.variable_list = VariableListWidget()
-        left_split.addWidget(self.fileset_tree)
-        left_split.addWidget(self.variable_list)
-        left_split.setSizes([350, 150])
+        self.variable_list = self.left_panel.variable_list
 
-        self.dock_left = QDockWidget("文件集", self)
+        # 文件树 + 左侧面板垂直分割
+        left_split = QSplitter(Qt.Vertical)
+        left_split.addWidget(self.fileset_tree)
+        left_split.addWidget(self.left_panel)
+        left_split.setSizes([200, 400])
+
+        self.dock_left = QDockWidget("文件集 & 控制", self)
         self.dock_left.setObjectName("dockFileset")
         self.dock_left.setWidget(left_split)
         self.dock_left.setFeatures(
@@ -338,6 +342,7 @@ class MainWindow(QMainWindow):
         self.property_panel.detect_bottom_clicked.connect(self._detect_bottom)
         self.property_panel.draw_bottom_clicked.connect(self._start_draw_bottom)
         self.property_panel.update_bottom_clicked.connect(self._on_update_bottom)
+        self.property_panel.apply_all_clicked.connect(self._apply_all_params)
 
         # 变量列表
         self.variable_list.variable_selected.connect(self._on_variable_selected)
@@ -765,6 +770,25 @@ class MainWindow(QMainWindow):
     def _on_noise_params_changed(self, params):
         self._noise_timer.start()
 
+    def _apply_all_params(self):
+        """应用全部参数：保存配置 → 更新config → 触发处理"""
+        if self._ds_Sv is None:
+            QMessageBox.warning(self, "警告", "请先加载数据")
+            return
+
+        # 保存配置到QSettings
+        self.property_panel.save_settings()
+
+        # 从UI获取所有配置并更新config
+        ui_config = self.property_panel.get_all_config()
+        self._config = ui_config
+
+        # 更新状态栏
+        self.statusbar.set_status("参数已应用，开始处理...")
+
+        # 触发噪声去除（第一步）
+        self._apply_noise_params()
+
     def _apply_noise_params(self):
         if self._ds_Sv is None or self._config is None:
             return
@@ -1036,9 +1060,30 @@ class MainWindow(QMainWindow):
             return
         grid_cfg = self.property_panel.processing.get_grid_config()
         density_cfg = self.property_panel.processing.get_density_config()
+
+        # 自动按表线→底线裁剪数据（不依赖手动启用分析区域）
+        ds_for_grid = self._get_analysis_ds()
+        if ds_for_grid is None:
+            QMessageBox.warning(self, "警告", "无可用数据")
+            return
+
+        # 计算底线深度（米）：直接从 bottom_depth 变量取最大正值
+        bottom_depth_m = None
+        if "bottom_depth" in ds_for_grid:
+            bd = ds_for_grid["bottom_depth"].values
+            if bd.ndim > 1:
+                bd = bd.flatten()
+            valid_bd = bd[np.isfinite(bd)]
+            positive_bd = valid_bd[valid_bd > 0]
+            if len(positive_bd) > 0:
+                bottom_depth_m = float(np.max(positive_bd))
+            elif len(valid_bd) > 0:
+                bottom_depth_m = float(np.max(valid_bd))
+
         self.statusbar.show_progress("网格分析...")
         self._current_worker = GridWorker(
-            self._get_analysis_ds(), self._surface_depth_m, grid_cfg, density_cfg
+            ds_for_grid, self._surface_depth_m, grid_cfg, density_cfg,
+            bottom_depth_m=bottom_depth_m
         )
         self._current_worker.finished.connect(self._on_grid_done)
         self._current_worker.error.connect(self._on_worker_error)
@@ -1050,8 +1095,8 @@ class MainWindow(QMainWindow):
         self.stats_dialog.update_grid(df)
         self.statusbar.hide_progress()
         self.statusbar.set_status(f"网格分析完成: {len(df)} 个单元")
-        # 网格颜色叠加到回波图
-        self.echogram.set_grid_data(df, self._ds_Sv, color_by="mean_sv")
+        # 网格颜色叠加到回波图（使用裁剪后数据，确保坐标一致）
+        self.echogram.set_grid_data(df, self._get_analysis_ds(), color_by="mean_sv")
         # 显示统计对话框
         self._show_stats()
 
@@ -1114,7 +1159,7 @@ class MainWindow(QMainWindow):
             return
         self.statusbar.show_progress("正在分析多频率通道...")
         self._current_worker = MultifreqAnalysisWorker(
-            self._ds_Sv, self._config
+            self._get_analysis_ds(), self._config
         )
         self._current_worker.finished.connect(self._on_multifreq_done)
         self._current_worker.error.connect(self._on_worker_error)

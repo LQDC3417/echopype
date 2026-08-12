@@ -5,9 +5,12 @@
 - 数值输入紧凑，标签左对齐
 - 结果区域突出显示
 - 网格配置增强：统计指标选择、输出格式、输入验证
+- 支持预设配置加载
 """
 
-from PySide6.QtCore import Qt, Signal
+import yaml
+from pathlib import Path
+from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -28,6 +31,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+# 预设配置文件路径
+PRESETS_FILE = Path(__file__).parent.parent.parent / "configs" / "presets.yaml"
 
 
 class _InfoRow(QWidget):
@@ -111,13 +117,16 @@ class ProcessingTab(QWidget):
     single_target_clicked = Signal()
     sv_stats_clicked = Signal()
     transect_split_clicked = Signal()
-    # ??????
     detect_bottom_clicked = Signal()
     draw_bottom_clicked = Signal()
     update_bottom_clicked = Signal()
+    apply_all_clicked = Signal()  # 新增：应用全部参数信号
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._presets = self._load_presets()
+        self._settings = QSettings("Echopype", "FishAcoustics")
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -125,6 +134,31 @@ class ProcessingTab(QWidget):
         layout = QVBoxLayout(container)
         layout.setSpacing(8)
         layout.setContentsMargins(8, 8, 8, 8)
+
+        # ── 预设配置 ──
+        preset_group = QGroupBox("预设配置")
+        preset_layout = QHBoxLayout()
+        preset_layout.setSpacing(6)
+        preset_layout.setContentsMargins(8, 12, 8, 8)
+
+        self.combo_preset = QComboBox()
+        self.combo_preset.setToolTip("选择预设配置\n不同场景的默认参数组合")
+        for key, preset in self._presets.items():
+            self.combo_preset.addItem(preset["name"], key)
+
+        self.btn_load_preset = QPushButton("加载")
+        self.btn_load_preset.setToolTip("加载选中的预设配置")
+        self.btn_load_preset.clicked.connect(self._on_load_preset)
+
+        self.btn_save_preset = QPushButton("保存")
+        self.btn_save_preset.setToolTip("将当前配置保存为自定义预设")
+        self.btn_save_preset.clicked.connect(self._on_save_preset)
+
+        preset_layout.addWidget(self.combo_preset, 1)
+        preset_layout.addWidget(self.btn_load_preset)
+        preset_layout.addWidget(self.btn_save_preset)
+        preset_group.setLayout(preset_layout)
+        layout.addWidget(preset_group)
 
         # ── 噪声去除参数 ──
         noise_group = QGroupBox("噪声去除")
@@ -183,12 +217,38 @@ class ProcessingTab(QWidget):
         bottom_layout.setSpacing(6)
         bottom_layout.setContentsMargins(8, 12, 8, 8)
 
+        # 检测方法选择
+        self.combo_bottom_method = QComboBox()
+        self.combo_bottom_method.addItems(["basic", "enhanced", "afsc"])
+        self.combo_bottom_method.setToolTip(
+            "底部检测方法:\n"
+            "- basic: 基础阈值检测 (echopype 默认)\n"
+            "- enhanced: 增强检测 (平滑+双阈值+相关性验证)\n"
+            "- afsc: AFSC 算法 (Hanning平滑+echo envelope)"
+        )
+        bottom_layout.addRow("检测方法:", self.combo_bottom_method)
+
         self.spin_bottom_thr = QDoubleSpinBox()
         self.spin_bottom_thr.setRange(-70, -20)
         self.spin_bottom_thr.setValue(-40.0)
         self.spin_bottom_thr.setSuffix(" dB")
         self.spin_bottom_thr.setToolTip("Sv 阈值：低于此值视为底部\n推荐范围: -50 ~ -30 dB\n过大值可能误判，过小值可能漏检")
         bottom_layout.addRow("Sv 阈值:", self.spin_bottom_thr)
+
+        # enhanced 方法参数
+        self.spin_peak_thr = QDoubleSpinBox()
+        self.spin_peak_thr.setRange(-80, -10)
+        self.spin_peak_thr.setValue(-40.0)
+        self.spin_peak_thr.setSuffix(" dB")
+        self.spin_peak_thr.setToolTip("峰值阈值 (enhanced 方法)\n推荐范围: -50 ~ -30 dB")
+        bottom_layout.addRow("峰值阈值:", self.spin_peak_thr)
+
+        self.spin_disc_thr = QDoubleSpinBox()
+        self.spin_disc_thr.setRange(-80, -10)
+        self.spin_disc_thr.setValue(-50.0)
+        self.spin_disc_thr.setSuffix(" dB")
+        self.spin_disc_thr.setToolTip("判别阈值 (enhanced 方法)\n推荐范围: -60 ~ -40 dB")
+        bottom_layout.addRow("判别阈值:", self.spin_disc_thr)
         # 底部检测按钮
         self.btn_detect_bottom = QPushButton("检测底部")
         self.btn_detect_bottom.setProperty("cssClass", "primary")
@@ -440,12 +500,74 @@ class ProcessingTab(QWidget):
         btn_layout4.addWidget(self.btn_transect)
         layout.addLayout(btn_layout4)
 
+        # ── 应用全部参数按钮 ──
+        self.btn_apply_all = QPushButton("✓ 应用全部参数")
+        self.btn_apply_all.setProperty("cssClass", "primary")
+        self.btn_apply_all.setToolTip("将所有参数应用到后端处理\n点击后开始处理数据")
+        self.btn_apply_all.clicked.connect(self.apply_all_clicked)
+        layout.addWidget(self.btn_apply_all)
+
         layout.addStretch()
         scroll.setWidget(container)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(scroll)
+
+        # 恢复上次配置
+        self._restore_settings()
+
+    def _load_presets(self) -> dict:
+        """加载预设配置文件"""
+        try:
+            if PRESETS_FILE.exists():
+                with open(PRESETS_FILE, 'r', encoding='utf-8') as f:
+                    data = yaml.safe_load(f)
+                    return data.get("presets", {})
+        except Exception:
+            pass
+        return {"default": {"name": "默认配置", "description": "通用默认参数"}}
+
+    def _on_load_preset(self):
+        """加载选中的预设配置"""
+        preset_key = self.combo_preset.currentData()
+        if preset_key and preset_key in self._presets:
+            preset = self._presets[preset_key]
+            config = {
+                "processing": preset.get("processing", {}),
+                "school_detection": preset.get("school_detection", {}),
+                "density": preset.get("density", {}),
+            }
+            self.load_from_config(config)
+            QMessageBox.information(self, "预设已加载", f"已加载预设: {preset['name']}")
+
+    def _on_save_preset(self):
+        """保存当前配置为自定义预设"""
+        config = self.get_all_config()
+        custom_presets = self._settings.value("custom_presets", {})
+        if not isinstance(custom_presets, dict):
+            custom_presets = {}
+        custom_presets["custom"] = {
+            "name": "自定义配置",
+            "description": "用户保存的自定义参数",
+            **config,
+        }
+        self._settings.setValue("custom_presets", custom_presets)
+        QMessageBox.information(self, "保存成功", "当前配置已保存为自定义预设")
+
+    def _restore_settings(self):
+        """恢复上次保存的配置"""
+        try:
+            config = self._settings.value("last_config")
+            if config and isinstance(config, dict):
+                self.load_from_config(config)
+        except Exception:
+            pass
+
+    def save_settings(self):
+        """保存当前配置到QSettings"""
+        config = self.get_all_config()
+        self._settings.setValue("last_config", config)
 
     def _on_h_method_changed(self, index):
         """水平分段方式改变时更新距离单位的启用状态"""
@@ -454,14 +576,9 @@ class ProcessingTab(QWidget):
     def _on_grid_clicked(self):
         """网格分析按钮点击时进行输入验证"""
         # 验证垂直间隔
-        v_text = self.combo_grid_v.currentText()
-        try:
-            v_interval = float(v_text.replace("m", ""))
-            if v_interval <= 0:
-                QMessageBox.warning(self, "输入错误", "垂直间隔必须大于0")
-                return
-        except ValueError:
-            QMessageBox.warning(self, "输入错误", "垂直间隔格式错误")
+        v_interval = self.spin_grid_v.value()
+        if v_interval <= 0:
+            QMessageBox.warning(self, "输入错误", "垂直间隔必须大于0")
             return
 
         # 验证水平间隔
@@ -498,7 +615,12 @@ class ProcessingTab(QWidget):
         return {"thr": self.spin_school_thr.value()}
 
     def get_bottom_config(self) -> dict:
-        return {"threshold": self.spin_bottom_thr.value()}
+        return {
+            "method": self.combo_bottom_method.currentText(),
+            "threshold": self.spin_bottom_thr.value(),
+            "peak_threshold": self.spin_peak_thr.value(),
+            "discrimination_threshold": self.spin_disc_thr.value(),
+        }
 
     def get_density_config(self) -> dict:
         return {
@@ -550,6 +672,14 @@ class ProcessingTab(QWidget):
         bottom = proc.get("bottom_detection", {})
         if "threshold" in bottom:
             self.spin_bottom_thr.setValue(bottom["threshold"])
+        if "method" in bottom:
+            idx = self.combo_bottom_method.findText(bottom["method"])
+            if idx >= 0:
+                self.combo_bottom_method.setCurrentIndex(idx)
+        if "peak_threshold" in bottom:
+            self.spin_peak_thr.setValue(bottom["peak_threshold"])
+        if "discrimination_threshold" in bottom:
+            self.spin_disc_thr.setValue(bottom["discrimination_threshold"])
 
         school = config.get("school_detection", {})
         if "thr" in school:
@@ -563,6 +693,18 @@ class ProcessingTab(QWidget):
             self.spin_ts.setValue(density["ts_default"])
         if "avg_weight_kg" in density:
             self.spin_avg_weight.setValue(density["avg_weight_kg"])
+
+    def get_all_config(self) -> dict:
+        """获取所有配置参数"""
+        return {
+            "processing": {
+                "noise_removal": self.get_noise_config(),
+                "bottom_detection": self.get_bottom_config(),
+            },
+            "school_detection": self.get_school_config(),
+            "density": self.get_density_config(),
+            "surface_line": {"depth_m": self.spin_surface.value()},
+        }
 
 
 class StatsTab(QWidget):
@@ -651,10 +793,10 @@ class PropertyPanel(QTabWidget):
     single_target_clicked = Signal()
     sv_stats_clicked = Signal()
     transect_split_clicked = Signal()
-    # ??????
     detect_bottom_clicked = Signal()
     draw_bottom_clicked = Signal()
     update_bottom_clicked = Signal()
+    apply_all_clicked = Signal()  # 新增：应用全部参数信号
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -682,3 +824,12 @@ class PropertyPanel(QTabWidget):
         self.processing.single_target_clicked.connect(self.single_target_clicked)
         self.processing.sv_stats_clicked.connect(self.sv_stats_clicked)
         self.processing.transect_split_clicked.connect(self.transect_split_clicked)
+        self.processing.apply_all_clicked.connect(self.apply_all_clicked)
+
+    def save_settings(self):
+        """保存当前配置"""
+        self.processing.save_settings()
+
+    def get_all_config(self) -> dict:
+        """获取所有配置"""
+        return self.processing.get_all_config()

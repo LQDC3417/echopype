@@ -12,21 +12,69 @@ processing:
   waveform_mode: "CW"
   encode_mode: "power"
   noise_removal:
+    # 模式选择: de_robertis / passive
+    # - de_robertis: De Robertis 算法（从回波数据估计噪声，默认）
+    # - passive: 被动模式（使用被动 ping 估算噪声）
+    mode: "de_robertis"
     ping_num: 5
     range_sample_num: 10
     SNR_threshold: "3.0dB"
+    noise_max: -125.0                 # 噪声上限 (dB)
+    low_Sv_dB: -150.0                 # 低 Sv 替换值 (dB)
+    save_check_plot: true             # 保存噪声检查图
   bottom_detection:
-    method: "basic"
-    threshold: -40.0
+    # 方法选择: basic / enhanced / afsc
+    # - basic: 基础阈值检测（echopype 默认）
+    # - enhanced: 增强检测（平滑 + 双阈值 + 相关性验证，参考 Matecho）
+    # - afsc: AFSC 算法（Hanning 平滑 + echo envelope，参考 pyEcholab）
+    method: "enhanced"
     offset_m: 0.5
+    # basic 方法参数
+    threshold: -40.0
     bin_skip_from_surface: 50
+    # enhanced 方法参数
+    peak_threshold: -40.0             # 峰值阈值 (dB)
+    discrimination_threshold: -50.0   # 判别阈值 (dB)
+    saturation_threshold: -60.0       # 饱和阈值 (dB)
+    validation_window: 15             # 相关性验证窗口（前 N 个 ping）
+    validation_threshold: 3.0         # 相关性验证倍数
+    smoothing_window: 11              # 平滑窗口长度
+    # afsc 方法参数
+    search_min: 10.0                  # 最小检测深度 (米)
+    window_len: 11                    # Hanning 窗口长度
+    backstep: 35.0                    # 回步值 (dB)
+
+# 回声积分配置（新增）
+integration:
+  esu_type: "pings"                   # ESU 类型: pings / seconds / nmi
+  esu_size: 500                       # ESU 大小: ping 数 / 秒数 / 海里数
+  layer_width: 5.0                    # 垂直层宽度 (米)
+  min_threshold: -70.0                # 最小 Sv 阈值 (dB)
+  max_threshold: 0.0                  # 最大 Sv 阈值 (dB)
 
 school_detection:
-  method: "echoview"
+  # 方法选择: echoview / advanced
+  # - echoview: echopype 默认的 detect_shoal
+  # - advanced: 高级提取（空间聚类 + 跨 ping 连接，参考 Matecho）
+  method: "advanced"
   thr: -55.0
   mincan: [3.0, 10.0]
   maxlink: [3.0, 15.0]
   minsho: [3.0, 15.0]
+  # advanced 方法参数
+  min_threshold: -60.0              # 最小阈值 (dB)
+  max_depth_distance: 0.1           # 最大深度间隔 (米)
+  max_ping_distance: 1              # 最大水平间隔 (ping 数)
+  max_time_gap: 20                  # 最大时间间隔 (ping 数)
+  min_shoal_pings: 3                # 最小鱼群 ping 数
+  min_shoal_height: 0.5             # 最小鱼群高度 (米)
+
+# 单体目标检测配置（新增）
+single_target:
+  enabled: false                    # 默认关闭
+  sv_threshold_db: -50.0            # Sv 阈值 (dB)
+  min_area: 3                       # 最小面积（像素）
+  max_area: 500                     # 最大面积（像素）
 
 density:
   ts_default: -30.0

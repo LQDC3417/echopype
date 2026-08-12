@@ -56,10 +56,10 @@ def _split_vertical(
     
     depth = get_vertical_coords(ds_Sv)
     d_max = float(np.nanmax(depth))
-    
-    # 应用最大深度限制
-    if max_depth is not None and max_depth > 0:
-        d_max = min(d_max, max_depth)
+
+    # 应用底线深度限制（网格只分析表线→底线之间）
+    if max_depth is not None and max_depth > surface_depth_m:
+        d_max = max_depth
     
     # 根据模式生成深度边界
     if mode == "custom":
@@ -83,9 +83,16 @@ def _split_vertical(
         n_layers = max(1, int((log_end - log_start) / np.log10(interval_m + 1)))
         bins = np.logspace(log_start, log_end, n_layers + 1)
     else:  # linear
-        # 线性间隔（原有逻辑）
+        # 线性间隔：从表线到 max_depth（底线）
         d_start = surface_depth_m
-        bins = np.arange(d_start, d_max + interval_m, interval_m)
+        if max_depth is not None and max_depth > d_start:
+            d_max = max_depth
+        # 生成分层边界，确保最后一层不超过 d_max
+        raw_bins = np.arange(d_start, d_max + interval_m, interval_m)
+        # 截断到最后一个不超过 d_max 的边界
+        bins = raw_bins[raw_bins <= d_max + 1e-9]
+        if bins[-1] < d_max:
+            bins = np.append(bins, d_max)
     
     # 生成深度层
     layers = []
@@ -409,6 +416,7 @@ def compute_grid_stats(
     ds_Sv: xr.Dataset,
     grid_cells: list[dict],
     progress_callback: Callable[[int, int], None] | None = None,
+    bottom_depth_m: float | None = None,
 ) -> pd.DataFrame:
     """计算每个网格单元的统计指标。
 
@@ -465,7 +473,15 @@ def compute_grid_stats(
         else:
             center_lat, center_lon = _segment_center_gps(lat_arr, lon_arr, p_start, p_end)
 
-        # 深度掩码
+        # 深度掩码（超出底线的部分裁剪掉）
+        if bottom_depth_m is not None and d_lo >= bottom_depth_m:
+            # 整个网格单元超出底线，跳过
+            records.append(_empty_cell(i, p_start, p_end, d_lo, d_hi, ping_time,
+                                       latitude=center_lat, longitude=center_lon))
+            _update_progress(progress_callback, i + 1, total_cells)
+            continue
+        if bottom_depth_m is not None:
+            d_hi = min(d_hi, bottom_depth_m)
         d_mask = (depth >= d_lo) & (depth < d_hi)
         if not np.any(d_mask):
             records.append(_empty_cell(i, p_start, p_end, d_lo, d_hi, ping_time,
@@ -588,6 +604,7 @@ def compute_grid_density(
     grid_cells: list[dict],
     config: dict,
     progress_callback: Callable[[int, int], None] | None = None,
+    bottom_depth_m: float | None = None,
 ) -> pd.DataFrame:
     """计算每个网格单元的密度估算。
 
@@ -610,7 +627,7 @@ def compute_grid_density(
     avg_weight_kg = density_cfg.get("avg_weight_kg", 0.5)
     sigma_bs = 10 ** (ts_default / 10)
 
-    stats_df = compute_grid_stats(ds_Sv, grid_cells, progress_callback)
+    stats_df = compute_grid_stats(ds_Sv, grid_cells, progress_callback, bottom_depth_m=bottom_depth_m)
 
     # 使用向量化操作计算密度
     abc_values = stats_df["abc"].values
