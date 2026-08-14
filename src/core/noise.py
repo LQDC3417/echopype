@@ -12,7 +12,6 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 import xarray as xr

@@ -117,7 +117,7 @@ class Fileset:
         return count
 
     @classmethod
-    def from_folder(cls, folder: Path, name: str = None,
+    def from_folder(cls, folder: Path, name: str | None = None,
                     pattern: str = "*.raw") -> Fileset:
         """从文件夹创建文件集"""
         folder = Path(folder)

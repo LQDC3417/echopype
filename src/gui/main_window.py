@@ -991,18 +991,27 @@ class MainWindow(QMainWindow):
         self._current_worker.start()
 
     def _on_schools_detected(self, mask):
-        self._schools_mask = mask.values if hasattr(mask, 'values') else mask
+        # 将 mask 转换为 xr.DataArray
+        import xarray as xr
+
+        from src.core.school import schools_to_dataframe
+        mask_da = xr.DataArray(mask) if not isinstance(mask, xr.DataArray) else mask
+        self._schools_mask = mask_da.values if hasattr(mask_da, "values") else mask_da
         self.echogram.set_school_mask(self._schools_mask)
         n_pixels = int(np.sum(self._schools_mask)) if self._schools_mask.dtype == bool else 0
-        self.stats_dialog.update_schools(pd.DataFrame())
-        self.property_panel.stats.update_schools(pd.DataFrame())
+        
+        # 将 mask 转换为 DataFrame
+        schools_df = schools_to_dataframe(mask_da, self._ds_Sv)
+        self._schools_df = schools_df
+        self.stats_dialog.update_schools(schools_df)
+        self.property_panel.stats.update_schools(schools_df)
         self.statusbar.hide_progress()
         self.statusbar.set_status(f"鱼群检测完成: {n_pixels} 个鱼群像素")
 
         # 缓存鱼群状态
         self._save_file_state()
 
-        for _, row in df.iterrows():
+        for _, row in schools_df.iterrows():
             self.region_table.add_region(
                 name=f"鱼群 {int(row.get('school_id', 0))}",
                 region_type="鱼群",
@@ -1014,7 +1023,6 @@ class MainWindow(QMainWindow):
 
         if getattr(self, "_run_all_chain", False):
             QTimer.singleShot(200, self._compute_density)
-
     def _compute_density(self):
         if self._ds_Sv is None or self._config is None:
             QMessageBox.warning(self, "警告", "请先加载数据")
@@ -1315,7 +1323,7 @@ class MainWindow(QMainWindow):
             er_vals = er.values
             if er_vals.ndim == 2:
                 er_vals = er_vals[:, 0]
-            idx = int(round(sample))
+            idx = round(sample)
             if 0 <= idx < len(er_vals):
                 self.statusbar.set_depth_info(float(er_vals[idx]))
             else:

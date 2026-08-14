@@ -11,7 +11,6 @@
 """
 
 import logging
-from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -19,12 +18,8 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
     QGroupBox,
-    QHBoxLayout,
-    QLabel,
     QListWidget,
-    QPushButton,
     QScrollArea,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -129,7 +124,7 @@ class VariableListWidget(QListWidget):
         self._variables = {}
         self.currentTextChanged.connect(self._on_selection)
 
-    def add_variable(self, name: str, data, label: str = None):
+    def add_variable(self, name: str, data, label: str | None = None):
         """添加变量"""
         self._variables[name] = data
         display = label or name
@@ -212,7 +207,7 @@ class LeftPanel(QWidget):
         """设置可用频率"""
         self.quick_controls.set_frequencies(channels)
 
-    def add_variable(self, name: str, data, label: str = None):
+    def add_variable(self, name: str, data, label: str | None = None):
         """添加变量"""
         self.variable_list.add_variable(name, data, label)
 

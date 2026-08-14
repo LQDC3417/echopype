@@ -12,7 +12,6 @@ import xarray as xr
 import yaml
 
 # 兼容导入：旧代码可能从 utils 导入 build_analysis_mask
-from src.core.region import build_analysis_mask  # noqa: F401
 
 # 核心模块统一使用 "fish_acoustics" logger（见项目约定）
 logger = logging.getLogger("fish_acoustics")

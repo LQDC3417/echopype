@@ -8,9 +8,10 @@
 - 支持预设配置加载
 """
 
-import yaml
 from pathlib import Path
-from PySide6.QtCore import Qt, Signal, QSettings
+
+import yaml
+from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,

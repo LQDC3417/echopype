@@ -1,4 +1,4 @@
-"""Fileset 树形面板 + 批量导入对话框 — Echoview 风格"""
+﻿"""Fileset 树形面板 + 批量导入对话框 — Echoview 风格"""
 
 from pathlib import Path
 
@@ -409,7 +409,7 @@ class FilesetTreeWidget(QWidget):
         path_str = item.data(0, Qt.UserRole)
         if path_str:
             folder = str(Path(path_str).parent)
-            subprocess.run(["explorer", folder], shell=True)
+            subprocess.run(["explorer", folder], shell=True, check=False)
 
     # ── 公共方法 ──
 

@@ -1,4 +1,4 @@
-# -*- mode: python ; coding: utf-8 -*-
+﻿# -*- mode: python ; coding: utf-8 -*-
 """PyInstaller 打包配置 — Echogram 鱼类声学资源评估系统"""
 
 import sys
@@ -64,6 +64,8 @@ hiddenimports = [
     "src.gui.variable_list",
     "src.gui.region_panel",
     "src.gui.stats_dialog",
+    "src.gui.multifreq_dialog",
+    "src.gui.quality_dialog",
     "src.gui.export_dialog",
     "src.gui.status_bar",
     "src.viz.opengl_renderer",
@@ -156,3 +158,5 @@ coll = COLLECT(
     upx_exclude=[],
     name="Echogram",
 )
+
+

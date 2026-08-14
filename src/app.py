@@ -1,13 +1,13 @@
 """Echogram GUI 应用入口 — Echoview 风格 v2.0"""
 
-import sys
 import os
+import sys
 
 # 修复 Windows 中文环境
 os.environ["PYTHONUTF8"] = "1"
 
-from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 
 from src.gui.main_window import MainWindow
 from src.gui.theme import DARK_THEME

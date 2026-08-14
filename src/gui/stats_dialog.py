@@ -591,7 +591,7 @@ class StatsDialog(QDialog):
         if not rows:
             return
         
-        file_path, selected_filter = QFileDialog.getSaveFileName(
+        file_path, _selected_filter = QFileDialog.getSaveFileName(
             self, "导出数据", "", 
             "CSV 文件 (*.csv);;Excel 文件 (*.xlsx);;JSON 文件 (*.json)"
         )
@@ -653,7 +653,7 @@ class StatsDialog(QDialog):
 
     def _on_export_all_clicked(self):
         """导出所有数据"""
-        file_path, selected_filter = QFileDialog.getSaveFileName(
+        file_path, _selected_filter = QFileDialog.getSaveFileName(
             self, "导出所有数据", "", 
             "Excel 文件 (*.xlsx);;JSON 文件 (*.json)"
         )
@@ -702,7 +702,7 @@ class StatsDialog(QDialog):
 
     def _export_dataframe(self, df, default_name):
         """导出 DataFrame 到文件"""
-        file_path, selected_filter = QFileDialog.getSaveFileName(
+        file_path, _selected_filter = QFileDialog.getSaveFileName(
             self, f"导出{default_name}", default_name, 
             "CSV 文件 (*.csv);;Excel 文件 (*.xlsx);;JSON 文件 (*.json)"
         )

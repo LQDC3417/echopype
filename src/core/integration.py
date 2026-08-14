@@ -1,4 +1,4 @@
-"""回声积分模块：按网格单元进行标准化积分分析
+﻿"""回声积分模块：按网格单元进行标准化积分分析
 
 参考：pyEcholab integration.py
 功能：
@@ -9,9 +9,9 @@
 """
 
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -262,7 +262,7 @@ def integrate(
     """
     Sv = get_sv_array(ds_Sv)  # (n_pings, n_samples)
     depth = get_vertical_coords(ds_Sv)  # (n_samples,)
-    n_pings, n_samples = Sv.shape
+    _n_pings, n_samples = Sv.shape
 
     # 计算深度分辨率
     er = get_echo_range_1d(ds_Sv)
@@ -438,7 +438,7 @@ def integrate_by_grid_cells(
 
     Sv = get_sv_array(ds_Sv)
     depth = get_vertical_coords(ds_Sv)
-    n_pings, n_samples = Sv.shape
+    _n_pings, n_samples = Sv.shape
 
     # 计算深度分辨率
     er = get_echo_range_1d(ds_Sv)

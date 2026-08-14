@@ -1,4 +1,4 @@
-"""高级鱼群提取模块：空间聚类 + 跨 ping 连接
+﻿"""高级鱼群提取模块：空间聚类 + 跨 ping 连接
 
 参考：Matecho EchoGroupExtraction.m
 功能：
@@ -10,13 +10,12 @@
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 import numpy as np
 import pandas as pd
 import xarray as xr
-from scipy import ndimage
 
 from src.core.utils import get_sv_array, get_vertical_coords
 
@@ -56,7 +55,7 @@ class ShoalGroup:
 
     @property
     def n_pings(self) -> int:
-        return len(set(s.ping_idx for s in self.segments))
+        return len({s.ping_idx for s in self.segments})
 
     @property
     def height(self) -> float:
@@ -251,11 +250,6 @@ def extract_shoals_advanced(
     depth = get_vertical_coords(ds_Sv)  # (n_samples,)
     n_pings, n_samples = Sv.shape
 
-    # 计算深度分辨率
-    if len(depth) > 1:
-        depth_res = float(np.median(np.abs(np.diff(depth))))
-    else:
-        depth_res = 0.1
 
     # Step 1: 逐 ping 提取 segment
     all_segments: list[list[Segment]] = []

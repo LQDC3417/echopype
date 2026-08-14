@@ -189,9 +189,20 @@ python -m src.app
 
 ## 后续计划
 
-- [ ] 多频分析 UI（multifreq.py 已实现，GUI 尚未接入）
-- [ ] 质量检查结果展示（quality.py 已实现，GUI 尚未接入）
+- [x] 多频分析 UI（multifreq.py 已实现，GUI 尚未接入）
+- [x] 质量检查结果展示（quality.py 已实现，GUI 尚未接入）
 - [x] 底线自由手绘编辑（分段替换 + Ctrl+Z 撤销）
 - [x] 批量处理 UI（Ctrl+B，ThreadPoolExecutor 并行）
-- [ ] 网格分析结果可视化（颜色编码）
-- [ ] 用户文档和使用指南
+- [x] 网格分析结果可视化（颜色编码）
+- [x] 用户文档和使用指南
+
+## 已完成的后续功能
+
+| 功能 | 实现文件 | 说明 |
+|------|----------|------|
+| 多频分析 UI | src/gui/multifreq_dialog.py | 通道摘要 + ABC频率对比 + CSV/Excel导出 |
+| 质量检查展示 | src/gui/quality_dialog.py | 绿/黄/红状态指示 + Sv/底线质量 + 警告列表 |
+| 底线自由手绘 | src/viz/opengl_renderer.py | 分段替换 + Ctrl+Z撤销 + 实时预览 |
+| 批量处理 UI | src/gui/main_window.py | Ctrl+B，ThreadPoolExecutor 并行 |
+| 网格颜色编码 | src/viz/opengl_renderer.py | colormap着色 + 白色边框 + mean_sv标注 |
+| 用户文档 | docs/user-guide.md | 版本 2.1，覆盖所有功能 |

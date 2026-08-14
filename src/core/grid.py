@@ -569,7 +569,7 @@ def _update_progress(callback: Callable[[int, int], None] | None, current: int, 
     if callback is not None:
         try:
             callback(current, total)
-        except Exception as e:  # noqa: BLE001 — 回调不应中断网格计算
+        except Exception as e:
             logger.warning(f"进度回调执行失败: {e}")
 
 

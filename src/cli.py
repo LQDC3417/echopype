@@ -6,7 +6,7 @@ os.environ["PYTHONUTF8"] = "1"
 
 import click
 
-from src.core.utils import load_config, validate_config, setup_logging, get_output_dir
+from src.core.utils import get_output_dir, load_config, setup_logging, validate_config
 
 
 @click.group()

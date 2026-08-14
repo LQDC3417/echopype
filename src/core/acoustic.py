@@ -161,7 +161,6 @@ def process_single_file(echodata, config: dict) -> xr.Dataset:
         包含 Sv、Sv_corrected（如有）、depth、bottom_depth 的数据集
     """
     from echopype.clean import remove_background_noise
-    from echopype.mask import detect_seafloor
 
     proc_cfg = config["processing"]
 

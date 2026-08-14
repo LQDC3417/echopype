@@ -638,30 +638,3 @@ class TransectSplitWorker(QThread):
             })
         except Exception:
             self.error.emit(traceback.format_exc())
-    """单体目标检测工作线程
-
-    信号：
-    - finished(object): 检测结果 DataFrame
-    - error(str): 错误信息
-    - progress(str): 进度信息
-    """
-    finished = Signal(object)
-    error = Signal(str)
-    progress = Signal(str)
-
-    def __init__(self, ds_Sv, config):
-        super().__init__()
-        self.ds_Sv = ds_Sv
-        self.config = config
-
-    def run(self):
-        try:
-            from src.core.single_target import detect_and_compute_ts
-
-            self.progress.emit("正在检测单体目标...")
-            targets_df = detect_and_compute_ts(self.ds_Sv, self.config)
-            self.finished.emit(targets_df)
-
-        except Exception:
-            self.error.emit(traceback.format_exc())
-

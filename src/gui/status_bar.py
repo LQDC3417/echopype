@@ -150,7 +150,7 @@ class MainStatusBar(QStatusBar):
         """显示缩放比例"""
         self.lbl_zoom.setText(f"Zoom: {zoom_x:.1f}x")
     
-    def set_gps_info(self, lat: float = None, lon: float = None):
+    def set_gps_info(self, lat: float | None = None, lon: float | None = None):
         """设置 GPS 坐标"""
         if lat is None or lon is None:
             self.lbl_gps.setText("GPS: --")

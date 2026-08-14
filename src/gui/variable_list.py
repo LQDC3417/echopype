@@ -16,7 +16,7 @@ class VariableListWidget(QListWidget):
         self._variables = {}
         self.currentTextChanged.connect(self._on_selection)
 
-    def add_variable(self, name: str, data, label: str = None):
+    def add_variable(self, name: str, data, label: str | None = None):
         """添加变量"""
         self._variables[name] = data
         display = label or name

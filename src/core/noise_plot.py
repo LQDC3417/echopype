@@ -1,4 +1,4 @@
-"""噪声可视化检查模块：生成噪声去除效果的检查图
+﻿"""噪声可视化检查模块：生成噪声去除效果的检查图
 
 参考：Matecho 的检查图生成功能
 
@@ -41,7 +41,7 @@ def plot_noise_check(
     """
     try:
         import matplotlib.pyplot as plt
-        from matplotlib.colors import LogNorm
+        
     except ImportError:
         logger.warning("matplotlib 未安装，跳过噪声检查图生成")
         return {}

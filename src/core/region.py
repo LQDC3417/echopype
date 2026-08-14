@@ -163,7 +163,7 @@ def build_analysis_mask(
 
     # 排除表线以上
     if surface_sample is not None and not np.isnan(surface_sample):
-        surf_idx = int(round(surface_sample))
+        surf_idx = round(surface_sample)
         if surf_idx > 0:
             mask[:, :surf_idx] = False
 

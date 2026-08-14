@@ -1,4 +1,4 @@
-"""增强底部检测模块：多种算法支持
+﻿"""增强底部检测模块：多种算法支持
 
 参考：
 - Matecho BottomDetectionMatecho.m：双阈值检测 + 相关性验证
@@ -11,8 +11,8 @@
 """
 
 import logging
+from collections.abc import Callable
 from enum import Enum
-from typing import Callable
 
 import numpy as np
 import xarray as xr
@@ -234,7 +234,7 @@ def detect_bottom_enhanced(
     """
     Sv = get_sv_array(ds_Sv)  # (n_pings, n_samples)
     depth = get_vertical_coords(ds_Sv)  # (n_samples,)
-    n_pings, n_samples = Sv.shape
+    n_pings, _n_samples = Sv.shape
 
     # 计算深度分辨率
     if len(depth) > 1:

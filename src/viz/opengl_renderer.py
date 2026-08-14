@@ -495,7 +495,7 @@ class EchogramRenderer(QOpenGLWidget):
         if mask is None:
             return
         glColor4f(0.3, 0.3, 0.3, 0.5)
-        h, w = mask.shape
+        h, _w = mask.shape
         # 批量收集所有 quad 顶点
         verts = []
         for ping in range(h):
@@ -850,8 +850,8 @@ class EchogramRenderer(QOpenGLWidget):
         self.mouse_moved.emit(data_x, data_y)
 
         # 发射 Sv 值
-        ping_idx = int(round(data_x))
-        sample_idx = int(round(data_y))
+        ping_idx = round(data_x)
+        sample_idx = round(data_y)
         sv_val = self._get_sv_at(ping_idx, sample_idx)
         self.sv_at_cursor.emit(data_x, data_y, sv_val)
 
@@ -944,8 +944,8 @@ class EchogramRenderer(QOpenGLWidget):
         # 显示当前位置信息
         sx, sy = float(pos.x()), float(pos.y())
         px, py = self._screen_to_data(sx, sy)
-        ping_idx = int(round(px))
-        sample_idx = int(round(py))
+        ping_idx = round(px)
+        sample_idx = round(py)
         sv_val = self._get_sv_at(ping_idx, sample_idx)
         if not np.isnan(sv_val):
             menu.addAction(f"📍 Ping: {ping_idx} | Sample: {sample_idx} | Sv: {sv_val:.1f} dB").setEnabled(False)
@@ -1069,8 +1069,8 @@ class EchogramRenderer(QOpenGLWidget):
         
         # ??????? Ping ??
         pings = [p[0] for p in points]
-        ping_min = max(0, int(round(min(pings))))
-        ping_max = min(self._n_pings - 1, int(round(max(pings))))
+        ping_min = max(0, round(min(pings)))
+        ping_max = min(self._n_pings - 1, round(max(pings)))
         
         if ping_min > ping_max:
             self._bottom_draw_points.clear()
