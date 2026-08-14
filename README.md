@@ -1,4 +1,4 @@
-# Echogram GUI — 鱼类声学资源评估系统
+﻿# Echogram GUI — 鱼类声学资源评估系统
 
 基于 [echopype](https://github.com/OSOceanAcoustics/echopype) 构建的专业鱼类声学数据处理 GUI，提供 Echoview 风格的交互式回波图分析。
 
@@ -43,8 +43,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/YOUR_USERNAME/echopype-gui.git
-cd echopype-gui
+git clone https://github.com/LQDC3417/echopype.git
+cd echopype
 
 # 创建虚拟环境
 python -m venv venv
