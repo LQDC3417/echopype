@@ -1,4 +1,4 @@
-"""主窗口 — Echoview 专业风格停靠布局
+﻿"""主窗口 — Echoview 专业风格停靠布局
 
 ┌──────────────────────────────────────────────────┐
 │ Menu Bar                                          │
@@ -38,6 +38,8 @@ from src.gui.fileset_tree import BatchImportDialog, FilesetTreeWidget
 from src.gui.property_panel import PropertyPanel
 from src.gui.region_panel import RegionTableWidget
 from src.gui.stats_dialog import StatsDialog
+from src.gui.quality_dialog import QualityDialog
+from src.gui.multifreq_dialog import MultifreqDialog
 from src.gui.status_bar import MainStatusBar
 from src.gui.toolbars import EchogramToolBar, MouseMode, StandardToolBar
 from src.gui.variable_list import VariableListWidget

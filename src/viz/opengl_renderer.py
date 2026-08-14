@@ -1,4 +1,4 @@
-"""OpenGL Echogram 渲染器
+﻿"""OpenGL Echogram 渲染器
 
 高性能 echogram 渲染，支持缩放、平移、叠加层与框选交互。
 依赖: PyOpenGL, matplotlib, numpy, PySide6
@@ -108,6 +108,9 @@ class EchogramRenderer(QOpenGLWidget):
         self._grid_values = None  # np.ndarray — 每格的着色值（如 mean_sv）
         self._grid_vmin = -70.0
         self._grid_vmax = -20.0
+        self._grid_colors_cache = None   # 缓存的颜色数组 (N, 4) RGBA
+        self._grid_colors_dirty = True   # 颜色缓存是否需要更新
+        self._grid_alpha = 0.35          # 网格填充透明度
 
         # ??????????
         self._bottom_line_color = (0.8, 0.6, 0.0, 1.0)  # ???
@@ -283,12 +286,15 @@ class EchogramRenderer(QOpenGLWidget):
             self._grid_vmax = float(np.nanmax(self._grid_values))
             if self._grid_vmin == self._grid_vmax:
                 self._grid_vmax = self._grid_vmin + 1.0
+        self._grid_colors_dirty = True  # 标记颜色缓存需要更新
         self.update()
 
     def clear_grid_overlay(self) -> None:
         """清除网格叠加"""
         self._grid_cells = None
         self._grid_values = None
+        self._grid_colors_cache = None
+        self._grid_colors_dirty = True
         self.update()
 
     def set_colormap(self, name: str = "jet", vmin: float = -70.0, vmax: float = -20.0) -> None:
@@ -351,6 +357,9 @@ class EchogramRenderer(QOpenGLWidget):
 
         self._draw_echogram_texture()
 
+        # 网格叠加在 echogram 之上、底线/鱼群之下
+        if self._grid_cells is not None:
+            self._draw_grid_overlay()
         if self._noise_mask is not None:
             self._draw_noise_overlay()
         if self._bottom_line is not None:
@@ -359,8 +368,6 @@ class EchogramRenderer(QOpenGLWidget):
             self._draw_surface_line()
         if self._school_mask is not None:
             self._draw_school_overlay()
-        if self._grid_cells is not None:
-            self._draw_grid_overlay()
         if self._selecting and self._select_start and self._select_end:
             self._draw_selection_rect()
 
@@ -375,9 +382,6 @@ class EchogramRenderer(QOpenGLWidget):
         # 右侧渐变色图例（colorbar）
         if self._sv_data is not None:
             self._draw_colorbar()
-
-    # ── 纹理生成与渲染 ────────────────────────────────────────
-
     def _sv_to_rgba(self, ping_start: int = 0, ping_end: int = -1,
                     sample_start: int = 0, sample_end: int = -1) -> np.ndarray:
         """Sv 数据 → RGBA 纹理数组。
@@ -571,31 +575,27 @@ class EchogramRenderer(QOpenGLWidget):
         glDisable(GL_LINE_STIPPLE)
 
     def _draw_grid_overlay(self) -> None:
-        """绘制网格单元叠加（半透明彩色矩形 + 边框）"""
+        """绘制网格单元叠加（半透明彩色矩形 + 边框 + 数值标签）"""
         if not self._grid_cells or self._grid_values is None:
             return
 
-        try:
-            from matplotlib import colormaps
-            cmap = colormaps[self._cmap_name]
-        except (ImportError, AttributeError):
-            from matplotlib import cm
-            cmap = cm.get_cmap(self._cmap_name)
-
-        span = self._grid_vmax - self._grid_vmin
-        if span == 0:
-            span = 1.0
+        # 构建或使用缓存的颜色数组
+        if self._grid_colors_dirty or self._grid_colors_cache is None:
+            self._build_grid_colors_cache()
+        colors = self._grid_colors_cache
+        if colors is None:
+            return
 
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
-        # 绘制填充矩形（半透明）
+        alpha = self._grid_alpha
+
+        # 绘制填充矩形（半透明，使用缓存颜色）
         glBegin(GL_QUADS)
         for i, cell in enumerate(self._grid_cells):
-            val = self._grid_values[i]
-            norm = np.clip((val - self._grid_vmin) / span, 0, 1)
-            r, g, b, _ = cmap(norm)
-            glColor4f(r, g, b, 0.35)
+            r, g, b = colors[i]
+            glColor4f(r, g, b, alpha)
 
             x0 = self._offset_x + cell["ping_start"] * self._zoom_x
             x1 = self._offset_x + cell["ping_end"] * self._zoom_x
@@ -608,8 +608,8 @@ class EchogramRenderer(QOpenGLWidget):
             glVertex2f(x0, y1)
         glEnd()
 
-        # 绘制边框（深色实线）
-        glColor4f(0.2, 0.2, 0.2, 0.6)
+        # 绘制边框（白色细线）
+        glColor4f(1.0, 1.0, 1.0, 0.8)
         glLineWidth(1.0)
         glBegin(GL_LINES)
         for cell in self._grid_cells:
@@ -617,16 +617,93 @@ class EchogramRenderer(QOpenGLWidget):
             x1 = self._offset_x + cell["ping_end"] * self._zoom_x
             y0 = self._offset_y + cell["sample_start"] * self._zoom_y
             y1 = self._offset_y + cell["sample_end"] * self._zoom_y
-            # 上
+            # 上边
             glVertex2f(x0, y0); glVertex2f(x1, y0)
-            # 下
+            # 下边
             glVertex2f(x0, y1); glVertex2f(x1, y1)
-            # 左
+            # 左边
             glVertex2f(x0, y0); glVertex2f(x0, y1)
-            # 右
+            # 右边
             glVertex2f(x1, y0); glVertex2f(x1, y1)
         glEnd()
 
+        # 在足够大的单元格内绘制 mean_sv 数值
+        self._draw_grid_labels()
+
+    def _build_grid_colors_cache(self) -> None:
+        """构建网格颜色缓存数组"""
+        try:
+            from matplotlib import colormaps
+            cmap = colormaps[self._cmap_name]
+        except (ImportError, AttributeError):
+            from matplotlib import cm
+            cmap = cm.get_cmap(self._cmap_name)
+
+        span = self._grid_vmax - self._grid_vmin
+        if span == 0:
+            span = 1.0
+
+        n = len(self._grid_cells)
+        colors = np.zeros((n, 3), dtype=np.float32)
+
+        for i, val in enumerate(self._grid_values):
+            norm = np.clip((val - self._grid_vmin) / span, 0, 1)
+            r, g, b, _ = cmap(norm)
+            colors[i] = [r, g, b]
+
+        self._grid_colors_cache = colors
+        self._grid_colors_dirty = False
+
+    def _draw_grid_labels(self) -> None:
+        """在足够大的网格单元内绘制 mean_sv 数值标签"""
+        # 计算单元格屏幕尺寸，只在足够大时显示文字
+        min_cell_width = 60   # 最小宽度（像素）
+        min_cell_height = 20  # 最小高度（像素）
+
+        # 收集需要绘制标签的单元格
+        labels_to_draw = []
+        for i, cell in enumerate(self._grid_cells):
+            cell_w = (cell["ping_end"] - cell["ping_start"]) * self._zoom_x
+            cell_h = (cell["sample_end"] - cell["sample_start"]) * self._zoom_y
+
+            if cell_w >= min_cell_width and cell_h >= min_cell_height:
+                x0 = self._offset_x + cell["ping_start"] * self._zoom_x
+                x1 = self._offset_x + cell["ping_end"] * self._zoom_x
+                y0 = self._offset_y + cell["sample_start"] * self._zoom_y
+                y1 = self._offset_y + cell["sample_end"] * self._zoom_y
+                cx = (x0 + x1) / 2
+                cy = (y0 + y1) / 2
+                val = self._grid_values[i]
+                labels_to_draw.append((cx, cy, val, cell_w))
+
+        if not labels_to_draw:
+            return
+
+        # 使用 QPainter 绘制文字（在 OpenGL 上下文之上）
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        for cx, cy, val, cell_w in labels_to_draw:
+            # 根据单元格大小调整字体
+            font_size = max(8, min(12, int(cell_w / 8)))
+            font = QFont("Consolas", font_size)
+            painter.setFont(font)
+
+            # 文字颜色：深色背景用白色，浅色背景用黑色
+            # 这里简化为使用黑色带白色描边效果
+            text = f"{val:.1f}"
+
+            # 绘制文字阴影（提高可读性）
+            painter.setPen(QColor(255, 255, 255, 200))
+            painter.drawText(int(cx - 20), int(cy - 8), 40, 16,
+                           Qt.AlignCenter | Qt.AlignVCenter, text)
+
+            # 绘制主文字
+            painter.setPen(QColor(0, 0, 0, 220))
+            painter.drawText(int(cx - 21), int(cy - 9), 40, 16,
+                           Qt.AlignCenter | Qt.AlignVCenter, text)
+
+        painter.end()
     def _draw_bottom_preview(self) -> None:
         """???????? ? ??????????"""
         if not self._bottom_draw_points:
