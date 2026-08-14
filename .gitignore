@@ -54,3 +54,9 @@ screenshots/*.jpg
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Agent temporary files
+fix_f821.ps1
+fix_f821.py
+patch1.patch
+ruff_errors.json
