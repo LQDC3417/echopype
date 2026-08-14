@@ -1159,7 +1159,6 @@ class EchogramRenderer(QOpenGLWidget):
         bar_margin = 8      # 色条与 echogram 右边缘的间距
 
         w = self.width()
-        h = self.height()
 
         # 色条位置：紧贴 echogram 右侧
         bar_x = self._offset_x + self._n_pings * self._zoom_x + bar_margin
