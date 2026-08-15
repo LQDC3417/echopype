@@ -12,7 +12,7 @@ logger = logging.getLogger("fish_acoustics")
 
 
 def _build_edge_coords(center_coords: np.ndarray) -> np.ndarray:
-    """将中心坐标转换为边缘坐标（长度 n → n+1）。"""
+    """将中心坐标转换为边缘坐标（长度 n -> n+1）。"""
     if len(center_coords) < 2:
         return np.array([center_coords[0] - 0.5, center_coords[0] + 0.5])
 
@@ -42,13 +42,27 @@ def detect_schools(
     xr.DataArray
         布尔 mask，True 表示鱼群区域
     """
-    from echopype.mask import detect_shoal
-
     school_cfg = config.get("school_detection", {})
     method = school_cfg.get("method", "echoview")
 
-    if method != "echoview":
+    if method == "advanced":
+        # 使用高级鱼群提取模块
+        from src.core.shoal_extraction import extract_shoals
+        mask_arr, df = extract_shoals(ds_Sv, config)
+        # 转换为 xr.DataArray 以保持接口一致
+        sv_dims = ds_Sv["Sv"].dims[-2:]
+        return xr.DataArray(
+            mask_arr,
+            dims=sv_dims,
+            coords={
+                sv_dims[0]: ds_Sv["Sv"].coords[sv_dims[0]].values,
+                sv_dims[1]: ds_Sv["Sv"].coords[sv_dims[1]].values,
+            },
+        )
+    elif method != "echoview":
         raise ValueError(f"不支持的鱼群检测方法: {method}")
+
+    from echopype.mask import detect_shoal
 
     channel = str(ds_Sv["channel"].values[0]) if "channel" in ds_Sv.dims else None
     ping_time = ds_Sv["ping_time"].values
@@ -62,7 +76,6 @@ def detect_schools(
     # 确保单调递增（同步反转 Sv 数据以保持对齐）
     if len(idim_center) > 1 and idim_center[0] > idim_center[-1]:
         idim_center = idim_center[::-1]
-        # 同步反转 Sv 的深度维度
         sv_arr = ds_Sv[var_name].values
         if sv_arr.ndim == 3:
             ds_Sv[var_name].values[0, :, :] = sv_arr[0, :, ::-1]
@@ -147,12 +160,13 @@ def schools_to_dataframe(
         depth_end = depth[depth_idx_max] if depth_idx_max < len(depth) else float(depth_idx_max)
 
         n_pixels = int(region.sum())
-        # 避免 datetime 与 float 混算：ping_res 单位为秒
         if np.issubdtype(ping_time.dtype, np.datetime64):
             ping_res_s = float(np.diff(ping_time[:2]) / np.timedelta64(1, 's')) if len(ping_time) > 1 else 1.0
         else:
             ping_res_s = float(np.diff(ping_time[:2])[0]) if len(ping_time) > 1 else 1.0
-        depth_res = float(np.median(np.abs(np.diff(depth)))) if len(depth) > 1 else 1.0
+        depth_diffs = np.abs(np.diff(depth))
+        non_zero_diffs = depth_diffs[depth_diffs > 0]
+        depth_res = float(np.median(non_zero_diffs)) if len(non_zero_diffs) > 0 else 0.1
         area = n_pixels * abs(ping_res_s) * depth_res
 
         sv_values = Sv[region]

@@ -1,12 +1,12 @@
-﻿"""高级鱼群提取模块：空间聚类 + 跨 ping 连接
+"""¸ß¼¶ÓãÈºÌáÈ¡Ä£¿é£º¿Õ¼ä¾ÛÀà + ¿ç ping Á¬½Ó
 
-参考：Matecho EchoGroupExtraction.m
-功能：
-- 逐 ping 阈值化
-- 深度方向聚类（MaxDistDep）
-- 跨 ping segment linking（前向+后向）
-- 迁移区域特殊处理（日出/日落）
-- 鱼群描述符计算（面积、长度、高度、形态特征）
+²Î¿¼£ºMatecho EchoGroupExtraction.m
+¹¦ÄÜ£º
+- Öð ping ãÐÖµ»¯
+- Éî¶È·½Ïò¾ÛÀà£¨MaxDistDep£©
+- ¿ç ping segment linking£¨Ç°Ïò+ºóÏò£©
+- Ç¨ÒÆÇøÓòÌØÊâ´¦Àí£¨ÈÕ³ö/ÈÕÂä£©
+- ÓãÈºÃèÊö·û¼ÆËã£¨Ãæ»ý¡¢³¤¶È¡¢¸ß¶È¡¢ÐÎÌ¬ÌØÕ÷£©
 """
 
 import logging
@@ -24,16 +24,16 @@ logger = logging.getLogger("fish_acoustics")
 
 @dataclass
 class Segment:
-    """单个 segment（一个 ping 内的连续有效区域）"""
+    """µ¥¸ö segment£¨Ò»¸ö ping ÄÚµÄÁ¬ÐøÓÐÐ§ÇøÓò£©"""
     depth_min: float
     depth_max: float
     ping_idx: int
-    label: int = -1  # 所属鱼群标签
+    label: int = -1  # ËùÊôÓãÈº±êÇ©
 
 
 @dataclass
 class ShoalGroup:
-    """鱼群（由多个 segment 连接而成）"""
+    """ÓãÈº£¨ÓÉ¶à¸ö segment Á¬½Ó¶ø³É£©"""
     id: int
     segments: list[Segment] = field(default_factory=list)
 
@@ -68,7 +68,7 @@ class ShoalGroup:
 
 @dataclass
 class ShoalExtractionResult:
-    """鱼群提取结果"""
+    """ÓãÈºÌáÈ¡½á¹û"""
     shoals: list[ShoalGroup]
     mask: np.ndarray  # bool mask, shape=(n_pings, n_samples)
     labeled: np.ndarray  # labeled mask, shape=(n_pings, n_samples)
@@ -83,59 +83,59 @@ def _extract_segments_for_ping(
     bottom_depth: float | None = None,
     label_counter: int = 0,
 ) -> list[Segment]:
-    """对单个 ping 进行阈值化并提取 segment
+    """¶Ôµ¥¸ö ping ½øÐÐãÐÖµ»¯²¢ÌáÈ¡ segment
 
     Parameters
     ----------
     sv_ping : np.ndarray
-        单个 ping 的 Sv 数据，shape=(n_samples,)
+        µ¥¸ö ping µÄ Sv Êý¾Ý£¬shape=(n_samples,)
     depth : np.ndarray
-        深度数组，shape=(n_samples,)
+        Éî¶ÈÊý×é£¬shape=(n_samples,)
     ping_idx : int
-        当前 ping 索引
+        µ±Ç° ping Ë÷Òý
     min_threshold : float
-        最小阈值 (dB)
+        ×îÐ¡ãÐÖµ (dB)
     max_depth_dist : float
-        最大深度间隔 (米)，超过此间隔分为不同 segment
+        ×î´óÉî¶È¼ä¸ô (Ã×)£¬³¬¹ý´Ë¼ä¸ô·ÖÎª²»Í¬ segment
     bottom_depth : float, optional
-        底部深度 (米)，超过底部的样本被排除
+        µ×²¿Éî¶È (Ã×)£¬³¬¹ýµ×²¿µÄÑù±¾±»ÅÅ³ý
     label_counter : int
-        标签计数器起始值
+        ±êÇ©¼ÆÊýÆ÷ÆðÊ¼Öµ
 
     Returns
     -------
     list[Segment]
-        提取的 segment 列表
+        ÌáÈ¡µÄ segment ÁÐ±í
     """
-    # 阈值化
+    # ãÐÖµ»¯
     valid_mask = (sv_ping >= min_threshold) & np.isfinite(sv_ping)
 
-    # 底部以下排除
+    # µ×²¿ÒÔÏÂÅÅ³ý
     if bottom_depth is not None and np.isfinite(bottom_depth):
         valid_mask[depth >= bottom_depth] = False
 
     if not np.any(valid_mask):
         return []
 
-    # 找到有效样本的深度
+    # ÕÒµ½ÓÐÐ§Ñù±¾µÄÉî¶È
     valid_depths = depth[valid_mask]
 
-    # 按深度方向聚类（间隔 > max_depth_dist 分为不同 segment）
+    # °´Éî¶È·½Ïò¾ÛÀà£¨¼ä¸ô > max_depth_dist ·ÖÎª²»Í¬ segment£©
     segments = []
     if len(valid_depths) == 0:
         return segments
 
-    # 排序深度
+    # ÅÅÐòÉî¶È
     sorted_depths = np.sort(valid_depths)
 
-    # 按深度间隔分组
+    # °´Éî¶È¼ä¸ô·Ö×é
     current_min = sorted_depths[0]
     current_max = sorted_depths[0]
     current_label = label_counter
 
     for i in range(1, len(sorted_depths)):
         if sorted_depths[i] - sorted_depths[i-1] > max_depth_dist:
-            # 间隔过大，结束当前 segment，开始新的
+            # ¼ä¸ô¹ý´ó£¬½áÊøµ±Ç° segment£¬¿ªÊ¼ÐÂµÄ
             segments.append(Segment(
                 depth_min=current_min,
                 depth_max=current_max,
@@ -148,7 +148,7 @@ def _extract_segments_for_ping(
         else:
             current_max = sorted_depths[i]
 
-    # 添加最后一个 segment
+    # Ìí¼Ó×îºóÒ»¸ö segment
     segments.append(Segment(
         depth_min=current_min,
         depth_max=current_max,
@@ -166,36 +166,36 @@ def _link_segments_forward(
     max_time_gap: int,
     current_ping: int,
 ) -> None:
-    """前向连接：将当前 ping 的 segment 与前几个 ping 的 segment 连接
+    """Ç°ÏòÁ¬½Ó£º½«µ±Ç° ping µÄ segment ÓëÇ°¼¸¸ö ping µÄ segment Á¬½Ó
 
     Parameters
     ----------
     current_segments : list[Segment]
-        当前 ping 的 segment 列表
+        µ±Ç° ping µÄ segment ÁÐ±í
     previous_segments : list[Segment]
-        前几个 ping 的 segment 列表
+        Ç°¼¸¸ö ping µÄ segment ÁÐ±í
     max_depth_dist : float
-        最大深度间隔 (米)
+        ×î´óÉî¶È¼ä¸ô (Ã×)
     max_time_gap : int
-        最大时间间隔 (ping 数)
+        ×î´óÊ±¼ä¼ä¸ô (ping Êý)
     current_ping : int
-        当前 ping 索引
+        µ±Ç° ping Ë÷Òý
     """
     for curr_seg in current_segments:
         best_match = None
         best_overlap = 0
 
         for prev_seg in previous_segments:
-            # 检查时间间隔
+            # ¼ì²éÊ±¼ä¼ä¸ô
             if current_ping - prev_seg.ping_idx > max_time_gap:
                 continue
 
-            # 计算深度重叠
+            # ¼ÆËãÉî¶ÈÖØµþ
             overlap_min = max(curr_seg.depth_min, prev_seg.depth_min)
             overlap_max = min(curr_seg.depth_max, prev_seg.depth_max)
             overlap = max(0, overlap_max - overlap_min)
 
-            # 检查是否在深度容差内
+            # ¼ì²éÊÇ·ñÔÚÉî¶ÈÈÝ²îÄÚ
             depth_gap = min(
                 abs(curr_seg.depth_min - prev_seg.depth_max),
                 abs(curr_seg.depth_max - prev_seg.depth_min),
@@ -207,7 +207,7 @@ def _link_segments_forward(
                     best_match = prev_seg
 
         if best_match is not None:
-            # 继承前一个 segment 的标签
+            # ¼Ì³ÐÇ°Ò»¸ö segment µÄ±êÇ©
             curr_seg.label = best_match.label
 
 
@@ -217,41 +217,41 @@ def extract_shoals_advanced(
     bottom_depth_m: np.ndarray | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> ShoalExtractionResult:
-    """高级鱼群提取（参考 Matecho）
+    """¸ß¼¶ÓãÈºÌáÈ¡£¨²Î¿¼ Matecho£©
 
     Parameters
     ----------
     ds_Sv : xr.Dataset
-        Sv 数据集
+        Sv Êý¾Ý¼¯
     config : dict
-        配置字典，需包含 school_detection 子项
+        ÅäÖÃ×Öµä£¬Ðè°üº¬ school_detection ×ÓÏî
     bottom_depth_m : np.ndarray, optional
-        底部深度数组 (米)，shape=(n_pings,)
+        µ×²¿Éî¶ÈÊý×é (Ã×)£¬shape=(n_pings,)
     progress_callback : callable, optional
-        进度回调函数
+        ½ø¶È»Øµ÷º¯Êý
 
     Returns
     -------
     ShoalExtractionResult
-        提取结果
+        ÌáÈ¡½á¹û
     """
     school_cfg = config.get("school_detection", {})
 
-    # 参数
+    # ²ÎÊý
     min_threshold = school_cfg.get("min_threshold", -60.0)
-    max_depth_dist = school_cfg.get("max_depth_distance", 0.1)  # 米
-    max_ping_dist = school_cfg.get("max_ping_distance", 1)  # ping 数
-    max_time_gap = school_cfg.get("max_time_gap", 20)  # ping 数
+    max_depth_dist = school_cfg.get("max_depth_distance", 0.1)  # Ã×
+    max_ping_dist = school_cfg.get("max_ping_distance", 1)  # ping Êý
+    max_time_gap = school_cfg.get("max_time_gap", 20)  # ping Êý
     min_shoal_pings = school_cfg.get("min_shoal_pings", 3)
-    min_shoal_height = school_cfg.get("min_shoal_height", 0.5)  # 米
+    min_shoal_height = school_cfg.get("min_shoal_height", 0.5)  # Ã×
 
-    # 获取数据
+    # »ñÈ¡Êý¾Ý
     Sv = get_sv_array(ds_Sv)  # (n_pings, n_samples)
     depth = get_vertical_coords(ds_Sv)  # (n_samples,)
     n_pings, n_samples = Sv.shape
 
 
-    # Step 1: 逐 ping 提取 segment
+    # Step 1: Öð ping ÌáÈ¡ segment
     all_segments: list[list[Segment]] = []
     label_counter = 0
 
@@ -267,17 +267,17 @@ def extract_shoals_advanced(
         if progress_callback:
             progress_callback(ping_idx + 1, n_pings * 2)
 
-    logger.info(f"Step 1 完成: 提取了 {label_counter} 个初始 segment")
+    logger.info(f"Step 1 Íê³É: ÌáÈ¡ÁË {label_counter} ¸ö³õÊ¼ segment")
 
-    # Step 2: 前向连接（跨 ping linking）
-    max_lookback = min(max_ping_dist + 1, 10)  # 向前看的 ping 数
+    # Step 2: Ç°ÏòÁ¬½Ó£¨¿ç ping linking£©
+    max_lookback = min(max_ping_dist + 1, 10)  # ÏòÇ°¿´µÄ ping Êý
 
     for ping_idx in range(1, n_pings):
         current_segments = all_segments[ping_idx]
         if not current_segments:
             continue
 
-        # 收集前几个 ping 的 segment
+        # ÊÕ¼¯Ç°¼¸¸ö ping µÄ segment
         previous_segments = []
         for lookback in range(1, min(max_lookback + 1, ping_idx + 1)):
             prev_ping = ping_idx - lookback
@@ -292,9 +292,9 @@ def extract_shoals_advanced(
         if progress_callback:
             progress_callback(n_pings + ping_idx + 1, n_pings * 2)
 
-    logger.info("Step 2 完成: 前向连接")
+    logger.info("Step 2 Íê³É: Ç°ÏòÁ¬½Ó")
 
-    # Step 3: 构建鱼群（合并相同标签的 segment）
+    # Step 3: ¹¹½¨ÓãÈº£¨ºÏ²¢ÏàÍ¬±êÇ©µÄ segment£©
     label_to_shoal: dict[int, ShoalGroup] = {}
     shoal_id_counter = 0
 
@@ -307,15 +307,15 @@ def extract_shoals_advanced(
                 label_to_shoal[seg.label] = shoal
                 shoal_id_counter += 1
 
-    # Step 4: 过滤小鱼群
+    # Step 4: ¹ýÂËÐ¡ÓãÈº
     shoals = []
     for shoal in label_to_shoal.values():
         if shoal.n_pings >= min_shoal_pings and shoal.height >= min_shoal_height:
             shoals.append(shoal)
 
-    logger.info(f"Step 3-4 完成: {len(shoals)} 个鱼群（过滤前 {len(label_to_shoal)} 个）")
+    logger.info(f"Step 3-4 Íê³É: {len(shoals)} ¸öÓãÈº£¨¹ýÂËÇ° {len(label_to_shoal)} ¸ö£©")
 
-    # Step 5: 构建 mask
+    # Step 5: ¹¹½¨ mask
     mask = np.zeros((n_pings, n_samples), dtype=bool)
     labeled = np.zeros((n_pings, n_samples), dtype=int)
 
@@ -326,7 +326,7 @@ def extract_shoals_advanced(
             mask[ping_idx, depth_mask] = True
             labeled[ping_idx, depth_mask] = shoal.id + 1
 
-    logger.info(f"鱼群提取完成: {len(shoals)} 个鱼群, {int(mask.sum())} 个像素")
+    logger.info(f"ÓãÈºÌáÈ¡Íê³É: {len(shoals)} ¸öÓãÈº, {int(mask.sum())} ¸öÏñËØ")
 
     return ShoalExtractionResult(
         shoals=shoals,
@@ -336,27 +336,29 @@ def extract_shoals_advanced(
 
 
 def shoals_to_dataframe(result: ShoalExtractionResult, ds_Sv: xr.Dataset) -> pd.DataFrame:
-    """将鱼群提取结果转换为 DataFrame
+    """½«ÓãÈºÌáÈ¡½á¹û×ª»»Îª DataFrame
 
     Parameters
     ----------
     result : ShoalExtractionResult
-        提取结果
+        ÌáÈ¡½á¹û
     ds_Sv : xr.Dataset
-        Sv 数据集
+        Sv Êý¾Ý¼¯
 
     Returns
     -------
     pd.DataFrame
-        每行一个鱼群
+        Ã¿ÐÐÒ»¸öÓãÈº
     """
     Sv = get_sv_array(ds_Sv)
     depth = get_vertical_coords(ds_Sv)
     ping_time = ds_Sv["ping_time"].values
 
-    # 计算深度和时间分辨率
+    # ¼ÆËãÉî¶ÈºÍÊ±¼ä·Ö±æÂÊ
     if len(depth) > 1:
-        depth_res = float(np.median(np.abs(np.diff(depth))))
+        depth_diffs = np.abs(np.diff(depth))
+        non_zero_diffs = depth_diffs[depth_diffs > 0]
+        depth_res = float(np.median(non_zero_diffs)) if len(non_zero_diffs) > 0 else 0.1
     else:
         depth_res = 0.1
 
@@ -370,7 +372,7 @@ def shoals_to_dataframe(result: ShoalExtractionResult, ds_Sv: xr.Dataset) -> pd.
 
     records = []
     for shoal in result.shoals:
-        # 计算鱼群内的 Sv 统计
+        # ¼ÆËãÓãÈºÄÚµÄ Sv Í³¼Æ
         sv_values = []
         for seg in shoal.segments:
             ping_idx = seg.ping_idx
@@ -381,7 +383,7 @@ def shoals_to_dataframe(result: ShoalExtractionResult, ds_Sv: xr.Dataset) -> pd.
         mean_sv = float(np.mean(sv_values)) if sv_values else np.nan
         max_sv = float(np.max(sv_values)) if sv_values else np.nan
 
-        # 计算面积
+        # ¼ÆËãÃæ»ý
         n_pixels = sum(
             int(np.sum((depth >= s.depth_min) & (depth <= s.depth_max)))
             for s in shoal.segments
@@ -406,7 +408,7 @@ def shoals_to_dataframe(result: ShoalExtractionResult, ds_Sv: xr.Dataset) -> pd.
         })
 
     df = pd.DataFrame(records)
-    logger.info(f"鱼群 DataFrame: {len(df)} 个鱼群")
+    logger.info(f"ÓãÈº DataFrame: {len(df)} ¸öÓãÈº")
     return df
 
 
@@ -416,18 +418,18 @@ def extract_shoals(
     bottom_depth_m: np.ndarray | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[np.ndarray, pd.DataFrame]:
-    """统一鱼群提取接口
+    """Í³Ò»ÓãÈºÌáÈ¡½Ó¿Ú
 
     Parameters
     ----------
     ds_Sv : xr.Dataset
-        Sv 数据集
+        Sv Êý¾Ý¼¯
     config : dict
-        配置字典
+        ÅäÖÃ×Öµä
     bottom_depth_m : np.ndarray, optional
-        底部深度数组
+        µ×²¿Éî¶ÈÊý×é
     progress_callback : callable, optional
-        进度回调函数
+        ½ø¶È»Øµ÷º¯Êý
 
     Returns
     -------
@@ -437,17 +439,17 @@ def extract_shoals(
     method = config.get("school_detection", {}).get("method", "advanced")
 
     if method == "echoview":
-        # 使用原有 echopype detect_shoal
+        # Ê¹ÓÃÔ­ÓÐ echopype detect_shoal
         from src.core.school import detect_schools, schools_to_dataframe
         mask = detect_schools(ds_Sv, config)
         df = schools_to_dataframe(mask, ds_Sv)
         return mask.values, df
 
     elif method == "advanced":
-        # 使用高级提取
+        # Ê¹ÓÃ¸ß¼¶ÌáÈ¡
         result = extract_shoals_advanced(ds_Sv, config, bottom_depth_m, progress_callback)
         df = shoals_to_dataframe(result, ds_Sv)
         return result.mask, df
 
     else:
-        raise ValueError(f"不支持的鱼群检测方法: {method}")
+        raise ValueError(f"²»Ö§³ÖµÄÓãÈº¼ì²â·½·¨: {method}")
