@@ -78,9 +78,9 @@ def detect_schools(
         idim_center = idim_center[::-1]
         sv_arr = ds_Sv[var_name].values
         if sv_arr.ndim == 3:
-            ds_Sv[var_name].values[0, :, :] = sv_arr[0, :, ::-1]
+            ds_Sv[var_name].values[0, :, :] = sv_arr[0, :, ::-1].copy()
         else:
-            ds_Sv[var_name].values[:] = sv_arr[:, ::-1]
+            ds_Sv[var_name].values[:] = sv_arr[:, ::-1].copy()
 
     jdim_center = ping_time.astype(float)
     if len(jdim_center) > 1 and jdim_center[0] > jdim_center[-1]:

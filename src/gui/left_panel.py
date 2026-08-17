@@ -1,9 +1,8 @@
-"""左侧面板 — Matecho风格
+"""左侧面板 — 参照 Echoview / Matecho 风格
 
 集成文件树、变量列表、频率选择、滤波器快速控制
 
-设计参考Matecho界面：
-- 文件树（可折叠）
+设计参照 Echoview 左侧 Filesets 面板：
 - 频率/通道选择
 - 回波类型选择
 - 滤波器快速开关
@@ -24,6 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.gui.i18n import T
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,13 +43,13 @@ class QuickControlsWidget(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
 
         # ── 频率/通道选择 ──
-        freq_group = QGroupBox("频率选择")
+        freq_group = QGroupBox(T("panel_frequency"))
         freq_layout = QVBoxLayout()
         freq_layout.setSpacing(4)
         freq_layout.setContentsMargins(8, 12, 8, 8)
 
         self.combo_frequency = QComboBox()
-        self.combo_frequency.setToolTip("选择工作频率/通道")
+        self.combo_frequency.setToolTip(T("panel_frequency"))
         self.combo_frequency.currentTextChanged.connect(self.frequency_changed)
         freq_layout.addWidget(self.combo_frequency)
 
@@ -56,14 +57,14 @@ class QuickControlsWidget(QWidget):
         layout.addWidget(freq_group)
 
         # ── 回波类型选择 ──
-        echo_group = QGroupBox("显示类型")
+        echo_group = QGroupBox(T("panel_display_type"))
         echo_layout = QVBoxLayout()
         echo_layout.setSpacing(4)
         echo_layout.setContentsMargins(8, 12, 8, 8)
 
         self.combo_echotype = QComboBox()
-        self.combo_echotype.addItems(["Sv (原始)", "Sv (去噪)", "噪声", "SNR"])
-        self.combo_echotype.setToolTip("选择显示的回波数据类型")
+        self._update_echo_items()
+        self.combo_echotype.setToolTip(T("panel_display_type"))
         self.combo_echotype.currentTextChanged.connect(self._on_echotype_changed)
         echo_layout.addWidget(self.combo_echotype)
 
@@ -71,24 +72,24 @@ class QuickControlsWidget(QWidget):
         layout.addWidget(echo_group)
 
         # ── 滤波器快速开关 ──
-        filter_group = QGroupBox("滤波器")
+        filter_group = QGroupBox(T("panel_filters"))
         filter_layout = QVBoxLayout()
         filter_layout.setSpacing(4)
         filter_layout.setContentsMargins(8, 12, 8, 8)
 
-        self.chk_noise = QCheckBox("噪声去除")
+        self.chk_noise = QCheckBox(T("filter_noise"))
         self.chk_noise.setChecked(True)
-        self.chk_noise.setToolTip("启用/禁用噪声去除")
+        self.chk_noise.setToolTip(T("filter_noise"))
         self.chk_noise.toggled.connect(lambda v: self.filter_toggled.emit("noise", v))
 
-        self.chk_bottom = QCheckBox("底部检测")
+        self.chk_bottom = QCheckBox(T("filter_bottom"))
         self.chk_bottom.setChecked(True)
-        self.chk_bottom.setToolTip("显示/隐藏底部检测线")
+        self.chk_bottom.setToolTip(T("filter_bottom"))
         self.chk_bottom.toggled.connect(lambda v: self.filter_toggled.emit("bottom", v))
 
-        self.chk_schools = QCheckBox("鱼群显示")
+        self.chk_schools = QCheckBox(T("filter_schools"))
         self.chk_schools.setChecked(True)
-        self.chk_schools.setToolTip("显示/隐藏鱼群叠加")
+        self.chk_schools.setToolTip(T("filter_schools"))
         self.chk_schools.toggled.connect(lambda v: self.filter_toggled.emit("schools", v))
 
         filter_layout.addWidget(self.chk_noise)
@@ -100,6 +101,20 @@ class QuickControlsWidget(QWidget):
 
         layout.addStretch()
 
+    def _update_echo_items(self):
+        """更新回波类型下拉框"""
+        self.combo_echotype.blockSignals(True)
+        current = self.combo_echotype.currentIndex()
+        self.combo_echotype.clear()
+        self.combo_echotype.addItems([
+            T("display_sv_raw"),
+            T("display_sv_corrected"),
+            T("display_noise"),
+            T("display_snr"),
+        ])
+        self.combo_echotype.setCurrentIndex(current if current >= 0 else 0)
+        self.combo_echotype.blockSignals(False)
+
     def set_frequencies(self, channels: list[str]):
         """设置可用频率列表"""
         self.combo_frequency.blockSignals(True)
@@ -109,7 +124,6 @@ class QuickControlsWidget(QWidget):
 
     def _on_echotype_changed(self, text: str):
         """回波类型变更"""
-        # 提取key部分："Sv (原始)" → "Sv"
         key = text.split(" ")[0] if text else "Sv"
         self.echotype_changed.emit(key)
 
@@ -154,7 +168,7 @@ class VariableListWidget(QListWidget):
 
 
 class LeftPanel(QWidget):
-    """左侧面板 — 集成文件树、变量列表、快速控制"""
+    """左侧面板 — 集成快速控制 + 变量列表（参照 Echoview 左侧布局）"""
 
     # 信号
     fileset_selected = Signal(object)
@@ -188,7 +202,7 @@ class LeftPanel(QWidget):
         layout.addWidget(self.quick_controls)
 
         # ── 变量列表 ──
-        var_group = QGroupBox("变量列表")
+        var_group = QGroupBox(T("panel_variables"))
         var_layout = QVBoxLayout()
         var_layout.setSpacing(4)
         var_layout.setContentsMargins(8, 12, 8, 8)

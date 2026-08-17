@@ -18,13 +18,15 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from src.gui.i18n import T
+
 
 class QualityDialog(QDialog):
     """数据质量检查结果对话框"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("数据质量检查")
+        self.setWindowTitle(T("quality_title"))
         self.setMinimumSize(500, 350)
         self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
 
@@ -56,7 +58,7 @@ class QualityDialog(QDialog):
         # ── 底部按钮 ──
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        self.btn_close = QPushButton("关闭")
+        self.btn_close = QPushButton(T("quality_close"))
         self.btn_close.setFixedWidth(80)
         self.btn_close.clicked.connect(self.close)
         btn_layout.addWidget(self.btn_close)
@@ -71,7 +73,7 @@ class QualityDialog(QDialog):
             "font-size: 16px; font-weight: bold; border-radius: 6px; padding: 6px;"
         )
         # 默认等待状态
-        self._set_status("等待检查...", "#718096", "#EDF2F7")
+        self._set_status(T("quality_waiting"), "#718096", "#EDF2F7")
 
     def _set_status(self, text, text_color, bg_color):
         """设置状态栏样式"""
@@ -83,14 +85,14 @@ class QualityDialog(QDialog):
 
     def _setup_sv_section(self):
         """设置 Sv 数据质量区域"""
-        self.sv_group = QGroupBox("Sv 数据质量")
+        self.sv_group = QGroupBox(T("quality_sv_group"))
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 14, 10, 10)
         layout.setSpacing(6)
 
         # 值范围
         row_range = QHBoxLayout()
-        row_range.addWidget(QLabel("Sv 值范围:"))
+        row_range.addWidget(QLabel(T("quality_sv_range")))
         self.lbl_sv_range = QLabel("--")
         self.lbl_sv_range.setStyleSheet("font-weight: bold; color: #2b6cb0;")
         row_range.addWidget(self.lbl_sv_range)
@@ -99,7 +101,7 @@ class QualityDialog(QDialog):
 
         # 数据尺寸
         row_size = QHBoxLayout()
-        row_size.addWidget(QLabel("数据尺寸:"))
+        row_size.addWidget(QLabel(T("quality_data_size")))
         self.lbl_data_size = QLabel("--")
         self.lbl_data_size.setStyleSheet("font-weight: bold; color: #2b6cb0;")
         row_size.addWidget(self.lbl_data_size)
@@ -108,7 +110,7 @@ class QualityDialog(QDialog):
 
         # NaN 比例
         row_nan = QHBoxLayout()
-        row_nan.addWidget(QLabel("NaN 比例:"))
+        row_nan.addWidget(QLabel(T("quality_nan_ratio")))
         self.lbl_nan_ratio = QLabel("--")
         self.lbl_nan_ratio.setStyleSheet("font-weight: bold; color: #2b6cb0;")
         row_nan.addWidget(self.lbl_nan_ratio)
@@ -119,14 +121,14 @@ class QualityDialog(QDialog):
 
     def _setup_bottom_section(self):
         """设置底线质量区域"""
-        self.bottom_group = QGroupBox("底线质量")
+        self.bottom_group = QGroupBox(T("quality_bottom_group"))
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 14, 10, 10)
         layout.setSpacing(6)
 
         # 有效 ping 数
         row_pings = QHBoxLayout()
-        row_pings.addWidget(QLabel("有效 Ping 数:"))
+        row_pings.addWidget(QLabel(T("quality_valid_pings")))
         self.lbl_valid_pings = QLabel("--")
         self.lbl_valid_pings.setStyleSheet("font-weight: bold; color: #2b6cb0;")
         row_pings.addWidget(self.lbl_valid_pings)
@@ -135,7 +137,7 @@ class QualityDialog(QDialog):
 
         # NaN 比例
         row_nan = QHBoxLayout()
-        row_nan.addWidget(QLabel("NaN 比例:"))
+        row_nan.addWidget(QLabel(T("quality_nan_ratio")))
         self.lbl_bottom_nan = QLabel("--")
         self.lbl_bottom_nan.setStyleSheet("font-weight: bold; color: #2b6cb0;")
         row_nan.addWidget(self.lbl_bottom_nan)
@@ -146,7 +148,7 @@ class QualityDialog(QDialog):
 
     def _setup_warnings_section(self):
         """设置警告列表区域"""
-        self.warnings_group = QGroupBox("警告列表")
+        self.warnings_group = QGroupBox(T("quality_warnings"))
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 14, 10, 10)
 
@@ -159,7 +161,7 @@ class QualityDialog(QDialog):
         layout.addWidget(self.warnings_list)
 
         # 无警告时的提示
-        self.lbl_no_warnings = QLabel("所有检查通过，无警告")
+        self.lbl_no_warnings = QLabel(T("quality_no_warnings"))
         self.lbl_no_warnings.setAlignment(Qt.AlignCenter)
         self.lbl_no_warnings.setStyleSheet("color: #38A169; font-style: italic;")
         self.lbl_no_warnings.setVisible(False)
@@ -252,8 +254,8 @@ class QualityDialog(QDialog):
 
         # 判定整体状态
         if not sv_valid or not bottom_valid:
-            self._set_status("✕ 检查失败", "#9B2C2C", "#FFF5F5")
+            self._set_status(T("quality_failed"), "#9B2C2C", "#FFF5F5")
         elif has_sv_warnings or has_bottom_warnings:
-            self._set_status("⚠ 存在警告", "#975A16", "#FFFFF0")
+            self._set_status(T("quality_warn"), "#975A16", "#FFFFF0")
         else:
-            self._set_status("✓ 检查通过", "#276749", "#F0FFF4")
+            self._set_status(T("quality_passed"), "#276749", "#F0FFF4")

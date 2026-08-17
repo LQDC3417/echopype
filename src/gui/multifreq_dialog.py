@@ -1,4 +1,4 @@
-﻿"""多频率分析结果展示对话框
+"""多频率分析结果展示对话框
 
 功能：
 - 显示通道摘要表格（channel, frequency_Hz, n_pings, n_samples）
@@ -10,6 +10,7 @@
 import math
 
 import pandas as pd
+from src.gui.i18n import T
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
@@ -39,7 +40,7 @@ class MultifreqDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("多频率分析")
+        self.setWindowTitle(T("multifreq_title"))
         self.setMinimumSize(600, 400)
         self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
 
@@ -57,27 +58,27 @@ class MultifreqDialog(QDialog):
         # 标签页 1: 通道摘要
         self.summary_tab = QWidget()
         self._setup_summary_tab()
-        self.tabs.addTab(self.summary_tab, "通道摘要")
+        self.tabs.addTab(self.summary_tab, T("multifreq_tab_summary"))
 
         # 标签页 2: 频率对比
         self.compare_tab = QWidget()
         self._setup_compare_tab()
-        self.tabs.addTab(self.compare_tab, "频率对比")
+        self.tabs.addTab(self.compare_tab, T("multifreq_tab_compare"))
 
         layout.addWidget(self.tabs, 1)
 
         # ── 底部按钮 ──
         btn_layout = QHBoxLayout()
-        self.btn_export_csv = QPushButton("导出 CSV")
-        self.btn_export_csv.setToolTip("导出当前标签页数据为 CSV 文件")
+        self.btn_export_csv = QPushButton(T("multifreq_btn_csv"))
+        self.btn_export_csv.setToolTip(T("multifreq_btn_csv"))
         self.btn_export_csv.clicked.connect(self._on_export_csv)
 
-        self.btn_export_all = QPushButton("导出全部")
-        self.btn_export_all.setToolTip("导出所有标签页数据到一个 Excel 文件")
+        self.btn_export_all = QPushButton(T("multifreq_btn_all"))
+        self.btn_export_all.setToolTip(T("multifreq_btn_all"))
         self.btn_export_all.clicked.connect(self._on_export_all)
 
-        self.btn_copy = QPushButton("复制到剪贴板")
-        self.btn_copy.setToolTip("复制当前表格数据到系统剪贴板")
+        self.btn_copy = QPushButton(T("multifreq_btn_copy"))
+        self.btn_copy.setToolTip(T("multifreq_btn_copy"))
         self.btn_copy.clicked.connect(self._on_copy)
 
         btn_layout.addStretch()
@@ -94,15 +95,13 @@ class MultifreqDialog(QDialog):
         layout.setSpacing(8)
         layout.setContentsMargins(0, 8, 0, 0)
 
-        group = QGroupBox("通道摘要")
+        group = QGroupBox(T("multifreq_tab_summary"))
         g_layout = QVBoxLayout()
         g_layout.setContentsMargins(8, 12, 8, 8)
 
         self.summary_table = QTableWidget()
         self.summary_table.setColumnCount(4)
-        self.summary_table.setHorizontalHeaderLabels(
-            ["通道", "频率 (Hz)", "Ping 数", "采样点数"]
-        )
+        self.summary_table.setHorizontalHeaderLabels(T("multifreq_summary_headers"))
         self.summary_table.setAlternatingRowColors(True)
         self.summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -119,12 +118,12 @@ class MultifreqDialog(QDialog):
         layout.setSpacing(8)
         layout.setContentsMargins(0, 8, 0, 0)
 
-        group = QGroupBox("多频率 ABC 对比")
+        group = QGroupBox(T("multifreq_compare_group"))
         g_layout = QVBoxLayout()
         g_layout.setContentsMargins(8, 12, 8, 8)
 
         # 提示标签：少于 2 个通道时显示
-        self.lbl_compare_hint = QLabel("需要至少 2 个通道才能进行频率对比")
+        self.lbl_compare_hint = QLabel(T("multifreq_need_2channels"))
         self.lbl_compare_hint.setAlignment(Qt.AlignCenter)
         self.lbl_compare_hint.setStyleSheet(
             "font-size: 13px; color: #999; padding: 20px;"
@@ -134,9 +133,7 @@ class MultifreqDialog(QDialog):
 
         self.compare_table = QTableWidget()
         self.compare_table.setColumnCount(5)
-        self.compare_table.setHorizontalHeaderLabels(
-            ["通道", "频率 (Hz)", "平均 ABC", "标准差 ABC", "最大 ABC"]
-        )
+        self.compare_table.setHorizontalHeaderLabels(T("multifreq_compare_headers"))
         self.compare_table.setAlternatingRowColors(True)
         self.compare_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.compare_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -202,27 +199,27 @@ class MultifreqDialog(QDialog):
         current_tab = self.tabs.currentIndex()
         if current_tab == 0:
             df = self._summary_df
-            name = "通道摘要"
+            name = T("multifreq_tab_summary")
         else:
             df = self._compare_df
-            name = "频率对比"
+            name = T("multifreq_tab_compare")
 
         if df is None or df.empty:
-            QMessageBox.warning(self, "警告", f"没有 {name} 数据可导出")
+            QMessageBox.warning(self, T("dialog_warning"), T("stats_no_data_warn", name=name))
             return
 
         file_path, _ = QFileDialog.getSaveFileName(
-            self, f"导出 {name}", f"{name}.csv",
-            "CSV 文件 (*.csv)"
+            self, f"{name}", f"{name}.csv",
+            "CSV (*.csv)"
         )
         if not file_path:
             return
 
         try:
             df.to_csv(file_path, index=False, encoding="utf-8-sig")
-            QMessageBox.information(self, "导出成功", f"数据已导出到: {file_path}")
+            QMessageBox.information(self, T("stats_export_success"), f"{file_path}")
         except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出数据时出错: {e!s}")
+            QMessageBox.critical(self, T("stats_export_failed"), f"{e!s}")
 
     def _on_export_all(self):
         """导出所有数据到 Excel"""
@@ -230,12 +227,12 @@ class MultifreqDialog(QDialog):
         has_compare = self._compare_df is not None and not self._compare_df.empty
 
         if not has_summary and not has_compare:
-            QMessageBox.warning(self, "警告", "没有数据可导出")
+            QMessageBox.warning(self, T("dialog_warning"), T("stats_no_data_export"))
             return
 
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "导出所有数据", "多频率分析.xlsx",
-            "Excel 文件 (*.xlsx)"
+            self, T("stats_btn_export_all"), "multifreq.xlsx",
+            "Excel (*.xlsx)"
         )
         if not file_path:
             return
@@ -243,12 +240,12 @@ class MultifreqDialog(QDialog):
         try:
             with pd.ExcelWriter(file_path) as writer:
                 if has_summary:
-                    self._summary_df.to_excel(writer, sheet_name="通道摘要", index=False)
+                    self._summary_df.to_excel(writer, sheet_name=T("multifreq_tab_summary"), index=False)
                 if has_compare:
-                    self._compare_df.to_excel(writer, sheet_name="频率对比", index=False)
-            QMessageBox.information(self, "导出成功", f"数据已导出到: {file_path}")
+                    self._compare_df.to_excel(writer, sheet_name=T("multifreq_tab_compare"), index=False)
+            QMessageBox.information(self, T("stats_export_success"), f"{file_path}")
         except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出数据时出错: {e!s}")
+            QMessageBox.critical(self, T("stats_export_failed"), f"{e!s}")
 
     def _on_copy(self):
         """复制当前表格到剪贴板"""
@@ -272,7 +269,7 @@ class MultifreqDialog(QDialog):
             rows.append("\t".join(cells))
 
         QApplication.clipboard().setText("\n".join(rows))
-        QMessageBox.information(self, "复制成功", "数据已复制到剪贴板")
+        QMessageBox.information(self, T("stats_copy_success"), "")
 
     # ── 工具方法 ──────────────────────────────────────────
 

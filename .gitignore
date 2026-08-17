@@ -60,3 +60,22 @@ fix_f821.ps1
 fix_f821.py
 patch1.patch
 ruff_errors.json
+
+# Root-level debug / ad-hoc test scripts (not part of tests/ suite)
+/test_area_debug.py
+/test_depth_debug.py
+/test_fix_verify.py
+/test_gui.py
+/test_real_data.py
+/test_shoal_debug.py
+/_fix_quality.py
+/_fix_school.py
+/test_e2e_prd.py
+/test_colormap_display.py
+/test_bottom_drawing.py
+/test_gui_integration.py
+/test_gui_real_flow.py
+/test_grid_overlay.py
+/test_real_data_full.py
+/test_quality_dialog.py
+/test_multifreq_dialog.py

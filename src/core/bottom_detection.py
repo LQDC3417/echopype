@@ -1,4 +1,4 @@
-﻿"""增强底部检测模块：多种算法支持
+"""增强底部检测模块：多种算法支持
 
 参考：
 - Matecho BottomDetectionMatecho.m：双阈值检测 + 相关性验证

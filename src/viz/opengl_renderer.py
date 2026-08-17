@@ -1,4 +1,4 @@
-﻿"""OpenGL Echogram 渲染器
+"""OpenGL Echogram 渲染器
 
 高性能 echogram 渲染，支持缩放、平移、叠加层与框选交互。
 依赖: PyOpenGL, matplotlib, numpy, PySide6

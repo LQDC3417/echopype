@@ -20,15 +20,15 @@ def test_load_config_not_found():
 def test_validate_config_missing_reservoir():
     """测试缺少 reservoir 字段"""
     config = {"input": {}, "output": {}}
-    with pytest.raises(ValueError, match="reservoir"):
-        validate_config(config)
+    errors = validate_config(config)
+    assert any("reservoir" in e for e in errors)
 
 
 def test_validate_config_missing_input():
     """测试缺少 input 字段"""
     config = {"reservoir": {}, "output": {}}
-    with pytest.raises(ValueError, match="input"):
-        validate_config(config)
+    errors = validate_config(config)
+    assert any("input" in e for e in errors)
 
 
 def test_validate_config_missing_raw_dir():
@@ -39,10 +39,11 @@ def test_validate_config_missing_raw_dir():
         "processing": {},
         "output": {"dir": "/tmp"},
     }
-    with pytest.raises(ValueError, match="raw_dir"):
-        validate_config(config)
+    errors = validate_config(config)
+    assert any("raw_dir" in e for e in errors)
 
 
 def test_validate_config_valid(sample_config):
     """测试正常验证"""
-    validate_config(sample_config)  # 不应抛出异常
+    errors = validate_config(sample_config)
+    assert errors == []

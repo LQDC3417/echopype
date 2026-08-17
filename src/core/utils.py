@@ -25,9 +25,12 @@ def squeeze_sv(sv: np.ndarray) -> np.ndarray:
 
 
 def sv_to_linear(Sv: np.ndarray) -> np.ndarray:
-    """将 Sv(dB) 转换为线性值，NaN 位置置零。"""
-    linear = 10 ** (Sv / 10)
-    return np.where(np.isfinite(linear), linear, 0.0)
+    """将 Sv(dB) 转换为线性值，NaN 保留为 NaN。
+
+    注意：下游使用 np.nansum 时，NaN 区域贡献为零（与旧行为一致），
+    但 np.mean/np.median 等会正确排除 NaN 区域。
+    """
+    return np.where(np.isfinite(Sv), 10.0 ** (Sv / 10.0), np.nan)
 
 
 def get_sv_array(ds_Sv: xr.Dataset) -> np.ndarray:
@@ -90,22 +93,25 @@ def load_config(config_path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def validate_config(config: dict) -> None:
-    """验证配置文件必要字段"""
+def validate_config(config: dict) -> list[str]:
+    """验证配置文件必要字段，返回错误列表（空列表 = 通过）。"""
+    errors = []
     required = ["reservoir", "input", "processing", "output"]
     for key in required:
         if key not in config:
-            raise ValueError(f"配置文件缺少必要字段: {key}")
+            errors.append(f"配置文件缺少必要字段: {key}")
 
     # 验证 input
-    input_cfg = config["input"]
-    if "raw_dir" not in input_cfg:
-        raise ValueError("配置缺少 input.raw_dir")
+    if "input" in config:
+        if "raw_dir" not in config["input"]:
+            errors.append("配置缺少 input.raw_dir")
 
     # 验证 output
-    output_cfg = config["output"]
-    if "dir" not in output_cfg:
-        raise ValueError("配置缺少 output.dir")
+    if "output" in config:
+        if "dir" not in config["output"]:
+            errors.append("配置缺少 output.dir")
+
+    return errors
 
 
 def setup_logging(reservoir_name: str, output_dir: str) -> logging.Logger:

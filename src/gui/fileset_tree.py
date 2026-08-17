@@ -1,4 +1,4 @@
-﻿"""Fileset 树形面板 + 批量导入对话框 — Echoview 风格"""
+"""Fileset 树形面板 + 批量导入对话框 — Echoview 风格"""
 
 from pathlib import Path
 
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.gui.fileset import Fileset, FilesetStore, RawFileInfo
+from src.gui.i18n import T
 
 # ═══════════════════════════════════════════════════════════════
 # Probe Worker — 后台探测 raw 文件元信息
@@ -58,7 +59,7 @@ class BatchImportDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("批量导入 Raw 文件")
+        self.setWindowTitle(T("fileset_import_title"))
         self.setMinimumSize(700, 500)
         self._files: list[Path] = []
         self._setup_ui()
@@ -67,11 +68,11 @@ class BatchImportDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # ── 顶部：选择来源 ──
-        src_group = QGroupBox("文件来源")
+        src_group = QGroupBox(T("fileset_source_group"))
         src_layout = QHBoxLayout()
-        self.btn_folder = QPushButton("📁 选择文件夹...")
+        self.btn_folder = QPushButton("📁 " + T("fileset_select_folder"))
         self.btn_folder.clicked.connect(self._select_folder)
-        self.btn_files = QPushButton("📄 选择文件...")
+        self.btn_files = QPushButton("📄 " + T("fileset_select_files"))
         self.btn_files.clicked.connect(self._select_files)
         src_layout.addWidget(self.btn_folder)
         src_layout.addWidget(self.btn_files)
@@ -81,13 +82,13 @@ class BatchImportDialog(QDialog):
 
         # ── 文件集名称 ──
         name_layout = QFormLayout()
-        self.edit_name = QLineEdit("新建文件集")
-        name_layout.addRow("文件集名称:", self.edit_name)
+        self.edit_name = QLineEdit(T("fileset_default_name"))
+        name_layout.addRow(T("fileset_name_label"), self.edit_name)
         layout.addLayout(name_layout)
 
         # ── 文件列表 ──
         self.file_list = QTreeWidget()
-        self.file_list.setHeaderLabels(["文件名", "大小", "通道", "Ping 数", "时间范围", "状态"])
+        self.file_list.setHeaderLabels(T("fileset_headers"))
         self.file_list.setAlternatingRowColors(True)
         self.file_list.setRootIsDecorated(False)
         self.file_list.setSelectionMode(QTreeWidget.ExtendedSelection)
@@ -101,9 +102,9 @@ class BatchImportDialog(QDialog):
 
         # ── 底部按钮 ──
         btn_layout = QHBoxLayout()
-        self.btn_probe = QPushButton("🔍 探测文件信息")
+        self.btn_probe = QPushButton("🔍 " + T("fileset_probe"))
         self.btn_probe.clicked.connect(self._probe_files)
-        self.btn_remove = QPushButton("🗑 移除选中")
+        self.btn_remove = QPushButton("🗑 " + T("fileset_remove_selected"))
         self.btn_remove.clicked.connect(self._remove_selected)
         btn_layout.addWidget(self.btn_probe)
         btn_layout.addWidget(self.btn_remove)
@@ -116,11 +117,11 @@ class BatchImportDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def _select_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "选择包含 .raw 文件的文件夹")
+        folder = QFileDialog.getExistingDirectory(self, T("fileset_select_folder"))
         if folder:
             paths = sorted(Path(folder).glob("*.raw"))
             if not paths:
-                QMessageBox.warning(self, "警告", f"在 {folder} 中未找到 .raw 文件")
+                QMessageBox.warning(self, T("dialog_warning"), T("fileset_probe_error", err=folder))
                 return
             self._files = list(paths)
             self.edit_name.setText(Path(folder).name)
@@ -128,8 +129,8 @@ class BatchImportDialog(QDialog):
 
     def _select_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "选择 Raw 文件", "",
-            "Raw 文件 (*.raw);;所有文件 (*)"
+            self, T("fileset_select_files"), "",
+            "Raw (*.raw);;All (*)"
         )
         if paths:
             self._files = [Path(p) for p in paths]
@@ -144,7 +145,7 @@ class BatchImportDialog(QDialog):
                 "--",
                 "--",
                 "--",
-                "未探测",
+                T("fileset_status_probing"),
             ])
             item.setData(0, Qt.UserRole, str(f))
             self.file_list.addTopLevelItem(item)
@@ -152,7 +153,9 @@ class BatchImportDialog(QDialog):
     def _probe_files(self):
         if not self._files:
             return
+        n = len(self._files)
         self.progress.setVisible(True)
+        self.progress.setRange(0, n)
         self.btn_probe.setEnabled(False)
         self.btn_folder.setEnabled(False)
         self.btn_files.setEnabled(False)
@@ -179,7 +182,7 @@ class BatchImportDialog(QDialog):
                     time_range = info.time_start.strftime("%H:%M:%S")
                     if info.time_end:
                         time_range += f" ~ {info.time_end.strftime('%H:%M:%S')}"
-                status = "✅" if info.is_valid else f"❌ {info.error_msg[:40]}"
+                status = T("fileset_status_valid") if info.is_valid else f"{T('fileset_status_invalid')} {info.error_msg[:40]}"
                 item.setText(1, f"{info.size_mb:.1f} MB")
                 item.setText(2, channels)
                 item.setText(3, pings)
@@ -202,9 +205,9 @@ class BatchImportDialog(QDialog):
 
     def _on_accept(self):
         if not self._files:
-            QMessageBox.warning(self, "没有文件", "请先添加至少一个 .raw 文件")
+            QMessageBox.warning(self, T("dialog_warning"), T("fileset_no_files"))
             return
-        name = self.edit_name.text().strip() or "新建文件集"
+        name = self.edit_name.text().strip() or T("fileset_default_name")
         fileset = Fileset(name=name, files=list(self._files))
         self.fileset_created.emit(fileset)
         self.accept()
@@ -212,7 +215,7 @@ class BatchImportDialog(QDialog):
     def get_fileset(self) -> Fileset | None:
         if not self._files:
             return None
-        name = self.edit_name.text().strip() or "新建文件集"
+        name = self.edit_name.text().strip() or T("fileset_default_name")
         return Fileset(name=name, files=list(self._files))
 
 
@@ -244,14 +247,14 @@ class FilesetTreeWidget(QWidget):
         # ── 顶部按钮 ──
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(2)
-        self.btn_import = QPushButton("📥 导入")
-        self.btn_import.setToolTip("批量导入 .raw 文件到新文件集")
+        self.btn_import = QPushButton("📥 " + T("fileset_import"))
+        self.btn_import.setToolTip(T("fileset_import_tooltip"))
         self.btn_import.clicked.connect(self._on_import)
         self.btn_add = QPushButton("＋")
-        self.btn_add.setToolTip("将文件添加到当前文件集")
+        self.btn_add.setToolTip(T("fileset_add_tooltip"))
         self.btn_add.clicked.connect(self._on_add_files)
         self.btn_del = QPushButton("🗑")
-        self.btn_del.setToolTip("删除当前文件集")
+        self.btn_del.setToolTip(T("fileset_delete_tooltip"))
         self.btn_del.clicked.connect(self._on_delete)
         btn_layout.addWidget(self.btn_import)
         btn_layout.addWidget(self.btn_add)
@@ -261,7 +264,7 @@ class FilesetTreeWidget(QWidget):
 
         # ── 文件集树 ──
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["文件集 / 文件"])
+        self.tree.setHeaderLabels([T("fileset_tree_header")])
         self.tree.setAlternatingRowColors(True)
         self.tree.setRootIsDecorated(True)
         self.tree.setIndentation(16)
@@ -273,8 +276,8 @@ class FilesetTreeWidget(QWidget):
 
         # ── 通道选择 ──
         ch_layout = QHBoxLayout()
-        ch_layout.addWidget(QLabel("频率:"))
-        self.ch_combo = QPushButton("全部")
+        ch_layout.addWidget(QLabel(T("fileset_frequency_label")))
+        self.ch_combo = QPushButton(T("fileset_all_channels"))
         self.ch_combo.setEnabled(False)
         self.ch_combo.clicked.connect(self._on_channel_click)
         ch_layout.addWidget(self.ch_combo, 1)
@@ -294,11 +297,11 @@ class FilesetTreeWidget(QWidget):
 
     def _on_add_files(self):
         if self._current_fileset is None:
-            QMessageBox.warning(self, "提示", "请先选中一个文件集")
+            QMessageBox.warning(self, T("dialog_warning"), T("fileset_select_first"))
             return
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "添加 Raw 文件", "",
-            "Raw 文件 (*.raw);;所有文件 (*)"
+            self, T("fileset_add_files_title"), "",
+            "Raw (*.raw);;All (*)"
         )
         if paths:
             for p in paths:
@@ -312,8 +315,8 @@ class FilesetTreeWidget(QWidget):
         if self._current_fileset is None:
             return
         reply = QMessageBox.question(
-            self, "删除文件集",
-            f"确定要删除文件集 '{self._current_fileset.name}' 吗？\n（不会删除实际文件）",
+            self, T("fileset_delete_title"),
+            T("fileset_delete_confirm", name=self._current_fileset.name),
             QMessageBox.Yes | QMessageBox.No
         )
         if reply == QMessageBox.Yes:
@@ -373,17 +376,17 @@ class FilesetTreeWidget(QWidget):
         menu = QMenu(self)
         if item.parent() is None:
             # 文件集
-            menu.addAction("重命名", lambda: self._rename_fileset(item))
-            menu.addAction("刷新", lambda: self._refresh_tree())
+            menu.addAction(T("fileset_ctx_rename"), lambda: self._rename_fileset(item))
+            menu.addAction(T("fileset_ctx_refresh"), lambda: self._refresh_tree())
         else:
-            menu.addAction("移除", lambda: self._remove_file(item))
-            menu.addAction("打开所在文件夹", lambda: self._open_in_explorer(item))
+            menu.addAction(T("fileset_ctx_remove"), lambda: self._remove_file(item))
+            menu.addAction(T("fileset_ctx_open_folder"), lambda: self._open_in_explorer(item))
         menu.exec_(self.tree.mapToGlobal(pos))
 
     def _rename_fileset(self, item):
         from PySide6.QtWidgets import QInputDialog
         old_name = item.text(0)
-        new_name, ok = QInputDialog.getText(self, "重命名", "新名称:", text=old_name)
+        new_name, ok = QInputDialog.getText(self, T("fileset_rename_title"), T("fileset_rename_label"), text=old_name)
         if ok and new_name and new_name != old_name:
             fs = self._filesets.pop(old_name)
             fs.name = new_name
@@ -477,5 +480,5 @@ class FilesetTreeWidget(QWidget):
         valid_files = sum(1 for info in fileset.file_infos.values() if info.is_valid)
         total_pings = fileset.total_pings
         self.lbl_stats.setText(
-            f"文件: {total_files} 个 | 有效: {valid_files} | Ping: {total_pings:,}"
+            T("fileset_stats", files=total_files, valid=valid_files, pings=f"{total_pings:,}")
         )

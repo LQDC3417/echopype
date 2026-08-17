@@ -1,4 +1,4 @@
-﻿"""后台处理工作线程（增强版）
+"""后台处理工作线程（增强版）
 
 功能增强：
 - GridWorker 添加更详细的进度显示
@@ -9,11 +9,14 @@
 
 import logging
 import traceback
+from src.gui.i18n import T
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QThread, Signal
+
+from src.gui.i18n import T
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ class LoadFileWorker(QThread):
     def run(self):
         try:
             from src.core.acoustic import open_single_file
-            self.progress.emit(f"加载文件: {self.raw_file.name}")
+            self.progress.emit(f"{self.raw_file.name}")
             echodata = open_single_file(self.raw_file, self.config)
             self.finished.emit(echodata)
         except Exception:
@@ -72,7 +75,7 @@ class ComputeSvWorker(QThread):
     def run(self):
         try:
             from src.core.acoustic import compute_sv
-            self.progress.emit("计算 Sv...")
+            self.progress.emit(T("msg_computing_sv"))
             ds_Sv = compute_sv(self.echodata, self.config)
             self.finished.emit(ds_Sv)
         except Exception:
@@ -95,7 +98,7 @@ class NoiseRemovalWorker(QThread):
         try:
             from echopype.clean import remove_background_noise
             noise_cfg = self.config.get("processing", {}).get("noise_removal", {})
-            self.progress.emit("去除背景噪声...")
+            self.progress.emit(T("msg_removing_noise"))
             ds = remove_background_noise(
                 self.ds_Sv,
                 ping_num=noise_cfg.get("ping_num", 5),
@@ -131,7 +134,7 @@ class DetectSeafloorWorker(QThread):
             method = bottom_cfg.get("method", "basic")
             offset_m = bottom_cfg.get("offset_m", 0.5)
 
-            self.progress.emit(f"底部检测 (方法={method})...")
+            self.progress.emit(T("msg_bottom_detection", method=method))
 
             # 调用统一底部检测接口
             bottom_depth_m = detect_bottom(
@@ -179,9 +182,8 @@ class DetectSchoolsWorker(QThread):
     def run(self):
         try:
             from src.core.school import detect_schools
-            school_cfg = self.config.get("school_detection", {})
-            self.progress.emit("检测鱼群...")
-            df = detect_schools(self.ds_Sv, school_cfg)
+            self.progress.emit(T("msg_detecting_schools"))
+            df = detect_schools(self.ds_Sv, self.config)
             self.finished.emit(df)
         except Exception:
             self.error.emit(traceback.format_exc())
@@ -202,7 +204,7 @@ class ComputeDensityWorker(QThread):
     def run(self):
         try:
             from src.core.density import estimate_density
-            self.progress.emit("计算密度...")
+            self.progress.emit(T("msg_computing_density"))
             df = estimate_density(self.schools_df, self.ds_Sv, self.config)
             self.finished.emit(df)
         except Exception:
@@ -240,12 +242,12 @@ class GridWorker(QThread):
     def cancel(self):
         """取消网格分析"""
         self._cancelled = True
-        self.status_changed.emit("正在取消...")
+        self.status_changed.emit(T("msg_processing"))
 
     def _check_cancelled(self):
         """检查是否已取消"""
         if self._cancelled:
-            raise InterruptedError("用户取消了网格分析")
+            raise InterruptedError("Cancelled")
 
     def _emit_progress(self, step_name, step_number):
         """发射进度信号"""
@@ -253,7 +255,7 @@ class GridWorker(QThread):
         progress_percent = int((step_number / self._total_steps) * 100)
         self.progress.emit(step_name)
         self.progress_percent.emit(progress_percent)
-        self.status_changed.emit(f"步骤 {step_number}/{self._total_steps}: {step_name}")
+        self.status_changed.emit(f"{step_number}/{self._total_steps}: {step_name}")
 
     def run(self):
         """执行网格分析"""
@@ -262,12 +264,12 @@ class GridWorker(QThread):
             from src.core.grid import compute_grid_density, create_grid
             
             # 步骤 1: 参数验证
-            self._emit_progress("验证参数...", 1)
+            self._emit_progress(T("msg_processing"), 1)
             self._check_cancelled()
             self._validate_parameters()
             
             # 步骤 2: 创建网格
-            self._emit_progress("创建网格...", 2)
+            self._emit_progress(T("msg_grid_analysis"), 2)
             self._check_cancelled()
             
             grid_cells = create_grid(
@@ -281,12 +283,12 @@ class GridWorker(QThread):
             
             # 验证网格创建结果
             if not grid_cells:
-                raise ValueError("网格创建失败：未生成任何网格单元")
+                raise ValueError("Grid creation failed")
             
-            self.progress.emit(f"创建了 {len(grid_cells)} 个网格单元")
+            self.progress.emit(f"Grid: {len(grid_cells)}")
             
             # 步骤 3: 计算网格统计
-            self._emit_progress("计算网格统计...", 3)
+            self._emit_progress(T("msg_grid_analysis"), 3)
             self._check_cancelled()
             
             # 准备配置
@@ -307,12 +309,12 @@ class GridWorker(QThread):
             df = compute_grid_density(self.ds_Sv, grid_cells, config, bottom_depth_m=self.bottom_depth_m)
             
             # 步骤 4: 完成
-            self._emit_progress("完成", 4)
+            self._emit_progress(T("dialog_success"), 4)
             self._check_cancelled()
             
             # 验证结果
             if df is None:
-                raise ValueError("网格统计计算失败：返回了空结果")
+                raise ValueError("Grid stats returned empty")
             
             if df.empty:
                 logger.warning("网格统计结果为空，可能是因为数据不足或参数设置不当")
@@ -432,12 +434,12 @@ class BatchProcessWorker(QThread):
             from src.core.acoustic import open_single_file, process_single_file
 
             if self._cancelled:
-                return path_str, None, "已取消"
+                return path_str, None, "Cancelled"
 
             echodata = open_single_file(raw_file, self.config)
 
             if self._cancelled:
-                return path_str, None, "已取消"
+                return path_str, None, "Cancelled"
 
             ds_Sv = process_single_file(echodata, self.config)
             return path_str, ds_Sv, ""
@@ -451,7 +453,7 @@ class BatchProcessWorker(QThread):
         success_count = 0
         error_count = 0
 
-        self.progress.emit(f"开始批量处理 {total} 个文件 (并行度: {self.max_workers})")
+        self.progress.emit(T("msg_batch_processing", n=total))
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_to_file = {
@@ -461,7 +463,7 @@ class BatchProcessWorker(QThread):
 
             for future in as_completed(future_to_file):
                 if self._cancelled:
-                    self.progress.emit("批量处理已取消")
+                    self.progress.emit("Cancelled")
                     break
 
                 path_str, ds_Sv, error_msg = future.result()
@@ -477,7 +479,7 @@ class BatchProcessWorker(QThread):
                     self.progress.emit(f"✓ 完成 [{success_count + error_count}/{total}]: {raw_file.name}")
 
         self.all_finished.emit(success_count, error_count)
-        self.progress.emit(f"批量处理完成: 成功 {success_count}, 失败 {error_count}")
+        self.progress.emit(T("msg_batch_done", ok=success_count, fail=error_count))
 
 
 class QualityCheckWorker(QThread):
@@ -501,12 +503,12 @@ class QualityCheckWorker(QThread):
         try:
             from src.core.quality import check_bottom_line, check_sv_quality
 
-            self.progress.emit("正在检查 Sv 数据质量...")
+            self.progress.emit(T("msg_quality_checking"))
             sv_result = check_sv_quality(self.ds_Sv)
 
             bl_result = None
             if self.bottom is not None:
-                self.progress.emit("正在检查底线质量...")
+                self.progress.emit(T("msg_quality_checking"))
                 n_samples = self.ds_Sv.sizes.get("range_sample", 0)
                 bl_result = check_bottom_line(self.bottom, n_samples)
 
@@ -542,16 +544,16 @@ class MultifreqAnalysisWorker(QThread):
                 list_channels,
             )
 
-            self.progress.emit("正在分析通道信息...")
+            self.progress.emit(T("msg_multifreq_analyzing"))
             channel_summary = get_channel_summary(self.ds_Sv)
 
             channels = list_channels(self.ds_Sv)
             freq_comparison = None
             if len(channels) >= 2:
-                self.progress.emit("正在进行多频率对比...")
+                self.progress.emit(T("msg_multifreq_analyzing"))
                 freq_comparison = compare_frequencies(self.ds_Sv, self.config, self.channels)
             else:
-                self.progress.emit("仅单通道，跳过频率对比")
+                self.progress.emit("--")
 
             self.finished.emit({
                 "channel_summary": channel_summary,
@@ -584,7 +586,7 @@ class SingleTargetWorker(QThread):
         try:
             from src.core.single_target import detect_and_compute_ts
 
-            self.progress.emit("正在检测单体目标...")
+            self.progress.emit(T("msg_single_target"))
             targets_df = detect_and_compute_ts(self.ds_Sv, self.config)
             self.finished.emit(targets_df)
 
@@ -605,7 +607,7 @@ class SvStatsWorker(QThread):
     def run(self):
         try:
             from src.core.density import sv_statistics_summary
-            self.progress.emit("计算 Sv 统计...")
+            self.progress.emit(T("msg_sv_stats"))
             result = sv_statistics_summary(self.ds_Sv)
             self.finished.emit(result)
         except Exception:
@@ -627,7 +629,7 @@ class TransectSplitWorker(QThread):
     def run(self):
         try:
             from src.core.multifreq import get_channel_summary, split_transects
-            self.progress.emit("分段中...")
+            self.progress.emit(T("msg_transect_split"))
             transect_ids = split_transects(self.ds_Sv, method=self.method, max_gap_s=self.max_gap_s)
             n_transects = int(transect_ids.max()) + 1 if len(transect_ids) > 0 else 0
             summary = get_channel_summary(self.ds_Sv)

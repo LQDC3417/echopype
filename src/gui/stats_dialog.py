@@ -1,4 +1,4 @@
-﻿"""统计结果弹出对话框 — 支持鱼群、密度、网格结果（增强版）
+"""统计结果弹出对话框 — 支持鱼群、密度、网格结果（增强版）
 
 功能增强：
 - 改进网格统计结果展示
@@ -12,6 +12,7 @@ import json
 import math
 
 import pandas as pd
+from src.gui.i18n import T
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QBrush, QColor
 from PySide6.QtWidgets import (
@@ -43,7 +44,7 @@ class StatsDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("统计结果")
+        self.setWindowTitle(T("stats_title"))
         self.setMinimumSize(800, 600)
         self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
 
@@ -66,12 +67,12 @@ class StatsDialog(QDialog):
         # 标签页 1: 鱼群 + 密度
         self.summary_tab = QWidget()
         self._setup_summary_tab()
-        self.tabs.addTab(self.summary_tab, "鱼群 / 密度")
+        self.tabs.addTab(self.summary_tab, T("stats_tab_summary"))
 
         # 标签页 2: 网格统计
         self.grid_tab = QWidget()
         self._setup_grid_tab()
-        self.tabs.addTab(self.grid_tab, "网格统计")
+        self.tabs.addTab(self.grid_tab, T("stats_tab_grid"))
 
         layout.addWidget(self.tabs, 1)
 
@@ -79,18 +80,18 @@ class StatsDialog(QDialog):
         btn_layout = QHBoxLayout()
         
         # 导出按钮
-        self.btn_export = QPushButton("导出数据")
-        self.btn_export.setToolTip("导出当前标签页的数据到文件")
+        self.btn_export = QPushButton(T("stats_btn_export"))
+        self.btn_export.setToolTip(T("stats_btn_export"))
         self.btn_export.clicked.connect(self._on_export_clicked)
         
         # 导出全部按钮
-        self.btn_export_all = QPushButton("导出全部")
-        self.btn_export_all.setToolTip("导出所有标签页的数据")
+        self.btn_export_all = QPushButton(T("stats_btn_export_all"))
+        self.btn_export_all.setToolTip(T("stats_btn_export_all"))
         self.btn_export_all.clicked.connect(self._on_export_all_clicked)
         
         # 复制按钮
-        self.btn_copy = QPushButton("复制到剪贴板")
-        self.btn_copy.setToolTip("复制当前表格数据到剪贴板")
+        self.btn_copy = QPushButton(T("stats_btn_copy"))
+        self.btn_copy.setToolTip(T("stats_btn_copy"))
         self.btn_copy.clicked.connect(self._on_copy_clicked)
         
         btn_layout.addStretch()
@@ -106,21 +107,21 @@ class StatsDialog(QDialog):
         layout.setContentsMargins(0, 8, 0, 0)
 
         # 密度摘要
-        summary_group = QGroupBox("密度摘要")
+        summary_group = QGroupBox(T("stats_density_summary"))
         summary_layout = QVBoxLayout()
         summary_layout.setContentsMargins(8, 12, 8, 8)
 
         self.lbl_abc = QLabel("ABC: --")
         self.lbl_abc.setStyleSheet("font-size: 13px; font-weight: bold; color: #2f855a;")
-        self.lbl_abc.setToolTip("面积背散射系数 (Area Backscattering Strength)")
+        self.lbl_abc.setToolTip(T("grid_stat_abc"))
         
-        self.lbl_density = QLabel("密度: --")
+        self.lbl_density = QLabel(f"{T(chr(39)+"density_group"+chr(39))}: --")
         self.lbl_density.setStyleSheet("font-size: 13px; font-weight: bold; color: #1a73e8;")
-        self.lbl_density.setToolTip("个体密度 (ind/ha)")
+        self.lbl_density.setToolTip(T("grid_stat_density"))
         
-        self.lbl_biomass = QLabel("生物量: --")
+        self.lbl_biomass = QLabel(f"{T(chr(39)+"density_avg_weight"+chr(39)).rstrip(chr(58))}: --")
         self.lbl_biomass.setStyleSheet("font-size: 13px; font-weight: bold; color: #c05621;")
-        self.lbl_biomass.setToolTip("生物量 (kg/ha)")
+        self.lbl_biomass.setToolTip(T("grid_stat_biomass"))
 
         summary_layout.addWidget(self.lbl_abc)
         summary_layout.addWidget(self.lbl_density)
@@ -129,31 +130,29 @@ class StatsDialog(QDialog):
         layout.addWidget(summary_group)
 
         # 鱼群列表
-        schools_group = QGroupBox("鱼群列表")
+        schools_group = QGroupBox(T("stats_school_list"))
         schools_layout = QVBoxLayout()
         schools_layout.setContentsMargins(8, 12, 8, 8)
 
         # 鱼群过滤
         filter_layout = QHBoxLayout()
         self.combo_school_filter = QComboBox()
-        self.combo_school_filter.addItems(["全部列", "ID", "Ping 范围", "深度范围", "面积", "平均 Sv", "中心深度"])
-        self.combo_school_filter.setToolTip("选择要过滤的列")
+        self.combo_school_filter.addItems(["--", "ID", "Ping", "Depth", "Area", "Sv", "Depth"])
+        self.combo_school_filter.setToolTip(T("stats_filter"))
         
         self.edit_school_filter = QLineEdit()
-        self.edit_school_filter.setPlaceholderText("输入过滤文本...")
-        self.edit_school_filter.setToolTip("输入要过滤的文本\n支持部分匹配")
+        self.edit_school_filter.setPlaceholderText(T("stats_filter_placeholder"))
+        self.edit_school_filter.setToolTip(T("stats_filter_placeholder"))
         self.edit_school_filter.textChanged.connect(self._on_school_filter_changed)
         
-        filter_layout.addWidget(QLabel("过滤:"))
+        filter_layout.addWidget(QLabel(T("stats_filter")))
         filter_layout.addWidget(self.combo_school_filter)
         filter_layout.addWidget(self.edit_school_filter)
         schools_layout.addLayout(filter_layout)
 
         self.school_table = QTableWidget()
         self.school_table.setColumnCount(6)
-        self.school_table.setHorizontalHeaderLabels([
-            "ID", "Ping 范围", "深度范围", "面积", "平均 Sv", "中心深度"
-        ])
+        self.school_table.setHorizontalHeaderLabels(T("school_headers"))
         self.school_table.horizontalHeader().setStretchLastSection(True)
         self.school_table.setAlternatingRowColors(True)
         self.school_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -176,13 +175,13 @@ class StatsDialog(QDialog):
         # 网格摘要
         summary_layout = QHBoxLayout()
         
-        self.lbl_grid_info = QLabel("网格: --")
+        self.lbl_grid_info = QLabel(T("stats_grid_info"))
         self.lbl_grid_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #4a5568;")
-        self.lbl_grid_info.setToolTip("网格统计信息")
+        self.lbl_grid_info.setToolTip(T("stats_tab_grid"))
         
-        self.lbl_grid_stats = QLabel("统计: --")
+        self.lbl_grid_stats = QLabel("--")
         self.lbl_grid_stats.setStyleSheet("font-size: 12px; color: #718096;")
-        self.lbl_grid_stats.setToolTip("网格统计摘要")
+        self.lbl_grid_stats.setToolTip(T("stats_tab_grid"))
         
         summary_layout.addWidget(self.lbl_grid_info)
         summary_layout.addStretch()
@@ -194,22 +193,22 @@ class StatsDialog(QDialog):
         
         self.combo_grid_filter = QComboBox()
         self.combo_grid_filter.addItems([
-            "全部列", "单元", "Ping 范围", "深度范围", 
-            "mean Sv", "ABC", "密度(ind/ha)", "生物量(kg/ha)", "有效像素"
+            "--", "Cell", "Ping", "Depth",
+            "Sv", "ABC", "Density", "Biomass", "Pixels"
         ])
-        self.combo_grid_filter.setToolTip("选择要过滤的列")
+        self.combo_grid_filter.setToolTip(T("stats_filter"))
         
         self.edit_grid_filter = QLineEdit()
-        self.edit_grid_filter.setPlaceholderText("输入过滤文本...")
-        self.edit_grid_filter.setToolTip("输入要过滤的文本\n支持部分匹配和数值范围\n例如: >100, <50, 10-20")
+        self.edit_grid_filter.setPlaceholderText(T("stats_filter_placeholder"))
+        self.edit_grid_filter.setToolTip(T("stats_filter_placeholder"))
         self.edit_grid_filter.textChanged.connect(self._on_grid_filter_changed)
         
         # 刷新按钮
-        self.btn_refresh = QPushButton("刷新")
-        self.btn_refresh.setToolTip("刷新网格数据")
+        self.btn_refresh = QPushButton(T("stats_refresh"))
+        self.btn_refresh.setToolTip(T("stats_refresh"))
         self.btn_refresh.clicked.connect(self._on_refresh_clicked)
         
-        filter_layout.addWidget(QLabel("过滤:"))
+        filter_layout.addWidget(QLabel(T("stats_filter")))
         filter_layout.addWidget(self.combo_grid_filter)
         filter_layout.addWidget(self.edit_grid_filter)
         filter_layout.addWidget(self.btn_refresh)
@@ -219,8 +218,8 @@ class StatsDialog(QDialog):
         self.grid_table = QTableWidget()
         self.grid_table.setColumnCount(8)
         self.grid_table.setHorizontalHeaderLabels([
-            "单元", "Ping 范围", "深度范围", "mean Sv", "ABC", 
-            "密度(ind/ha)", "生物量(kg/ha)", "有效像素"
+            "Cell", "Ping", "Depth", "mean Sv", "ABC", 
+            "Density", "Biomass", "Pixels"
         ])
         self.grid_table.horizontalHeader().setStretchLastSection(True)
         self.grid_table.setAlternatingRowColors(True)
@@ -259,13 +258,13 @@ class StatsDialog(QDialog):
         biomass_val = row.get('total_biomass_kg_ha', 0)
         
         self.lbl_abc.setText(f"ABC: {abc_val:.6f} m²/m²")
-        self.lbl_abc.setToolTip(f"面积背散射系数: {abc_val:.6f} m²/m²")
+        self.lbl_abc.setToolTip(T("density_abc_fmt", val=abc_val))
         
-        self.lbl_density.setText(f"密度: {density_val:.2f} ind/ha")
-        self.lbl_density.setToolTip(f"个体密度: {density_val:.2f} ind/ha")
+        self.lbl_density.setText(T("density_val_fmt", val=density_val))
+        self.lbl_density.setToolTip(T("density_val_fmt", val=density_val))
         
-        self.lbl_biomass.setText(f"生物量: {biomass_val:.2f} kg/ha")
-        self.lbl_biomass.setToolTip(f"生物量: {biomass_val:.2f} kg/ha")
+        self.lbl_biomass.setText(T("density_biomass_fmt", val=biomass_val))
+        self.lbl_biomass.setToolTip(T("density_biomass_fmt", val=biomass_val))
 
     def update_schools(self, schools_df):
         """更新鱼群列表"""
@@ -327,13 +326,13 @@ class StatsDialog(QDialog):
     def update_grid(self, grid_df):
         """更新网格统计结果"""
         if grid_df is None or grid_df.empty:
-            self.lbl_grid_info.setText("网格: 无数据")
-            self.lbl_grid_stats.setText("统计: --")
+            self.lbl_grid_info.setText(T("stats_grid_info"))
+            self.lbl_grid_stats.setText("--")
             self.grid_table.setRowCount(0)
             return
 
         self._grid_df = grid_df
-        self.lbl_grid_info.setText(f"网格: {len(grid_df)} 个单元")
+        self.lbl_grid_info.setText(T("stats_grid_info_fmt", n=len(grid_df)))
         
         # 计算统计摘要
         stats_text = self._calculate_grid_stats(grid_df)
@@ -351,25 +350,25 @@ class StatsDialog(QDialog):
             
             # 有效单元数
             valid_count = df['n_valid'].sum() if 'n_valid' in df.columns else 0
-            stats_parts.append(f"有效像素: {valid_count:,}")
-            
+            stats_parts.append(f"Valid: {valid_count:,}")
+
             # 平均 Sv
             if 'mean_sv' in df.columns:
                 mean_sv_vals = df['mean_sv'].dropna()
                 if not mean_sv_vals.empty:
                     avg_sv = mean_sv_vals.mean()
-                    stats_parts.append(f"平均Sv: {avg_sv:.1f} dB")
-            
+                    stats_parts.append(f"Sv: {avg_sv:.1f} dB")
+
             # 密度
             if 'density_ind_ha' in df.columns:
                 density_vals = df['density_ind_ha'].dropna()
                 if not density_vals.empty:
                     avg_density = density_vals.mean()
-                    stats_parts.append(f"平均密度: {avg_density:.1f} ind/ha")
+                    stats_parts.append(f"Density: {avg_density:.1f} ind/ha")
             
             return " | ".join(stats_parts)
         except Exception:
-            return "统计计算错误"
+            return "--"
 
     def _populate_grid_table(self, df):
         """填充网格表格"""
@@ -502,11 +501,11 @@ class StatsDialog(QDialog):
         """鱼群表格右键菜单"""
         menu = QMenu(self)
         
-        copy_action = QAction("复制选中行", self)
+        copy_action = QAction(T("stats_copy_selected"), self)
         copy_action.triggered.connect(lambda: self._copy_selected_rows(self.school_table))
         menu.addAction(copy_action)
         
-        copy_all_action = QAction("复制全部", self)
+        copy_all_action = QAction(T("stats_copy_all"), self)
         copy_all_action.triggered.connect(lambda: self._copy_all_rows(self.school_table))
         menu.addAction(copy_all_action)
         
@@ -516,17 +515,17 @@ class StatsDialog(QDialog):
         """网格表格右键菜单"""
         menu = QMenu(self)
         
-        copy_action = QAction("复制选中行", self)
+        copy_action = QAction(T("stats_copy_selected"), self)
         copy_action.triggered.connect(lambda: self._copy_selected_rows(self.grid_table))
         menu.addAction(copy_action)
         
-        copy_all_action = QAction("复制全部", self)
+        copy_all_action = QAction(T("stats_copy_all"), self)
         copy_all_action.triggered.connect(lambda: self._copy_all_rows(self.grid_table))
         menu.addAction(copy_all_action)
         
         menu.addSeparator()
         
-        export_selected_action = QAction("导出选中行", self)
+        export_selected_action = QAction(T("stats_export_selected"), self)
         export_selected_action.triggered.connect(lambda: self._export_selected_rows(self.grid_table))
         menu.addAction(export_selected_action)
         
@@ -572,7 +571,7 @@ class StatsDialog(QDialog):
         clipboard_text = "\n".join(data_lines)
         QApplication.clipboard().setText(clipboard_text)
         
-        QMessageBox.information(self, "复制成功", f"已复制 {len(rows)} 行数据到剪贴板")
+        QMessageBox.information(self, T("stats_copy_success"), T("stats_copy_msg", n=len(rows)))
 
     def _export_selected_rows(self, table):
         """导出选中的行"""
@@ -581,7 +580,7 @@ class StatsDialog(QDialog):
             selected_rows.add(item.row())
         
         if not selected_rows:
-            QMessageBox.warning(self, "警告", "请先选择要导出的行")
+            QMessageBox.warning(self, T("dialog_warning"), T("stats_select_rows_warn"))
             return
         
         self._export_rows(table, sorted(selected_rows))
@@ -592,8 +591,8 @@ class StatsDialog(QDialog):
             return
         
         file_path, _selected_filter = QFileDialog.getSaveFileName(
-            self, "导出数据", "", 
-            "CSV 文件 (*.csv);;Excel 文件 (*.xlsx);;JSON 文件 (*.json)"
+            self, T("stats_btn_export"), "", 
+            "CSV (*.csv);;Excel (*.xlsx);;JSON (*.json)"
         )
         
         if not file_path:
@@ -628,9 +627,9 @@ class StatsDialog(QDialog):
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
             
-            QMessageBox.information(self, "导出成功", f"数据已导出到: {file_path}")
+            QMessageBox.information(self, T("stats_export_success"), f"{file_path}")
         except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出数据时出错: {e!s}")
+            QMessageBox.critical(self, T("stats_export_failed"), f"{e!s}")
 
     # ── 底部按钮功能 ──
 
@@ -641,21 +640,21 @@ class StatsDialog(QDialog):
         if current_tab == 0:
             # 导出鱼群数据
             if self._schools_df is not None and not self._schools_df.empty:
-                self._export_dataframe(self._schools_df, "鱼群数据")
+                self._export_dataframe(self._schools_df, T("stats_school_list"))
             else:
-                QMessageBox.warning(self, "警告", "没有鱼群数据可导出")
+                QMessageBox.warning(self, T("dialog_warning"), T("stats_no_school_data"))
         elif current_tab == 1:
             # 导出网格数据
             if self._grid_df is not None and not self._grid_df.empty:
-                self._export_dataframe(self._grid_df, "网格数据")
+                self._export_dataframe(self._grid_df, T("stats_tab_grid"))
             else:
-                QMessageBox.warning(self, "警告", "没有网格数据可导出")
+                QMessageBox.warning(self, T("dialog_warning"), T("stats_no_grid_data"))
 
     def _on_export_all_clicked(self):
         """导出所有数据"""
         file_path, _selected_filter = QFileDialog.getSaveFileName(
-            self, "导出所有数据", "", 
-            "Excel 文件 (*.xlsx);;JSON 文件 (*.json)"
+            self, T("stats_btn_export_all"), "", 
+            "Excel (*.xlsx);;JSON (*.json)"
         )
         
         if not file_path:
@@ -665,11 +664,11 @@ class StatsDialog(QDialog):
             if file_path.endswith('.xlsx'):
                 with pd.ExcelWriter(file_path) as writer:
                     if self._density_df is not None and not self._density_df.empty:
-                        self._density_df.to_excel(writer, sheet_name="密度摘要", index=False)
+                        self._density_df.to_excel(writer, sheet_name=T("stats_density_summary"), index=False)
                     if self._schools_df is not None and not self._schools_df.empty:
-                        self._schools_df.to_excel(writer, sheet_name="鱼群列表", index=False)
+                        self._schools_df.to_excel(writer, sheet_name=T("stats_school_list"), index=False)
                     if self._grid_df is not None and not self._grid_df.empty:
-                        self._grid_df.to_excel(writer, sheet_name="网格统计", index=False)
+                        self._grid_df.to_excel(writer, sheet_name=T("stats_tab_grid"), index=False)
             elif file_path.endswith('.json'):
                 all_data = {}
                 if self._density_df is not None and not self._density_df.empty:
@@ -682,9 +681,9 @@ class StatsDialog(QDialog):
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(all_data, f, ensure_ascii=False, indent=2)
             
-            QMessageBox.information(self, "导出成功", f"所有数据已导出到: {file_path}")
+            QMessageBox.information(self, T("stats_export_success"), f"{file_path}")
         except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出数据时出错: {e!s}")
+            QMessageBox.critical(self, T("stats_export_failed"), f"{e!s}")
 
     def _on_copy_clicked(self):
         """复制当前表格到剪贴板"""
@@ -703,8 +702,8 @@ class StatsDialog(QDialog):
     def _export_dataframe(self, df, default_name):
         """导出 DataFrame 到文件"""
         file_path, _selected_filter = QFileDialog.getSaveFileName(
-            self, f"导出{default_name}", default_name, 
-            "CSV 文件 (*.csv);;Excel 文件 (*.xlsx);;JSON 文件 (*.json)"
+            self, f"{default_name}", default_name, 
+            "CSV (*.csv);;Excel (*.xlsx);;JSON (*.json)"
         )
         
         if not file_path:
@@ -718,9 +717,9 @@ class StatsDialog(QDialog):
             elif file_path.endswith('.json'):
                 df.to_json(file_path, orient='records', force_ascii=False, indent=2)
             
-            QMessageBox.information(self, "导出成功", f"{default_name}已导出到: {file_path}")
+            QMessageBox.information(self, T("stats_export_success"), f"{default_name}: {file_path}")
         except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出数据时出错: {e!s}")
+            QMessageBox.critical(self, T("stats_export_failed"), f"{e!s}")
 
 
 def _isnan(val):

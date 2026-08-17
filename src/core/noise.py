@@ -228,12 +228,13 @@ def apply_noise_reduction(
     low_Sv_dB = noise_cfg.get("low_Sv_dB", -150.0)
     Sv_corrected[Sv_corrected < low_Sv_dB] = low_Sv_dB
 
-    # 保存结果到数据集
-    ds_Sv["Sv_corrected"] = ds_Sv["Sv"].copy()
-    ds_Sv["Sv_corrected"].values[:] = Sv_corrected
-    ds_Sv["noise_Sv"] = xr.DataArray(noise_2d, dims=["ping_time", "range_sample"])
-    ds_Sv["noise_per_ping"] = xr.DataArray(noise_per_ping, dims=["ping_time"])
-    ds_Sv["SNR"] = xr.DataArray(SNR, dims=["ping_time", "range_sample"])
+    # 保存结果到数据集（深拷贝避免污染原始数据）
+    ds_out = ds_Sv.copy(deep=True)
+    ds_out["Sv_corrected"] = ds_out["Sv"].copy()
+    ds_out["Sv_corrected"].values[:] = Sv_corrected
+    ds_out["noise_Sv"] = xr.DataArray(noise_2d, dims=["ping_time", "range_sample"])
+    ds_out["noise_per_ping"] = xr.DataArray(noise_per_ping, dims=["ping_time"])
+    ds_out["SNR"] = xr.DataArray(SNR, dims=["ping_time", "range_sample"])
 
     # 记录统计
     n_masked = int(np.sum(SNR < snr_threshold))
@@ -241,7 +242,7 @@ def apply_noise_reduction(
     logger.info(f"噪声去除完成: {n_masked}/{total} 个样本被掩码 ({100*n_masked/total:.1f}%)")
     logger.info(f"  噪声范围: [{np.nanmin(noise_per_ping):.1f}, {np.nanmax(noise_per_ping):.1f}] dB")
 
-    return ds_Sv
+    return ds_out
 
 
 def noise_statistics(ds_Sv: xr.Dataset) -> dict:

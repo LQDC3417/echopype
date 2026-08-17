@@ -34,21 +34,21 @@ def test_sv_to_linear_basic():
 
 
 def test_sv_to_linear_nan():
-    """NaN 位置置零"""
+    """NaN 位置保留 NaN（下游 nansum 会正确处理）"""
     Sv = np.array([0.0, np.nan, -20.0])
     result = sv_to_linear(Sv)
     assert result[0] == 1.0
-    assert result[1] == 0.0
+    assert np.isnan(result[1])
     assert result[2] == pytest.approx(0.01)
 
 
 def test_sv_to_linear_inf():
-    """Inf 位置置零"""
+    """Inf 位置返回 NaN"""
     Sv = np.array([0.0, np.inf, -np.inf])
     result = sv_to_linear(Sv)
     assert result[0] == 1.0
-    assert result[1] == 0.0
-    assert result[2] == 0.0
+    assert np.isnan(result[1])
+    assert np.isnan(result[2])
 
 
 def test_sv_to_linear_2d():
