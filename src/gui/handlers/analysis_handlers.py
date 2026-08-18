@@ -119,34 +119,41 @@ class AnalysisMixin:
         if self._ds_Sv is None or self._config is None:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return
-        self.statusbar.show_progress(T("msg_single_target"))
-        self._current_worker = SingleTargetWorker(
-            self._get_analysis_ds(), self._config
+
+        # 从 UI 同步单体目标检测配置到 config
+        st_cfg = self.property_panel.processing.get_single_target_config()
+        self._config.setdefault("single_target", {}).update(st_cfg)
+
+        # 始终以表线+底线裁剪数据，确保只在表线→底线区域检测
+        from src.core.region import crop_sv_by_region
+        ds_for_st = crop_sv_by_region(
+            self._ds_Sv,
+            surface_depth_m=self._surface_depth_m if self._surface_depth_m > 0 else None,
+            bottom_sample_indices=self._bottom_line,
         )
+        if ds_for_st is None:
+            QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
+            return
+
+        self.statusbar.show_progress(T("msg_single_target"))
+        self._ds_for_single_target = ds_for_st
+        self._current_worker = SingleTargetWorker(ds_for_st, self._config)
         self._current_worker.finished.connect(self._on_single_target_done)
         self._current_worker.error.connect(self._on_worker_error)
         self._current_worker.progress.connect(self.statusbar.set_status)
         self._current_worker.start()
 
     def _on_single_target_done(self, targets_df):
-        """单体目标检测完成"""
+        """单体目标检测完成 → 展示结果表格"""
         self.statusbar.hide_progress()
         n = len(targets_df) if targets_df is not None and not targets_df.empty else 0
         if n == 0:
             QMessageBox.information(self, T("msg_single_target_result"), T("msg_no_single_target"))
             return
-        lines = [f"═══ {T('msg_single_target_result')} ═══\n", f"{T('msg_single_target_result')}: {n}\n"]
-        if not targets_df.empty:
-            ts_col = "ts_db" if "ts_db" in targets_df.columns else None
-            if ts_col:
-                ts_valid = targets_df[ts_col].dropna()
-                if len(ts_valid) > 0:
-                    lines.append(f"{T('msg_ts_stats')}:")
-                    lines.append(f"  {T('msg_mean')}: {ts_valid.mean():.1f} dB")
-                    lines.append(f"  {T('msg_median')}: {ts_valid.median():.1f} dB")
-                    lines.append(f"  {T('msg_range')}: [{ts_valid.min():.1f}, {ts_valid.max():.1f}] dB")
-            lines.append(f"\n{T('msg_target_columns')}: {', '.join(targets_df.columns[:8])}")
-        QMessageBox.information(self, T("msg_single_target_result"), "\n".join(lines))
+        self._single_target_df = targets_df
+        self.stats_dialog.update_single_target(targets_df)
+        self.statusbar.set_status(T("msg_single_target_done", n=n))
+        self._show_stats()
 
     # ═══════════════════════════════════════════════════════
     # Sv 统计摘要

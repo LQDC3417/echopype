@@ -640,3 +640,66 @@ class TransectSplitWorker(QThread):
             })
         except Exception:
             self.error.emit(traceback.format_exc())
+
+class IntegrationWorker(QThread):
+    """回声积分工作线程
+
+    信号：
+    - finished(object): IntegrationResult 积分结果
+    - error(str): 错误信息
+    - progress(str): 进度信息
+    - progress_percent(int): 进度百分比 (0-100)
+    """
+    finished = Signal(object)
+    error = Signal(str)
+    progress = Signal(str)
+    progress_percent = Signal(int)
+
+    def __init__(self, ds_Sv, config, surface_depth_m=0.0, max_depth_m=None):
+        super().__init__()
+        self.ds_Sv = ds_Sv
+        self.config = config
+        self.surface_depth_m = surface_depth_m
+        self.max_depth_m = max_depth_m
+
+    def run(self):
+        try:
+            from src.core.integration import (
+                ESUType,
+                create_integration_grid,
+                integrate,
+            )
+
+            cfg = self.config.get("integration", {})
+            esu_type = ESUType(cfg.get("esu_type", "pings"))
+            esu_size = float(cfg.get("esu_size", 500.0))
+            layer_width = float(cfg.get("layer_width", 5.0))
+            min_threshold = float(cfg.get("min_threshold", -70.0))
+            max_threshold = float(cfg.get("max_threshold", 0.0))
+
+            self.progress.emit(T("msg_integration_running"))
+            grid = create_integration_grid(
+                self.ds_Sv,
+                esu_type=esu_type,
+                esu_size=esu_size,
+                layer_width=layer_width,
+                surface_depth_m=self.surface_depth_m,
+                max_depth_m=self.max_depth_m,
+            )
+
+            def _progress_cb(current: int, total: int):
+                if total > 0:
+                    self.progress_percent.emit(int(current / total * 100))
+
+            result = integrate(
+                self.ds_Sv,
+                grid,
+                min_threshold=min_threshold,
+                max_threshold=max_threshold,
+                exclude_below_bottom=False,
+                progress_callback=_progress_cb,
+            )
+            self.finished.emit(result)
+
+        except Exception:
+            self.error.emit(traceback.format_exc())

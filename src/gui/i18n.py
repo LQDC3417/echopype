@@ -240,6 +240,46 @@ _TEXTS = {
     "btn_transect_split": {"zh": "Transect 分段", "en": "Transect Split"},
     "btn_apply_all": {"zh": "应用全部参数", "en": "Apply All Parameters"},
 
+    # ── 回声积分 ──
+    "menu_integration": {"zh": "回声积分", "en": "Echo Integration"},
+    "integration_group": {"zh": "回声积分", "en": "Echo Integration"},
+    "integration_esu_type": {"zh": "ESU 类型:", "en": "ESU Type:"},
+    "integration_esu_pings": {"zh": "Ping 数", "en": "Pings"},
+    "integration_esu_seconds": {"zh": "秒", "en": "Seconds"},
+    "integration_esu_nmi": {"zh": "海里", "en": "Nautical Miles"},
+    "integration_esu_size": {"zh": "ESU 大小:", "en": "ESU Size:"},
+    "integration_layer_width": {"zh": "垂直层宽:", "en": "Layer Width:"},
+    "integration_min_threshold": {"zh": "最小 Sv 阈值:", "en": "Min Sv Threshold:"},
+    "integration_max_threshold": {"zh": "最大 Sv 阈值:", "en": "Max Sv Threshold:"},
+    "btn_integration": {"zh": "回声积分", "en": "Echo Integration"},
+    "msg_integration_running": {"zh": "回声积分中...", "en": "Echo integration..."},
+    "msg_integration_done": {"zh": "回声积分完成: {n} 个单元", "en": "Echo integration done: {n} cells"},
+    "stats_tab_integration": {"zh": "回声积分", "en": "Echo Integration"},
+    "integration_info": {"zh": "回声积分: --", "en": "Integration: --"},
+    "integration_info_fmt": {"zh": "回声积分: {n} 个单元", "en": "Integration: {n} cells"},
+    "integration_headers": {
+        "zh": ["ESU", "Ping 范围", "深度范围", "平均 Sv", "NASC", "最小 Sv", "最大 Sv", "有效样本"],
+        "en": ["ESU", "Ping Range", "Depth Range", "Mean Sv", "NASC", "Min Sv", "Max Sv", "Good Samples"],
+    },
+    "stats_no_integration_data": {"zh": "没有回声积分数据可导出", "en": "No integration data to export"},
+
+    # ── 单体目标检测 ──
+    "menu_single_target": {"zh": "单体目标检测", "en": "Single Target Detection"},
+    "single_target_group": {"zh": "单体目标检测", "en": "Single Target Detection"},
+    "single_target_sv_threshold": {"zh": "Sv 阈值:", "en": "Sv Threshold:"},
+    "single_target_min_area": {"zh": "最小面积:", "en": "Min Area:"},
+    "single_target_max_area": {"zh": "最大面积:", "en": "Max Area:"},
+    "single_target_area_px": {"zh": " 像素", "en": " px"},
+    "stats_tab_single_target": {"zh": "单体目标", "en": "Single Targets"},
+    "single_target_info": {"zh": "单体目标: --", "en": "Single Targets: --"},
+    "single_target_info_fmt": {"zh": "单体目标: {n} 个", "en": "Single Targets: {n}"},
+    "single_target_headers": {
+        "zh": ["ID", "Ping", "深度", "Sv 峰值", "Sv 均值", "面积", "TS"],
+        "en": ["ID", "Ping", "Depth", "Peak Sv", "Mean Sv", "Area", "TS"],
+    },
+    "stats_no_single_target_data": {"zh": "没有单体目标数据可导出", "en": "No single target data to export"},
+    "msg_single_target_done": {"zh": "单体目标检测完成: {n} 个目标", "en": "Single target detection done: {n} targets"},
+
     # ── 底部区域表格 ──
     "region_headers": {
         "zh": ["ID", "名称", "类型", "Ping 范围", "深度范围", "面积", "平均 Sv"],

@@ -260,7 +260,8 @@ def integrate(
     IntegrationResult
         积分结果
     """
-    Sv = get_sv_array(ds_Sv)  # (n_pings, n_samples)
+    # 复制数组，避免后续底部掩码原地改写 Sv 视图时污染原始 ds_Sv
+    Sv = get_sv_array(ds_Sv).copy()  # (n_pings, n_samples)
     depth = get_vertical_coords(ds_Sv)  # (n_samples,)
     _n_pings, n_samples = Sv.shape
 
@@ -436,7 +437,7 @@ def integrate_by_grid_cells(
             depth_start=np.array([]), depth_end=np.array([]),
         )
 
-    Sv = get_sv_array(ds_Sv)
+    Sv = get_sv_array(ds_Sv).copy()
     depth = get_vertical_coords(ds_Sv)
     _n_pings, n_samples = Sv.shape
 

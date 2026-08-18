@@ -52,6 +52,8 @@ class StatsDialog(QDialog):
         self._density_df = None
         self._schools_df = None
         self._grid_df = None
+        self._integration_df = None
+        self._single_target_df = None
         
         # 过滤状态
         self._grid_filter_column = -1
@@ -73,6 +75,16 @@ class StatsDialog(QDialog):
         self.grid_tab = QWidget()
         self._setup_grid_tab()
         self.tabs.addTab(self.grid_tab, T("stats_tab_grid"))
+
+        # 标签页 3: 回声积分
+        self.integration_tab = QWidget()
+        self._setup_integration_tab()
+        self.tabs.addTab(self.integration_tab, T("stats_tab_integration"))
+
+        # 标签页 4: 单体目标
+        self.single_target_tab = QWidget()
+        self._setup_single_target_tab()
+        self.tabs.addTab(self.single_target_tab, T("stats_tab_single_target"))
 
         layout.addWidget(self.tabs, 1)
 
@@ -242,6 +254,122 @@ class StatsDialog(QDialog):
         header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
 
         layout.addWidget(self.grid_table, 1)
+
+    def _setup_integration_tab(self):
+        """设置回声积分标签页"""
+        layout = QVBoxLayout(self.integration_tab)
+        layout.setSpacing(8)
+        layout.setContentsMargins(0, 8, 0, 0)
+
+        summary_layout = QHBoxLayout()
+        self.lbl_integration_info = QLabel(T("integration_info"))
+        self.lbl_integration_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #4a5568;")
+        self.lbl_integration_stats = QLabel("--")
+        self.lbl_integration_stats.setStyleSheet("font-size: 12px; color: #718096;")
+        summary_layout.addWidget(self.lbl_integration_info)
+        summary_layout.addStretch()
+        summary_layout.addWidget(self.lbl_integration_stats)
+        layout.addLayout(summary_layout)
+
+        self.integration_table = QTableWidget()
+        self.integration_table.setColumnCount(8)
+        self.integration_table.setHorizontalHeaderLabels(T("integration_headers"))
+        self.integration_table.horizontalHeader().setStretchLastSection(True)
+        self.integration_table.setAlternatingRowColors(True)
+        self.integration_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.integration_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.integration_table.verticalHeader().setVisible(False)
+        self.integration_table.setSortingEnabled(True)
+        self.integration_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.integration_table.customContextMenuRequested.connect(self._on_integration_context_menu)
+
+        header = self.integration_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        for col in range(3, 7):
+            header.setSectionResizeMode(col, QHeaderView.Stretch)
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
+
+        layout.addWidget(self.integration_table, 1)
+
+    def _setup_single_target_tab(self):
+        """设置单体目标标签页"""
+        layout = QVBoxLayout(self.single_target_tab)
+        layout.setSpacing(8)
+        layout.setContentsMargins(0, 8, 0, 0)
+
+        summary_layout = QHBoxLayout()
+        self.lbl_single_target_info = QLabel(T("single_target_info"))
+        self.lbl_single_target_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #4a5568;")
+        self.lbl_single_target_stats = QLabel("--")
+        self.lbl_single_target_stats.setStyleSheet("font-size: 12px; color: #718096;")
+        summary_layout.addWidget(self.lbl_single_target_info)
+        summary_layout.addStretch()
+        summary_layout.addWidget(self.lbl_single_target_stats)
+        layout.addLayout(summary_layout)
+
+        self.single_target_table = QTableWidget()
+        self.single_target_table.setColumnCount(7)
+        self.single_target_table.setHorizontalHeaderLabels(T("single_target_headers"))
+        self.single_target_table.horizontalHeader().setStretchLastSection(True)
+        self.single_target_table.setAlternatingRowColors(True)
+        self.single_target_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.single_target_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.single_target_table.verticalHeader().setVisible(False)
+        self.single_target_table.setSortingEnabled(True)
+        self.single_target_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.single_target_table.customContextMenuRequested.connect(self._on_single_target_context_menu)
+
+        header = self.single_target_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        for col in range(3, 6):
+            header.setSectionResizeMode(col, QHeaderView.Stretch)
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+
+        layout.addWidget(self.single_target_table, 1)
+
+    def _on_single_target_context_menu(self, position):
+        """单体目标表格右键菜单"""
+        menu = QMenu(self)
+
+        copy_action = QAction(T("stats_copy_selected"), self)
+        copy_action.triggered.connect(lambda: self._copy_selected_rows(self.single_target_table))
+        menu.addAction(copy_action)
+
+        copy_all_action = QAction(T("stats_copy_all"), self)
+        copy_all_action.triggered.connect(lambda: self._copy_all_rows(self.single_target_table))
+        menu.addAction(copy_all_action)
+
+        menu.addSeparator()
+
+        export_action = QAction(T("stats_export_selected"), self)
+        export_action.triggered.connect(lambda: self._export_selected_rows(self.single_target_table))
+        menu.addAction(export_action)
+
+        menu.exec_(self.single_target_table.viewport().mapToGlobal(position))
+
+    def _on_integration_context_menu(self, position):
+        """回声积分表格右键菜单"""
+        menu = QMenu(self)
+
+        copy_action = QAction(T("stats_copy_selected"), self)
+        copy_action.triggered.connect(lambda: self._copy_selected_rows(self.integration_table))
+        menu.addAction(copy_action)
+
+        copy_all_action = QAction(T("stats_copy_all"), self)
+        copy_all_action.triggered.connect(lambda: self._copy_all_rows(self.integration_table))
+        menu.addAction(copy_all_action)
+
+        menu.addSeparator()
+
+        export_action = QAction(T("stats_export_selected"), self)
+        export_action.triggered.connect(lambda: self._export_selected_rows(self.integration_table))
+        menu.addAction(export_action)
+
+        menu.exec_(self.integration_table.viewport().mapToGlobal(position))
 
     # ── 更新方法 ──
 
@@ -451,6 +579,176 @@ class StatsDialog(QDialog):
         
         self.grid_table.setSortingEnabled(True)
 
+    def update_integration(self, df):
+        """更新回声积分结果"""
+        if df is None or df.empty:
+            self.lbl_integration_info.setText(T("integration_info"))
+            self.lbl_integration_stats.setText("--")
+            self.integration_table.setRowCount(0)
+            return
+
+        self._integration_df = df
+        self.lbl_integration_info.setText(T("integration_info_fmt", n=len(df)))
+
+        parts = []
+        if "nasc" in df.columns:
+            nasc = df["nasc"].dropna()
+            if len(nasc):
+                parts.append(f"NASC mean: {nasc.mean():.2f} m²/nmi²")
+        if "mean_Sv" in df.columns:
+            sv = df["mean_Sv"].dropna()
+            if len(sv):
+                parts.append(f"Sv: {sv.mean():.1f} dB")
+        self.lbl_integration_stats.setText(" | ".join(parts) if parts else "--")
+
+        self._populate_integration_table(df)
+        self.tabs.setCurrentIndex(2)
+
+    def _populate_integration_table(self, df):
+        """填充回声积分表格"""
+        self.integration_table.setSortingEnabled(False)
+        self.integration_table.setRowCount(len(df))
+
+        for i, (_, row) in enumerate(df.iterrows()):
+            item_esu = QTableWidgetItem(str(row.get("interval", "")))
+            item_esu.setTextAlignment(Qt.AlignCenter)
+            self.integration_table.setItem(i, 0, item_esu)
+
+            self.integration_table.setItem(i, 1, QTableWidgetItem(
+                f"{row.get('ping_start', '')} ~ {row.get('ping_end', '')}"))
+            self.integration_table.setItem(i, 2, QTableWidgetItem(
+                f"{row.get('depth_start', 0):.1f} ~ {row.get('depth_end', 0):.1f} m"))
+
+            mean_sv = row.get("mean_Sv")
+            if mean_sv is not None and not _isnan(mean_sv):
+                item = QTableWidgetItem(f"{mean_sv:.1f}")
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if mean_sv > -40:
+                    item.setBackground(QBrush(QColor("#e6fffa")))
+                elif mean_sv < -60:
+                    item.setBackground(QBrush(QColor("#fed7d7")))
+                self.integration_table.setItem(i, 3, item)
+            else:
+                self.integration_table.setItem(i, 3, self._dash_item())
+
+            nasc = row.get("nasc")
+            if nasc is not None and not _isnan(nasc):
+                item = QTableWidgetItem(f"{nasc:.2f}")
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.integration_table.setItem(i, 4, item)
+            else:
+                self.integration_table.setItem(i, 4, self._dash_item())
+
+            for col, key in ((5, "min_Sv"), (6, "max_Sv")):
+                val = row.get(key)
+                if val is not None and not _isnan(val):
+                    item = QTableWidgetItem(f"{val:.1f}")
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    self.integration_table.setItem(i, col, item)
+                else:
+                    self.integration_table.setItem(i, col, self._dash_item())
+
+            n_good = row.get("n_good", 0)
+            item_n = QTableWidgetItem(str(int(n_good)))
+            item_n.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.integration_table.setItem(i, 7, item_n)
+
+        self.integration_table.setSortingEnabled(True)
+
+    def _dash_item(self):
+        item = QTableWidgetItem("--")
+        item.setTextAlignment(Qt.AlignCenter)
+        return item
+
+    def update_single_target(self, df):
+        """更新单体目标检测结果"""
+        if df is None or df.empty:
+            self.lbl_single_target_info.setText(T("single_target_info"))
+            self.lbl_single_target_stats.setText("--")
+            self.single_target_table.setRowCount(0)
+            return
+
+        self._single_target_df = df
+        self.lbl_single_target_info.setText(T("single_target_info_fmt", n=len(df)))
+
+        parts = []
+        if "ts_db" in df.columns:
+            ts = df["ts_db"].dropna()
+            ts_valid = ts[ts > -900]
+            if len(ts_valid):
+                parts.append(f"TS: {ts_valid.mean():.1f} dB (n={len(ts_valid)})")
+        if "sv_max" in df.columns:
+            sv = df["sv_max"].dropna()
+            if len(sv):
+                parts.append(f"Sv max: {sv.mean():.1f} dB")
+        self.lbl_single_target_stats.setText(" | ".join(parts) if parts else "--")
+
+        self._populate_single_target_table(df)
+        self.tabs.setCurrentIndex(3)
+
+    def _populate_single_target_table(self, df):
+        """填充单体目标表格"""
+        self.single_target_table.setSortingEnabled(False)
+        self.single_target_table.setRowCount(len(df))
+
+        for i, (_, row) in enumerate(df.iterrows()):
+            # ID
+            item_id = QTableWidgetItem(str(row.get("target_id", "")))
+            item_id.setTextAlignment(Qt.AlignCenter)
+            self.single_target_table.setItem(i, 0, item_id)
+
+            # Ping（时间）
+            pc = row.get("ping_center", "")
+            ping_str = str(pc)[:19] if pc is not None else "--"
+            item_ping = QTableWidgetItem(ping_str)
+            item_ping.setTextAlignment(Qt.AlignCenter)
+            self.single_target_table.setItem(i, 1, item_ping)
+
+            # 深度
+            dc = row.get("depth_center", 0)
+            item_depth = QTableWidgetItem(f"{dc:.1f} m")
+            item_depth.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.single_target_table.setItem(i, 2, item_depth)
+
+            # Sv 峰值
+            sv_max = row.get("sv_max")
+            if sv_max is not None and not _isnan(sv_max):
+                item = QTableWidgetItem(f"{sv_max:.1f}")
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if sv_max > -40:
+                    item.setBackground(QBrush(QColor("#e6fffa")))
+                elif sv_max < -60:
+                    item.setBackground(QBrush(QColor("#fed7d7")))
+                self.single_target_table.setItem(i, 3, item)
+            else:
+                self.single_target_table.setItem(i, 3, self._dash_item())
+
+            # Sv 均值
+            sv_mean = row.get("sv_mean")
+            if sv_mean is not None and not _isnan(sv_mean):
+                item = QTableWidgetItem(f"{sv_mean:.1f}")
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.single_target_table.setItem(i, 4, item)
+            else:
+                self.single_target_table.setItem(i, 4, self._dash_item())
+
+            # 面积
+            area = row.get("area", 0)
+            item_area = QTableWidgetItem(str(int(area)))
+            item_area.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.single_target_table.setItem(i, 5, item_area)
+
+            # TS
+            ts = row.get("ts_db")
+            if ts is not None and not _isnan(ts) and ts > -900:
+                item_ts = QTableWidgetItem(f"{ts:.1f}")
+                item_ts.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.single_target_table.setItem(i, 6, item_ts)
+            else:
+                self.single_target_table.setItem(i, 6, self._dash_item())
+
+        self.single_target_table.setSortingEnabled(True)
+
     # ── 过滤功能 ──
 
     def _on_school_filter_changed(self, text):
@@ -649,6 +947,18 @@ class StatsDialog(QDialog):
                 self._export_dataframe(self._grid_df, T("stats_tab_grid"))
             else:
                 QMessageBox.warning(self, T("dialog_warning"), T("stats_no_grid_data"))
+        elif current_tab == 2:
+            # 导出回声积分数据
+            if self._integration_df is not None and not self._integration_df.empty:
+                self._export_dataframe(self._integration_df, T("stats_tab_integration"))
+            else:
+                QMessageBox.warning(self, T("dialog_warning"), T("stats_no_integration_data"))
+        elif current_tab == 3:
+            # 导出单体目标数据
+            if self._single_target_df is not None and not self._single_target_df.empty:
+                self._export_dataframe(self._single_target_df, T("stats_tab_single_target"))
+            else:
+                QMessageBox.warning(self, T("dialog_warning"), T("stats_no_single_target_data"))
 
     def _on_export_all_clicked(self):
         """导出所有数据"""
@@ -669,6 +979,10 @@ class StatsDialog(QDialog):
                         self._schools_df.to_excel(writer, sheet_name=T("stats_school_list"), index=False)
                     if self._grid_df is not None and not self._grid_df.empty:
                         self._grid_df.to_excel(writer, sheet_name=T("stats_tab_grid"), index=False)
+                    if self._integration_df is not None and not self._integration_df.empty:
+                        self._integration_df.to_excel(writer, sheet_name=T("stats_tab_integration"), index=False)
+                    if self._single_target_df is not None and not self._single_target_df.empty:
+                        self._single_target_df.to_excel(writer, sheet_name=T("stats_tab_single_target"), index=False)
             elif file_path.endswith('.json'):
                 all_data = {}
                 if self._density_df is not None and not self._density_df.empty:
@@ -677,6 +991,10 @@ class StatsDialog(QDialog):
                     all_data["schools"] = self._schools_df.to_dict(orient='records')
                 if self._grid_df is not None and not self._grid_df.empty:
                     all_data["grid"] = self._grid_df.to_dict(orient='records')
+                if self._integration_df is not None and not self._integration_df.empty:
+                    all_data["integration"] = self._integration_df.to_dict(orient='records')
+                if self._single_target_df is not None and not self._single_target_df.empty:
+                    all_data["single_target"] = self._single_target_df.to_dict(orient='records')
                 
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(all_data, f, ensure_ascii=False, indent=2)
@@ -693,6 +1011,10 @@ class StatsDialog(QDialog):
             self._copy_all_rows(self.school_table)
         elif current_tab == 1:
             self._copy_all_rows(self.grid_table)
+        elif current_tab == 2:
+            self._copy_all_rows(self.integration_table)
+        elif current_tab == 3:
+            self._copy_all_rows(self.single_target_table)
 
     def _on_refresh_clicked(self):
         """刷新数据"""

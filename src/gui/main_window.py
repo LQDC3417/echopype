@@ -18,7 +18,6 @@
 import logging
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
@@ -62,12 +61,6 @@ from src.viz.opengl_renderer import EchogramRenderer
 
 logger = logging.getLogger(__name__)
 
-
-def squeeze_sv(sv: np.ndarray) -> np.ndarray:
-    """将 3D Sv 数组降维为 2D（取第一个 channel）。"""
-    if sv.ndim == 3:
-        return sv[0]
-    return sv
 
 from src.gui.handlers import (
     FileMixin,
@@ -193,6 +186,9 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
 
         # ── 分析 ──
         am = mb.addMenu(T("menu_analysis"))
+        am.addAction(self._act(T("menu_integration"), self._run_integration))
+        am.addAction(self._act(T("menu_single_target"), self._run_single_target_detection))
+        am.addSeparator()
         am.addAction(self._act(T("export_density_report"), self._export))
         am.addAction(self._act(T("export_school_list"), self._export_schools))
 
@@ -353,6 +349,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.property_panel.single_target_clicked.connect(self._run_single_target_detection)
         self.property_panel.sv_stats_clicked.connect(self._run_sv_stats)
         self.property_panel.transect_split_clicked.connect(self._run_transect_split)
+        self.property_panel.integration_clicked.connect(self._run_integration)
         self.property_panel.detect_bottom_clicked.connect(self._detect_bottom)
         self.property_panel.draw_bottom_clicked.connect(self._start_draw_bottom)
         self.property_panel.update_bottom_clicked.connect(self._on_update_bottom)
@@ -386,6 +383,9 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
                 "mincan": [3, 10], "maxlink": [3, 15], "minsho": [3, 15],
             },
             "density": {"ts_default": -30.0},
+            "single_target": {
+                "sv_threshold_db": -50.0, "min_area": 3, "max_area": 500,
+            },
         }
 
     # ═══════════════════════════════════════════════════════

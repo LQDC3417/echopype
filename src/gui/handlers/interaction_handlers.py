@@ -10,6 +10,8 @@ from pathlib import Path
 from src.gui.i18n import T
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+from src.core.utils import squeeze_sv
+from src.gui.export_dialog import ExportDialog
 from src.gui.toolbars import MouseMode
 
 logger = logging.getLogger(__name__)

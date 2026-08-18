@@ -122,6 +122,7 @@ class ProcessingTab(QWidget):
     single_target_clicked = Signal()
     sv_stats_clicked = Signal()
     transect_split_clicked = Signal()
+    integration_clicked = Signal()
     detect_bottom_clicked = Signal()
     draw_bottom_clicked = Signal()
     update_bottom_clicked = Signal()
@@ -410,6 +411,53 @@ class ProcessingTab(QWidget):
         grid_group.setLayout(grid_layout)
         layout.addWidget(grid_group)
 
+        # ── 回声积分 ──
+        integration_group = QGroupBox(T("integration_group"))
+        integration_layout = QFormLayout()
+        integration_layout.setSpacing(6)
+        integration_layout.setContentsMargins(8, 12, 8, 8)
+
+        self.combo_integration_esu = QComboBox()
+        self.combo_integration_esu.addItems([
+            T("integration_esu_pings"),
+            T("integration_esu_seconds"),
+            T("integration_esu_nmi"),
+        ])
+        integration_layout.addRow(T("integration_esu_type"), self.combo_integration_esu)
+
+        self.spin_integration_esu_size = QDoubleSpinBox()
+        self.spin_integration_esu_size.setRange(1.0, 1000000.0)
+        self.spin_integration_esu_size.setValue(500.0)
+        self.spin_integration_esu_size.setDecimals(1)
+        integration_layout.addRow(T("integration_esu_size"), self.spin_integration_esu_size)
+
+        self.spin_integration_layer_width = QDoubleSpinBox()
+        self.spin_integration_layer_width.setRange(0.5, 100.0)
+        self.spin_integration_layer_width.setValue(5.0)
+        self.spin_integration_layer_width.setSingleStep(0.5)
+        self.spin_integration_layer_width.setSuffix(" m")
+        integration_layout.addRow(T("integration_layer_width"), self.spin_integration_layer_width)
+
+        self.spin_integration_min_thr = QDoubleSpinBox()
+        self.spin_integration_min_thr.setRange(-150.0, 0.0)
+        self.spin_integration_min_thr.setValue(-70.0)
+        self.spin_integration_min_thr.setSuffix(" dB")
+        integration_layout.addRow(T("integration_min_threshold"), self.spin_integration_min_thr)
+
+        self.spin_integration_max_thr = QDoubleSpinBox()
+        self.spin_integration_max_thr.setRange(-150.0, 0.0)
+        self.spin_integration_max_thr.setValue(0.0)
+        self.spin_integration_max_thr.setSuffix(" dB")
+        integration_layout.addRow(T("integration_max_threshold"), self.spin_integration_max_thr)
+
+        self.btn_integration = QPushButton(T("btn_integration"))
+        self.btn_integration.setProperty("cssClass", "primary")
+        self.btn_integration.clicked.connect(self.integration_clicked)
+        integration_layout.addRow(self.btn_integration)
+
+        integration_group.setLayout(integration_layout)
+        layout.addWidget(integration_group)
+
         self.combo_grid_h_method.currentIndexChanged.connect(self._on_h_method_changed)
         self.btn_stats.clicked.connect(self.stats_clicked)
 
@@ -421,18 +469,42 @@ class ProcessingTab(QWidget):
         self.btn_multifreq = QPushButton(T("btn_multifreq"))
         self.btn_multifreq.clicked.connect(self.multifreq_clicked)
 
-        # ── 单体目标检测 ──
-        self.btn_single_target = QPushButton(T("btn_single_target"))
-        self.btn_single_target.clicked.connect(self.single_target_clicked)
-
         btn_layout2 = QHBoxLayout()
         btn_layout2.addWidget(self.btn_quality)
         btn_layout2.addWidget(self.btn_multifreq)
         layout.addLayout(btn_layout2)
 
-        btn_layout3 = QHBoxLayout()
-        btn_layout3.addWidget(self.btn_single_target)
-        layout.addLayout(btn_layout3)
+        # ── 单体目标检测 ──
+        single_target_group = QGroupBox(T("single_target_group"))
+        single_target_layout = QFormLayout()
+        single_target_layout.setSpacing(6)
+        single_target_layout.setContentsMargins(8, 12, 8, 8)
+
+        self.spin_st_threshold = QDoubleSpinBox()
+        self.spin_st_threshold.setRange(-150.0, 0.0)
+        self.spin_st_threshold.setValue(-50.0)
+        self.spin_st_threshold.setDecimals(1)
+        self.spin_st_threshold.setSingleStep(1.0)
+        self.spin_st_threshold.setSuffix(" dB")
+        single_target_layout.addRow(T("single_target_sv_threshold"), self.spin_st_threshold)
+
+        self.spin_st_min_area = QSpinBox()
+        self.spin_st_min_area.setRange(1, 100000)
+        self.spin_st_min_area.setValue(3)
+        single_target_layout.addRow(T("single_target_min_area"), self.spin_st_min_area)
+
+        self.spin_st_max_area = QSpinBox()
+        self.spin_st_max_area.setRange(1, 1000000)
+        self.spin_st_max_area.setValue(500)
+        single_target_layout.addRow(T("single_target_max_area"), self.spin_st_max_area)
+
+        self.btn_single_target = QPushButton(T("btn_single_target"))
+        self.btn_single_target.setProperty("cssClass", "primary")
+        self.btn_single_target.clicked.connect(self.single_target_clicked)
+        single_target_layout.addRow(self.btn_single_target)
+
+        single_target_group.setLayout(single_target_layout)
+        layout.addWidget(single_target_group)
 
         # ── Sv 统计摘要 ──
         self.btn_sv_stats = QPushButton(T("btn_sv_stats"))
@@ -599,6 +671,25 @@ class ProcessingTab(QWidget):
             "include_summary": self.chk_include_summary.isChecked(),
         }
 
+    def get_integration_config(self) -> dict:
+        """获取回声积分配置"""
+        esu_map = {0: "pings", 1: "seconds", 2: "nmi"}
+        return {
+            "esu_type": esu_map.get(self.combo_integration_esu.currentIndex(), "pings"),
+            "esu_size": self.spin_integration_esu_size.value(),
+            "layer_width": self.spin_integration_layer_width.value(),
+            "min_threshold": self.spin_integration_min_thr.value(),
+            "max_threshold": self.spin_integration_max_thr.value(),
+        }
+
+    def get_single_target_config(self) -> dict:
+        """获取单体目标检测配置"""
+        return {
+            "sv_threshold_db": self.spin_st_threshold.value(),
+            "min_area": self.spin_st_min_area.value(),
+            "max_area": self.spin_st_max_area.value(),
+        }
+
     def load_from_config(self, config: dict):
         """从配置字典加载参数"""
         proc = config.get("processing", {})
@@ -636,6 +727,27 @@ class ProcessingTab(QWidget):
         if "avg_weight_kg" in density:
             self.spin_avg_weight.setValue(density["avg_weight_kg"])
 
+        integ = config.get("integration", {})
+        if "esu_type" in integ:
+            esu_map = {"pings": 0, "seconds": 1, "nmi": 2}
+            self.combo_integration_esu.setCurrentIndex(esu_map.get(integ["esu_type"], 0))
+        if "esu_size" in integ:
+            self.spin_integration_esu_size.setValue(float(integ["esu_size"]))
+        if "layer_width" in integ:
+            self.spin_integration_layer_width.setValue(float(integ["layer_width"]))
+        if "min_threshold" in integ:
+            self.spin_integration_min_thr.setValue(float(integ["min_threshold"]))
+        if "max_threshold" in integ:
+            self.spin_integration_max_thr.setValue(float(integ["max_threshold"]))
+
+        st = config.get("single_target", {})
+        if "sv_threshold_db" in st:
+            self.spin_st_threshold.setValue(float(st["sv_threshold_db"]))
+        if "min_area" in st:
+            self.spin_st_min_area.setValue(int(st["min_area"]))
+        if "max_area" in st:
+            self.spin_st_max_area.setValue(int(st["max_area"]))
+
     def get_all_config(self) -> dict:
         """获取所有配置参数"""
         return {
@@ -645,6 +757,8 @@ class ProcessingTab(QWidget):
             },
             "school_detection": self.get_school_config(),
             "density": self.get_density_config(),
+            "integration": self.get_integration_config(),
+            "single_target": self.get_single_target_config(),
             "surface_line": {"depth_m": self.spin_surface.value()},
         }
 
@@ -734,6 +848,7 @@ class PropertyPanel(QTabWidget):
     single_target_clicked = Signal()
     sv_stats_clicked = Signal()
     transect_split_clicked = Signal()
+    integration_clicked = Signal()
     detect_bottom_clicked = Signal()
     draw_bottom_clicked = Signal()
     update_bottom_clicked = Signal()
@@ -765,6 +880,7 @@ class PropertyPanel(QTabWidget):
         self.processing.single_target_clicked.connect(self.single_target_clicked)
         self.processing.sv_stats_clicked.connect(self.sv_stats_clicked)
         self.processing.transect_split_clicked.connect(self.transect_split_clicked)
+        self.processing.integration_clicked.connect(self.integration_clicked)
         self.processing.apply_all_clicked.connect(self.apply_all_clicked)
 
     def save_settings(self):

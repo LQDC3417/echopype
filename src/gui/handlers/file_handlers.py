@@ -10,7 +10,9 @@ from pathlib import Path
 from src.gui.i18n import T
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+from src.core.utils import load_config, squeeze_sv
 from src.gui.fileset import Fileset
+from src.gui.fileset_tree import BatchImportDialog
 from src.gui.workers import (
     BatchProcessWorker,
     ComputeSvWorker,

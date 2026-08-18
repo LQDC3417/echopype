@@ -6,14 +6,17 @@ import traceback
 import numpy as np
 import pandas as pd
 from src.gui.i18n import T
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QInputDialog, QMessageBox
 
+from src.core.utils import squeeze_sv
 from src.gui.workers import (
     ComputeSvWorker,
     DetectSchoolsWorker,
     DetectSeafloorWorker,
     ComputeDensityWorker as DensityWorker,
     GridWorker,
+    IntegrationWorker,
     NoiseRemovalWorker,
 )
 
@@ -392,6 +395,62 @@ class ProcessingMixin:
         # 网格颜色叠加到回波图（使用裁剪后数据，确保坐标一致）
         self.echogram.set_grid_data(df, self._ds_for_grid, color_by="mean_sv")
         # 显示统计对话框
+        self._show_stats()
+
+    def _run_integration(self):
+        """运行回声积分分析"""
+        if self._ds_Sv is None or self._config is None:
+            QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
+            return
+
+        # 从 UI 同步积分配置到 config
+        integ_cfg = self.property_panel.processing.get_integration_config()
+        self._config.setdefault("integration", {}).update(integ_cfg)
+
+        # 始终以表线+底线裁剪数据，确保积分只在表线→底线区域进行
+        from src.core.region import crop_sv_by_region
+        ds_for_integ = crop_sv_by_region(
+            self._ds_Sv,
+            surface_depth_m=self._surface_depth_m if self._surface_depth_m > 0 else None,
+            bottom_sample_indices=self._bottom_line,
+        )
+        if ds_for_integ is None:
+            QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
+            return
+
+        # 计算底线最大深度（米），用于限制积分层范围（与网格分析一致）
+        max_depth_m = None
+        if "bottom_depth" in ds_for_integ:
+            bd = ds_for_integ["bottom_depth"].values
+            if bd.ndim > 1:
+                bd = bd.flatten()
+            valid_bd = bd[np.isfinite(bd)]
+            positive_bd = valid_bd[valid_bd > 0]
+            if len(positive_bd) > 0:
+                max_depth_m = float(np.max(positive_bd))
+            elif len(valid_bd) > 0:
+                max_depth_m = float(np.max(valid_bd))
+
+        self.statusbar.show_progress(T("msg_integration_running"))
+        self._ds_for_integration = ds_for_integ
+        self._current_worker = IntegrationWorker(
+            ds_for_integ, self._config,
+            surface_depth_m=self._surface_depth_m,
+            max_depth_m=max_depth_m,
+        )
+        self._current_worker.finished.connect(self._on_integration_done)
+        self._current_worker.error.connect(self._on_worker_error)
+        self._current_worker.progress.connect(self.statusbar.set_status)
+        self._current_worker.start()
+
+    def _on_integration_done(self, result):
+        """回声积分完成 → 展示结果表格"""
+        self._integration_result = result
+        self.statusbar.hide_progress()
+        df = result.to_dataframe()
+        self._integration_df = df
+        self.stats_dialog.update_integration(df)
+        self.statusbar.set_status(T("msg_integration_done", n=len(df)))
         self._show_stats()
 
     # ═══════════════════════════════════════════════════════
