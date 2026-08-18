@@ -124,13 +124,8 @@ class AnalysisMixin:
         st_cfg = self.property_panel.processing.get_single_target_config()
         self._config.setdefault("single_target", {}).update(st_cfg)
 
-        # 始终以表线+底线裁剪数据，确保只在表线→底线区域检测
-        from src.core.region import crop_sv_by_region
-        ds_for_st = crop_sv_by_region(
-            self._ds_Sv,
-            surface_depth_m=self._surface_depth_m if self._surface_depth_m > 0 else None,
-            bottom_sample_indices=self._bottom_line,
-        )
+        # 统一使用 _get_analysis_ds() 获取裁剪后的数据（表线→底线区域）
+        ds_for_st = self._get_analysis_ds()
         if ds_for_st is None:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return

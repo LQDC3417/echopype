@@ -39,6 +39,7 @@ class ProcessingMixin:
 
     def _on_sv_computed(self, ds_Sv):
         self._ds_Sv = ds_Sv
+        self._ds_Sv_analysis = None  # 清除裁剪缓存，等待后续重新裁剪
         self.statusbar.hide_progress()
         self.statusbar.set_status(T("msg_sv_computed"))
 
@@ -90,6 +91,7 @@ class ProcessingMixin:
 
     def _on_noise_removed(self, ds_Sv):
         self._ds_Sv = ds_Sv
+        self._ds_Sv_analysis = None  # 清除裁剪缓存，等待后续重新裁剪
         self.statusbar.hide_progress()
 
         # 更新变量列表（保留原始 Sv，新增 Sv_corrected）
@@ -203,8 +205,12 @@ class ProcessingMixin:
         return get_surface_sample(self._ds_Sv, self._surface_depth_m)
 
     def _apply_analysis_region_to_ds(self):
-        """根据分析区域（表线~底线）裁剪 ds_Sv，生成 _ds_Sv_analysis。"""
-        if not self._analysis_region_enabled or self._ds_Sv is None:
+        """根据分析区域（表线~底线）裁剪 ds_Sv，生成 _ds_Sv_analysis。
+
+        始终执行裁剪（不受 _analysis_region_enabled 开关控制），
+        确保所有分析操作一致地只在表线→底线水体区域进行。
+        """
+        if self._ds_Sv is None:
             self._ds_Sv_analysis = None
             return
 
@@ -216,10 +222,16 @@ class ProcessingMixin:
         )
 
     def _get_analysis_ds(self):
-        """返回当前应使用的 ds_Sv：分析区域开启时返回裁剪版本，否则返回完整版本。"""
-        if self._analysis_region_enabled and self._ds_Sv_analysis is not None:
-            return self._ds_Sv_analysis
-        return self._ds_Sv
+        """返回裁剪后的 ds_Sv（表线→底线水体区域）。
+
+        所有分析操作统一调用此方法，确保只在水体区域进行。
+        当 surface/bottom 均未设置时回退返回完整数据（不裁剪）。
+        """
+        if self._ds_Sv is None:
+            return None
+        if self._ds_Sv_analysis is None:
+            self._apply_analysis_region_to_ds()
+        return self._ds_Sv_analysis if self._ds_Sv_analysis is not None else self._ds_Sv
 
     def _update_surface_line_render(self):
         """将表线深度(m)转为 sample index 并传给渲染器"""
@@ -352,13 +364,8 @@ class ProcessingMixin:
         grid_cfg = self.property_panel.processing.get_grid_config()
         density_cfg = self.property_panel.processing.get_density_config()
 
-        # 始终以表线+底线裁剪数据，确保网格只分析表线→底线区域
-        from src.core.region import crop_sv_by_region
-        ds_for_grid = crop_sv_by_region(
-            self._ds_Sv,
-            surface_depth_m=self._surface_depth_m if self._surface_depth_m > 0 else None,
-            bottom_sample_indices=self._bottom_line,
-        )
+        # 统一使用 _get_analysis_ds() 获取裁剪后的数据（表线→底线区域）
+        ds_for_grid = self._get_analysis_ds()
         if ds_for_grid is None:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return
@@ -407,13 +414,8 @@ class ProcessingMixin:
         integ_cfg = self.property_panel.processing.get_integration_config()
         self._config.setdefault("integration", {}).update(integ_cfg)
 
-        # 始终以表线+底线裁剪数据，确保积分只在表线→底线区域进行
-        from src.core.region import crop_sv_by_region
-        ds_for_integ = crop_sv_by_region(
-            self._ds_Sv,
-            surface_depth_m=self._surface_depth_m if self._surface_depth_m > 0 else None,
-            bottom_sample_indices=self._bottom_line,
-        )
+        # 统一使用 _get_analysis_ds() 获取裁剪后的数据（表线→底线区域）
+        ds_for_integ = self._get_analysis_ds()
         if ds_for_integ is None:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return

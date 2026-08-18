@@ -26,3 +26,16 @@ fish-acoustics = "src.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "F",    # pyflakes: F821 未定义名, F401 未使用导入, F841 未使用变量, F811 重复定义
+    "E4",   # import 相关
+    "E7",   # statement 相关
+    "E9",   # runtime error 相关
+    "W",    # pycodestyle warnings
+]
+

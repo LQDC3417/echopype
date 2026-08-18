@@ -189,6 +189,7 @@ class FileMixin:
         # 内存优化：float64 → float32
         sv = optimize_array_dtype(sv)
         self._ds_Sv = ds_Sv
+        self._ds_Sv_analysis = None  # 清除裁剪缓存
         self._update_variable_list(ds_Sv, sv)
         self.echogram.set_data(sv)
         self._update_file_info(ds_Sv)
@@ -268,6 +269,7 @@ class FileMixin:
             return
 
         self._ds_Sv = cached["ds"]
+        self._ds_Sv_analysis = None  # 清除裁剪缓存
         sv = cached["sv"]
         logger.debug("Switching to %s, sv.shape=%s", path.name, sv.shape)
 

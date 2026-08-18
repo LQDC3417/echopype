@@ -90,7 +90,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._bottom_line = None
         self._bottom_manually_edited = False  # 底线是否被手动编辑过
         self._surface_depth_m = 2.0  # 表线深度（米）
-        self._analysis_region_enabled = False  # 分析区域限定
+        self._analysis_region_enabled = False  # 分析区域限定（仅控制 UI 渲染，不影响分析裁剪）
         self._schools_mask = None
         self._schools_df = None
         self._density_df = None
