@@ -165,6 +165,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         am = mb.addMenu(T("menu_analysis"))
         am.addAction(self._act(T("menu_integration"), self._run_integration))
         am.addAction(self._act(T("menu_single_target"), self._run_single_target_detection))
+        am.addAction(self._act(T("btn_real_sed"), self._run_real_sed))
         am.addSeparator()
         am.addAction(self._act(T("export_density_report"), self._export))
         am.addAction(self._act(T("menu_export_schools"), self._export_schools))
@@ -327,6 +328,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.property_panel.sv_stats_clicked.connect(self._run_sv_stats)
         self.property_panel.transect_split_clicked.connect(self._run_transect_split)
         self.property_panel.integration_clicked.connect(self._run_integration)
+        self.property_panel.real_sed_clicked.connect(self._run_real_sed)
         self.property_panel.detect_bottom_clicked.connect(self._detect_bottom)
         self.property_panel.draw_bottom_clicked.connect(self._start_draw_bottom)
         self.property_panel.update_bottom_clicked.connect(self._on_update_bottom)
@@ -362,6 +364,12 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
             "density": {"ts_default": -30.0},
             "single_target": {
                 "sv_threshold_db": -50.0, "min_area": 3, "max_area": 500,
+            },
+            "single_target_real": {
+                "ts_threshold_db": -50.0, "pldl_db": 6.0,
+                "min_norm_pulse": 0.8, "max_norm_pulse": 1.5,
+                "max_angle_std_deg": 0.6, "max_beam_comp_db": 3.0,
+                "min_depth_m": 0.0, "max_depth_m": 200.0,
             },
         }
 

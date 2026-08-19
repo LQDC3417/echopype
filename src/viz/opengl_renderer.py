@@ -309,8 +309,13 @@ class EchogramRenderer(QOpenGLWidget):
         if targets_df is None or targets_df.empty:
             self._single_targets = None
         else:
-            pings = np.asarray(targets_df["ping_idx_center"].values, dtype=np.float32)
-            samples = np.asarray(targets_df["depth_idx_center"].values, dtype=np.float32)
+            # 兼容两种列名：简化版 (ping_idx_center/depth_idx_center) 和真实 SED (ping_idx/sample_idx)
+            if "ping_idx_center" in targets_df.columns:
+                pings = np.asarray(targets_df["ping_idx_center"].values, dtype=np.float32)
+                samples = np.asarray(targets_df["depth_idx_center"].values, dtype=np.float32)
+            else:
+                pings = np.asarray(targets_df["ping_idx"].values, dtype=np.float32)
+                samples = np.asarray(targets_df["sample_idx"].values, dtype=np.float32)
             self._single_targets = np.column_stack([pings, samples])
         self.update()
 

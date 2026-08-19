@@ -279,6 +279,27 @@ _TEXTS = {
     },
     "stats_no_single_target_data": {"zh": "没有单体目标数据可导出", "en": "No single target data to export"},
     "msg_single_target_done": {"zh": "单体目标检测完成: {n} 个目标", "en": "Single target detection done: {n} targets"},
+    "single_target_real_group": {"zh": "真实 SED（分裂波束）", "en": "Real SED (Split-beam)"},
+    "st_real_ts_threshold": {"zh": "TS 阈值:", "en": "TS Threshold:"},
+    "st_real_pldl": {"zh": "脉冲判定电平:", "en": "Pulse Length Level:"},
+    "st_real_min_norm_pulse": {"zh": "最小归一化脉宽:", "en": "Min Norm Pulse:"},
+    "st_real_max_norm_pulse": {"zh": "最大归一化脉宽:", "en": "Max Norm Pulse:"},
+    "st_real_max_angle_std": {"zh": "最大角度标准差:", "en": "Max Angle Std Dev:"},
+    "st_real_max_beam_comp": {"zh": "最大波束补偿:", "en": "Max Beam Comp:"},
+    "st_real_min_depth": {"zh": "最小深度:", "en": "Min Depth:"},
+    "st_real_max_depth": {"zh": "最大深度:", "en": "Max Depth:"},
+    "btn_real_sed": {"zh": "真实 SED 检测", "en": "Real SED Detection"},
+    "msg_real_sed_running": {"zh": "正在运行真实 SED...", "en": "Running real SED..."},
+    "msg_real_sed_done": {"zh": "真实 SED 完成: {n} 个目标", "en": "Real SED done: {n} targets"},
+    "msg_real_sed_none": {"zh": "未检测到单体目标\n尝试降低 TS 阈值", "en": "No single targets detected\nTry lowering TS threshold"},
+    "stats_tab_real_sed": {"zh": "真实 SED", "en": "Real SED"},
+    "real_sed_info": {"zh": "真实 SED: --", "en": "Real SED: --"},
+    "real_sed_info_fmt": {"zh": "真实 SED: {n} 个目标", "en": "Real SED: {n} targets"},
+    "real_sed_headers": {
+        "zh": ["ID", "Ping", "深度", "TS", "TS(未补偿)", "沿船角", "横向角", "脉宽", "补偿"],
+        "en": ["ID", "Ping", "Depth", "TS", "TS(raw)", "Alongship", "Athwartship", "Pulse", "Comp"],
+    },
+    "stats_no_real_sed_data": {"zh": "没有真实 SED 数据可导出", "en": "No real SED data to export"},
 
     # ── 底部区域表格 ──
     "region_headers": {

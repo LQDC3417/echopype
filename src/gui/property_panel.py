@@ -123,6 +123,7 @@ class ProcessingTab(QWidget):
     sv_stats_clicked = Signal()
     transect_split_clicked = Signal()
     integration_clicked = Signal()
+    real_sed_clicked = Signal()
     detect_bottom_clicked = Signal()
     draw_bottom_clicked = Signal()
     update_bottom_clicked = Signal()
@@ -506,6 +507,69 @@ class ProcessingTab(QWidget):
         single_target_group.setLayout(single_target_layout)
         layout.addWidget(single_target_group)
 
+        # ── 真实 SED（分裂波束）──
+        real_sed_group = QGroupBox(T("single_target_real_group"))
+        real_sed_layout = QFormLayout()
+        real_sed_layout.setSpacing(6)
+        real_sed_layout.setContentsMargins(8, 12, 8, 8)
+
+        self.spin_rs_threshold = QDoubleSpinBox()
+        self.spin_rs_threshold.setRange(-150.0, 0.0)
+        self.spin_rs_threshold.setValue(-50.0)
+        self.spin_rs_threshold.setDecimals(1)
+        self.spin_rs_threshold.setSuffix(" dB")
+        real_sed_layout.addRow(T("st_real_ts_threshold"), self.spin_rs_threshold)
+
+        self.spin_rs_pldl = QDoubleSpinBox()
+        self.spin_rs_pldl.setRange(1.0, 30.0)
+        self.spin_rs_pldl.setValue(6.0)
+        self.spin_rs_pldl.setSuffix(" dB")
+        real_sed_layout.addRow(T("st_real_pldl"), self.spin_rs_pldl)
+
+        self.spin_rs_min_pulse = QDoubleSpinBox()
+        self.spin_rs_min_pulse.setRange(0.1, 5.0)
+        self.spin_rs_min_pulse.setValue(0.8)
+        self.spin_rs_min_pulse.setDecimals(2)
+        real_sed_layout.addRow(T("st_real_min_norm_pulse"), self.spin_rs_min_pulse)
+
+        self.spin_rs_max_pulse = QDoubleSpinBox()
+        self.spin_rs_max_pulse.setRange(0.1, 10.0)
+        self.spin_rs_max_pulse.setValue(1.5)
+        self.spin_rs_max_pulse.setDecimals(2)
+        real_sed_layout.addRow(T("st_real_max_norm_pulse"), self.spin_rs_max_pulse)
+
+        self.spin_rs_angle_std = QDoubleSpinBox()
+        self.spin_rs_angle_std.setRange(0.1, 5.0)
+        self.spin_rs_angle_std.setValue(0.6)
+        self.spin_rs_angle_std.setSuffix(" deg")
+        real_sed_layout.addRow(T("st_real_max_angle_std"), self.spin_rs_angle_std)
+
+        self.spin_rs_beam_comp = QDoubleSpinBox()
+        self.spin_rs_beam_comp.setRange(0.0, 12.0)
+        self.spin_rs_beam_comp.setValue(3.0)
+        self.spin_rs_beam_comp.setSuffix(" dB")
+        real_sed_layout.addRow(T("st_real_max_beam_comp"), self.spin_rs_beam_comp)
+
+        self.spin_rs_min_depth = QDoubleSpinBox()
+        self.spin_rs_min_depth.setRange(0.0, 2000.0)
+        self.spin_rs_min_depth.setValue(0.0)
+        self.spin_rs_min_depth.setSuffix(" m")
+        real_sed_layout.addRow(T("st_real_min_depth"), self.spin_rs_min_depth)
+
+        self.spin_rs_max_depth = QDoubleSpinBox()
+        self.spin_rs_max_depth.setRange(0.0, 5000.0)
+        self.spin_rs_max_depth.setValue(200.0)
+        self.spin_rs_max_depth.setSuffix(" m")
+        real_sed_layout.addRow(T("st_real_max_depth"), self.spin_rs_max_depth)
+
+        self.btn_real_sed = QPushButton(T("btn_real_sed"))
+        self.btn_real_sed.setProperty("cssClass", "primary")
+        self.btn_real_sed.clicked.connect(self.real_sed_clicked)
+        real_sed_layout.addRow(self.btn_real_sed)
+
+        real_sed_group.setLayout(real_sed_layout)
+        layout.addWidget(real_sed_group)
+
         # ── Sv 统计摘要 ──
         self.btn_sv_stats = QPushButton(T("btn_sv_stats"))
         self.btn_sv_stats.clicked.connect(self.sv_stats_clicked)
@@ -690,6 +754,19 @@ class ProcessingTab(QWidget):
             "max_area": self.spin_st_max_area.value(),
         }
 
+    def get_real_sed_config(self) -> dict:
+        """获取真实 SED 配置"""
+        return {
+            "ts_threshold_db": self.spin_rs_threshold.value(),
+            "pldl_db": self.spin_rs_pldl.value(),
+            "min_norm_pulse": self.spin_rs_min_pulse.value(),
+            "max_norm_pulse": self.spin_rs_max_pulse.value(),
+            "max_angle_std_deg": self.spin_rs_angle_std.value(),
+            "max_beam_comp_db": self.spin_rs_beam_comp.value(),
+            "min_depth_m": self.spin_rs_min_depth.value(),
+            "max_depth_m": self.spin_rs_max_depth.value(),
+        }
+
     def load_from_config(self, config: dict):
         """从配置字典加载参数"""
         proc = config.get("processing", {})
@@ -748,6 +825,24 @@ class ProcessingTab(QWidget):
         if "max_area" in st:
             self.spin_st_max_area.setValue(int(st["max_area"]))
 
+        rs = config.get("single_target_real", {})
+        if "ts_threshold_db" in rs:
+            self.spin_rs_threshold.setValue(float(rs["ts_threshold_db"]))
+        if "pldl_db" in rs:
+            self.spin_rs_pldl.setValue(float(rs["pldl_db"]))
+        if "min_norm_pulse" in rs:
+            self.spin_rs_min_pulse.setValue(float(rs["min_norm_pulse"]))
+        if "max_norm_pulse" in rs:
+            self.spin_rs_max_pulse.setValue(float(rs["max_norm_pulse"]))
+        if "max_angle_std_deg" in rs:
+            self.spin_rs_angle_std.setValue(float(rs["max_angle_std_deg"]))
+        if "max_beam_comp_db" in rs:
+            self.spin_rs_beam_comp.setValue(float(rs["max_beam_comp_db"]))
+        if "min_depth_m" in rs:
+            self.spin_rs_min_depth.setValue(float(rs["min_depth_m"]))
+        if "max_depth_m" in rs:
+            self.spin_rs_max_depth.setValue(float(rs["max_depth_m"]))
+
     def get_all_config(self) -> dict:
         """获取所有配置参数"""
         return {
@@ -759,6 +854,7 @@ class ProcessingTab(QWidget):
             "density": self.get_density_config(),
             "integration": self.get_integration_config(),
             "single_target": self.get_single_target_config(),
+            "single_target_real": self.get_real_sed_config(),
             "surface_line": {"depth_m": self.spin_surface.value()},
         }
 
@@ -849,6 +945,7 @@ class PropertyPanel(QTabWidget):
     sv_stats_clicked = Signal()
     transect_split_clicked = Signal()
     integration_clicked = Signal()
+    real_sed_clicked = Signal()
     detect_bottom_clicked = Signal()
     draw_bottom_clicked = Signal()
     update_bottom_clicked = Signal()
@@ -881,6 +978,7 @@ class PropertyPanel(QTabWidget):
         self.processing.sv_stats_clicked.connect(self.sv_stats_clicked)
         self.processing.transect_split_clicked.connect(self.transect_split_clicked)
         self.processing.integration_clicked.connect(self.integration_clicked)
+        self.processing.real_sed_clicked.connect(self.real_sed_clicked)
         self.processing.apply_all_clicked.connect(self.apply_all_clicked)
 
     def save_settings(self):

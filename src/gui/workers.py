@@ -593,6 +593,36 @@ class SingleTargetWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
+class RealSedWorker(QThread):
+    """真实单体目标检测（分裂波束 SED）工作线程
+
+    流程：compute_TS → detect_single_targets_real（阈值+脉冲长度+测角+补偿）
+    """
+    finished = Signal(object)
+    error = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, echodata, config):
+        super().__init__()
+        self.echodata = echodata
+        self.config = config
+
+    def run(self):
+        try:
+            from src.core.acoustic import _detect_waveform_mode
+            from echopype.calibrate import compute_TS
+            from src.core.sed import detect_single_targets_real
+
+            self.progress.emit(T("msg_real_sed_running"))
+            wm, em = _detect_waveform_mode(self.echodata)
+            ds_TS = compute_TS(self.echodata, waveform_mode=wm, encode_mode=em)
+            targets_df = detect_single_targets_real(self.echodata, ds_TS, self.config)
+            self.finished.emit(targets_df)
+
+        except Exception:
+            self.error.emit(traceback.format_exc())
+
+
 class SvStatsWorker(QThread):
     """Sv 统计摘要工作线程"""
     finished = Signal(object)

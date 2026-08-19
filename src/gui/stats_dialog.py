@@ -54,6 +54,7 @@ class StatsDialog(QDialog):
         self._grid_df = None
         self._integration_df = None
         self._single_target_df = None
+        self._real_sed_df = None
 
         # 过滤状态
         self._grid_filter_column = -1
@@ -85,6 +86,11 @@ class StatsDialog(QDialog):
         self.single_target_tab = QWidget()
         self._setup_single_target_tab()
         self.tabs.addTab(self.single_target_tab, T("stats_tab_single_target"))
+
+        # 标签页 5: 真实 SED
+        self.real_sed_tab = QWidget()
+        self._setup_real_sed_tab()
+        self.tabs.addTab(self.real_sed_tab, T("stats_tab_real_sed"))
 
         layout.addWidget(self.tabs, 1)
 
@@ -350,6 +356,62 @@ class StatsDialog(QDialog):
         menu.addAction(export_action)
 
         menu.exec_(self.single_target_table.viewport().mapToGlobal(position))
+
+    def _setup_real_sed_tab(self):
+        """设置真实 SED 标签页"""
+        layout = QVBoxLayout(self.real_sed_tab)
+        layout.setSpacing(8)
+        layout.setContentsMargins(0, 8, 0, 0)
+
+        summary_layout = QHBoxLayout()
+        self.lbl_real_sed_info = QLabel(T("real_sed_info"))
+        self.lbl_real_sed_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #4a5568;")
+        self.lbl_real_sed_stats = QLabel("--")
+        self.lbl_real_sed_stats.setStyleSheet("font-size: 12px; color: #718096;")
+        summary_layout.addWidget(self.lbl_real_sed_info)
+        summary_layout.addStretch()
+        summary_layout.addWidget(self.lbl_real_sed_stats)
+        layout.addLayout(summary_layout)
+
+        self.real_sed_table = QTableWidget()
+        self.real_sed_table.setColumnCount(9)
+        self.real_sed_table.setHorizontalHeaderLabels(T("real_sed_headers"))
+        self.real_sed_table.horizontalHeader().setStretchLastSection(True)
+        self.real_sed_table.setAlternatingRowColors(True)
+        self.real_sed_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.real_sed_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.real_sed_table.verticalHeader().setVisible(False)
+        self.real_sed_table.setSortingEnabled(True)
+        self.real_sed_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.real_sed_table.customContextMenuRequested.connect(self._on_real_sed_context_menu)
+
+        header = self.real_sed_table.horizontalHeader()
+        for col in range(9):
+            header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
+
+        layout.addWidget(self.real_sed_table, 1)
+
+    def _on_real_sed_context_menu(self, position):
+        """真实 SED 表格右键菜单"""
+        menu = QMenu(self)
+
+        copy_action = QAction(T("stats_copy_selected"), self)
+        copy_action.triggered.connect(lambda: self._copy_selected_rows(self.real_sed_table))
+        menu.addAction(copy_action)
+
+        copy_all_action = QAction(T("stats_copy_all"), self)
+        copy_all_action.triggered.connect(lambda: self._copy_all_rows(self.real_sed_table))
+        menu.addAction(copy_all_action)
+
+        menu.addSeparator()
+
+        export_action = QAction(T("stats_export_selected"), self)
+        export_action.triggered.connect(lambda: self._export_selected_rows(self.real_sed_table))
+        menu.addAction(export_action)
+
+        menu.exec_(self.real_sed_table.viewport().mapToGlobal(position))
 
     def _on_integration_context_menu(self, position):
         """回声积分表格右键菜单"""
@@ -749,6 +811,114 @@ class StatsDialog(QDialog):
 
         self.single_target_table.setSortingEnabled(True)
 
+    def update_real_sed(self, df):
+        """更新真实 SED 检测结果"""
+        if df is None or df.empty:
+            self.lbl_real_sed_info.setText(T("real_sed_info"))
+            self.lbl_real_sed_stats.setText("--")
+            self.real_sed_table.setRowCount(0)
+            return
+
+        self._real_sed_df = df
+        self.lbl_real_sed_info.setText(T("real_sed_info_fmt", n=len(df)))
+
+        parts = []
+        if "ts_db" in df.columns:
+            ts = df["ts_db"].dropna()
+            if len(ts):
+                parts.append(f"TS: {ts.mean():.1f} dB")
+        if "range_m" in df.columns:
+            dep = df["range_m"].dropna()
+            if len(dep):
+                parts.append(f"Depth: {dep.min():.1f}-{dep.max():.1f} m")
+        self.lbl_real_sed_stats.setText(" | ".join(parts) if parts else "--")
+
+        self._populate_real_sed_table(df)
+        self.tabs.setCurrentIndex(4)
+
+    def _populate_real_sed_table(self, df):
+        """填充真实 SED 表格"""
+        self.real_sed_table.setSortingEnabled(False)
+        self.real_sed_table.setRowCount(len(df))
+
+        for i, (_, row) in enumerate(df.iterrows()):
+            # ID
+            item_id = QTableWidgetItem(str(row.get("target_id", "")))
+            item_id.setTextAlignment(Qt.AlignCenter)
+            self.real_sed_table.setItem(i, 0, item_id)
+
+            # Ping
+            item_ping = QTableWidgetItem(str(int(row.get("ping_idx", 0))))
+            item_ping.setTextAlignment(Qt.AlignCenter)
+            self.real_sed_table.setItem(i, 1, item_ping)
+
+            # 深度
+            dep = row.get("range_m")
+            if dep is not None and not _isnan(dep):
+                item = QTableWidgetItem(f"{dep:.1f} m")
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            else:
+                item = self._dash_item()
+            self.real_sed_table.setItem(i, 2, item)
+
+            # TS（补偿后）
+            ts = row.get("ts_db")
+            if ts is not None and not _isnan(ts):
+                item = QTableWidgetItem(f"{ts:.1f}")
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if ts > -40:
+                    item.setBackground(QBrush(QColor("#e6fffa")))
+            else:
+                item = self._dash_item()
+            self.real_sed_table.setItem(i, 3, item)
+
+            # TS（未补偿）
+            ts_raw = row.get("ts_uncompensated_db")
+            if ts_raw is not None and not _isnan(ts_raw):
+                item = QTableWidgetItem(f"{ts_raw:.1f}")
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            else:
+                item = self._dash_item()
+            self.real_sed_table.setItem(i, 4, item)
+
+            # 沿船角
+            along = row.get("alongship_deg")
+            if along is not None and not _isnan(along):
+                item = QTableWidgetItem(f"{along:.2f}")
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            else:
+                item = self._dash_item()
+            self.real_sed_table.setItem(i, 5, item)
+
+            # 横向角
+            athw = row.get("athwartship_deg")
+            if athw is not None and not _isnan(athw):
+                item = QTableWidgetItem(f"{athw:.2f}")
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            else:
+                item = self._dash_item()
+            self.real_sed_table.setItem(i, 6, item)
+
+            # 脉宽（samples）
+            pl = row.get("pulse_len")
+            if pl is not None and not _isnan(pl):
+                item = QTableWidgetItem(str(int(pl)))
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            else:
+                item = self._dash_item()
+            self.real_sed_table.setItem(i, 7, item)
+
+            # 波束补偿
+            comp = row.get("beam_comp_db")
+            if comp is not None and not _isnan(comp):
+                item = QTableWidgetItem(f"{comp:.2f}")
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            else:
+                item = self._dash_item()
+            self.real_sed_table.setItem(i, 8, item)
+
+        self.real_sed_table.setSortingEnabled(True)
+
     # ── 过滤功能 ──
 
     def _on_school_filter_changed(self, text):
@@ -959,6 +1129,12 @@ class StatsDialog(QDialog):
                 self._export_dataframe(self._single_target_df, T("stats_tab_single_target"))
             else:
                 QMessageBox.warning(self, T("dialog_warning"), T("stats_no_single_target_data"))
+        elif current_tab == 4:
+            # 导出真实 SED 数据
+            if self._real_sed_df is not None and not self._real_sed_df.empty:
+                self._export_dataframe(self._real_sed_df, T("stats_tab_real_sed"))
+            else:
+                QMessageBox.warning(self, T("dialog_warning"), T("stats_no_real_sed_data"))
 
     def _on_export_all_clicked(self):
         """导出所有数据"""
@@ -983,6 +1159,8 @@ class StatsDialog(QDialog):
                         self._integration_df.to_excel(writer, sheet_name=T("stats_tab_integration"), index=False)
                     if self._single_target_df is not None and not self._single_target_df.empty:
                         self._single_target_df.to_excel(writer, sheet_name=T("stats_tab_single_target"), index=False)
+                    if self._real_sed_df is not None and not self._real_sed_df.empty:
+                        self._real_sed_df.to_excel(writer, sheet_name=T("stats_tab_real_sed"), index=False)
             elif file_path.endswith('.json'):
                 all_data = {}
                 if self._density_df is not None and not self._density_df.empty:
@@ -995,6 +1173,8 @@ class StatsDialog(QDialog):
                     all_data["integration"] = self._integration_df.to_dict(orient='records')
                 if self._single_target_df is not None and not self._single_target_df.empty:
                     all_data["single_target"] = self._single_target_df.to_dict(orient='records')
+                if self._real_sed_df is not None and not self._real_sed_df.empty:
+                    all_data["real_sed"] = self._real_sed_df.to_dict(orient='records')
 
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(all_data, f, ensure_ascii=False, indent=2)
@@ -1015,6 +1195,8 @@ class StatsDialog(QDialog):
             self._copy_all_rows(self.integration_table)
         elif current_tab == 3:
             self._copy_all_rows(self.single_target_table)
+        elif current_tab == 4:
+            self._copy_all_rows(self.real_sed_table)
 
     def _on_refresh_clicked(self):
         """刷新数据"""
