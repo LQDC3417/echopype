@@ -146,22 +146,21 @@ def step7_density(ds_Sv, config):
     return f"密度={len(density_df)} 行"
 
 # ═══════════════════════════════════════════════════════
-# 步骤 8: 网格分析
+# 步骤 8: 回声积分（ABC + 密度，替代网格分析）
 # ═══════════════════════════════════════════════════════
-def step8_grid_analysis(ds_Sv, config):
-    from src.core.grid import create_grid, compute_grid_density
+def step8_integration(ds_Sv, config):
+    from src.core.integration import create_integration_grid, integrate, ESUType
 
-    cells = create_grid(ds_Sv, surface_depth_m=2.0, vertical_interval_m=2.0, horizontal_interval=100)
-    grid_df = compute_grid_density(ds_Sv, cells, config)
+    grid = create_integration_grid(ds_Sv, esu_type=ESUType.PINGS, esu_size=100, layer_width=2.0, surface_depth_m=2.0)
+    result = integrate(ds_Sv, grid, min_threshold=-70, max_threshold=0, ts_default_db=-30.0)
+    df = result.to_dataframe()
 
-    print(f"  网格数: {len(cells)}")
-    print(f"  列: {list(grid_df.columns)}")
-    print(f"  含 cell_id: {'cell_id' in grid_df.columns}")
-    print(f"  含 latitude: {'latitude' in grid_df.columns}")
-    print(f"  含 longitude: {'longitude' in grid_df.columns}")
-    print(f"  含 abc: {'abc' in grid_df.columns}")
-    print(f"  含 mean_sv: {'mean_sv' in grid_df.columns}")
-    return f"网格={len(cells)} 单元"
+    print(f"  区间×层: {grid.n_intervals}×{grid.n_layers}")
+    print(f"  列: {list(df.columns)}")
+    print(f"  含 abc: {'abc' in df.columns}")
+    print(f"  含 density: {'density_ind_ha' in df.columns}")
+    print(f"  含 mean_Sv: {'mean_Sv' in df.columns}")
+    return f"积分={len(df)} 单元"
 
 # ═══════════════════════════════════════════════════════
 # 步骤 9: 单体目标检测
@@ -245,14 +244,14 @@ def step14_workers():
     from src.gui.workers import (
         LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
         DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker,
-        GridWorker, BatchProcessWorker, QualityCheckWorker,
+        IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
         MultifreqAnalysisWorker, SingleTargetWorker, SvStatsWorker,
         TransectSplitWorker,
     )
     workers = [
         LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
         DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker,
-        GridWorker, BatchProcessWorker, QualityCheckWorker,
+        IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
         MultifreqAnalysisWorker, SingleTargetWorker, SvStatsWorker,
         TransectSplitWorker,
     ]
@@ -281,7 +280,7 @@ def main():
     test_step("5. 质量检查", lambda: step5_quality_check(ds_Sv))
     test_step("6. 鱼群检测", lambda: step6_school_detection(ds_Sv, config))
     test_step("7. 密度估算", lambda: step7_density(ds_Sv, config))
-    test_step("8. 网格分析", lambda: step8_grid_analysis(ds_Sv, config))
+    test_step("8. 回声积分", lambda: step8_integration(ds_Sv, config))
     test_step("9. 单体目标检测", lambda: step9_single_target(ds_Sv, config))
     test_step("10. 多频分析", lambda: step10_multifreq(ds_Sv, config))
     test_step("11. Sv 统计", lambda: step11_sv_stats(ds_Sv))

@@ -51,14 +51,9 @@ class StatsDialog(QDialog):
         # 存储原始数据
         self._density_df = None
         self._schools_df = None
-        self._grid_df = None
         self._integration_df = None
         self._single_target_df = None
         self._real_sed_df = None
-
-        # 过滤状态
-        self._grid_filter_column = -1
-        self._grid_filter_text = ""
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -72,10 +67,6 @@ class StatsDialog(QDialog):
         self._setup_summary_tab()
         self.tabs.addTab(self.summary_tab, T("stats_tab_summary"))
 
-        # 标签页 2: 网格统计
-        self.grid_tab = QWidget()
-        self._setup_grid_tab()
-        self.tabs.addTab(self.grid_tab, T("stats_tab_grid"))
 
         # 标签页 3: 回声积分
         self.integration_tab = QWidget()
@@ -183,84 +174,6 @@ class StatsDialog(QDialog):
         schools_layout.addWidget(self.school_table)
         schools_group.setLayout(schools_layout)
         layout.addWidget(schools_group, 1)
-
-    def _setup_grid_tab(self):
-        """设置网格统计标签页"""
-        layout = QVBoxLayout(self.grid_tab)
-        layout.setSpacing(8)
-        layout.setContentsMargins(0, 8, 0, 0)
-
-        # 网格摘要
-        summary_layout = QHBoxLayout()
-
-        self.lbl_grid_info = QLabel(T("stats_grid_info"))
-        self.lbl_grid_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #4a5568;")
-        self.lbl_grid_info.setToolTip(T("stats_tab_grid"))
-
-        self.lbl_grid_stats = QLabel("--")
-        self.lbl_grid_stats.setStyleSheet("font-size: 12px; color: #718096;")
-        self.lbl_grid_stats.setToolTip(T("stats_tab_grid"))
-
-        summary_layout.addWidget(self.lbl_grid_info)
-        summary_layout.addStretch()
-        summary_layout.addWidget(self.lbl_grid_stats)
-        layout.addLayout(summary_layout)
-
-        # 网格过滤
-        filter_layout = QHBoxLayout()
-
-        self.combo_grid_filter = QComboBox()
-        self.combo_grid_filter.addItems([
-            "--", "Cell", "Ping", "Depth",
-            "Sv", "ABC", "Density", "Biomass", "Pixels"
-        ])
-        self.combo_grid_filter.setToolTip(T("stats_filter"))
-
-        self.edit_grid_filter = QLineEdit()
-        self.edit_grid_filter.setPlaceholderText(T("stats_filter_placeholder"))
-        self.edit_grid_filter.setToolTip(T("stats_filter_placeholder"))
-        self.edit_grid_filter.textChanged.connect(self._on_grid_filter_changed)
-
-        # 刷新按钮
-        self.btn_refresh = QPushButton(T("stats_refresh"))
-        self.btn_refresh.setToolTip(T("stats_refresh"))
-        self.btn_refresh.clicked.connect(self._on_refresh_clicked)
-
-        filter_layout.addWidget(QLabel(T("stats_filter")))
-        filter_layout.addWidget(self.combo_grid_filter)
-        filter_layout.addWidget(self.edit_grid_filter)
-        filter_layout.addWidget(self.btn_refresh)
-        layout.addLayout(filter_layout)
-
-        # 网格统计表
-        self.grid_table = QTableWidget()
-        self.grid_table.setColumnCount(8)
-        self.grid_table.setHorizontalHeaderLabels([
-            "Cell", "Ping", "Depth", "mean Sv", "ABC",
-            "Density", "Biomass", "Pixels"
-        ])
-        self.grid_table.horizontalHeader().setStretchLastSection(True)
-        self.grid_table.setAlternatingRowColors(True)
-        self.grid_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.grid_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.grid_table.verticalHeader().setVisible(False)
-        self.grid_table.setSortingEnabled(True)
-        self.grid_table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.grid_table.customContextMenuRequested.connect(self._on_grid_context_menu)
-
-        # 设置列宽
-        header = self.grid_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.Stretch)
-        header.setSectionResizeMode(5, QHeaderView.Stretch)
-        header.setSectionResizeMode(6, QHeaderView.Stretch)
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
-
-        layout.addWidget(self.grid_table, 1)
-
     def _setup_integration_tab(self):
         """设置回声积分标签页"""
         layout = QVBoxLayout(self.integration_tab)
@@ -512,135 +425,6 @@ class StatsDialog(QDialog):
             self.school_table.setItem(i, 5, item_centroid)
 
         self.school_table.setSortingEnabled(True)
-
-    def update_grid(self, grid_df):
-        """更新网格统计结果"""
-        if grid_df is None or grid_df.empty:
-            self.lbl_grid_info.setText(T("stats_grid_info"))
-            self.lbl_grid_stats.setText("--")
-            self.grid_table.setRowCount(0)
-            return
-
-        self._grid_df = grid_df
-        self.lbl_grid_info.setText(T("stats_grid_info_fmt", n=len(grid_df)))
-
-        # 计算统计摘要
-        stats_text = self._calculate_grid_stats(grid_df)
-        self.lbl_grid_stats.setText(stats_text)
-
-        self._populate_grid_table(grid_df)
-
-        # 自动切换到网格标签页
-        self.tabs.setCurrentIndex(1)
-
-    def _calculate_grid_stats(self, df):
-        """计算网格统计摘要"""
-        try:
-            stats_parts = []
-
-            # 有效单元数
-            valid_count = df['n_valid'].sum() if 'n_valid' in df.columns else 0
-            stats_parts.append(f"Valid: {valid_count:,}")
-
-            # 平均 Sv
-            if 'mean_sv' in df.columns:
-                mean_sv_vals = df['mean_sv'].dropna()
-                if not mean_sv_vals.empty:
-                    avg_sv = mean_sv_vals.mean()
-                    stats_parts.append(f"Sv: {avg_sv:.1f} dB")
-
-            # 密度
-            if 'density_ind_ha' in df.columns:
-                density_vals = df['density_ind_ha'].dropna()
-                if not density_vals.empty:
-                    avg_density = density_vals.mean()
-                    stats_parts.append(f"Density: {avg_density:.1f} ind/ha")
-
-            return " | ".join(stats_parts)
-        except Exception:
-            return "--"
-
-    def _populate_grid_table(self, df):
-        """填充网格表格"""
-        self.grid_table.setSortingEnabled(False)
-        self.grid_table.setRowCount(len(df))
-
-        for i, (_, row) in enumerate(df.iterrows()):
-            # 单元
-            item_cell = QTableWidgetItem(str(row.get("cell_id", "")))
-            item_cell.setTextAlignment(Qt.AlignCenter)
-            self.grid_table.setItem(i, 0, item_cell)
-
-            # Ping 范围
-            ping_start = row.get('ping_start', '')
-            ping_end = row.get('ping_end', '')
-            item_ping = QTableWidgetItem(f"{ping_start} ~ {ping_end}")
-            self.grid_table.setItem(i, 1, item_ping)
-
-            # 深度范围
-            depth_lo = row.get('depth_lo', 0)
-            depth_hi = row.get('depth_hi', 0)
-            item_depth = QTableWidgetItem(f"{depth_lo:.1f} ~ {depth_hi:.1f} m")
-            self.grid_table.setItem(i, 2, item_depth)
-
-            # mean Sv
-            mean_sv = row.get('mean_sv')
-            if mean_sv is not None and not _isnan(mean_sv):
-                item_sv = QTableWidgetItem(f"{mean_sv:.1f}")
-                item_sv.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                # 颜色编码
-                if mean_sv > -40:
-                    item_sv.setBackground(QBrush(QColor("#e6fffa")))
-                elif mean_sv < -60:
-                    item_sv.setBackground(QBrush(QColor("#fed7d7")))
-            else:
-                item_sv = QTableWidgetItem("--")
-                item_sv.setTextAlignment(Qt.AlignCenter)
-            self.grid_table.setItem(i, 3, item_sv)
-
-            # ABC
-            abc = row.get('abc')
-            if abc is not None and not _isnan(abc):
-                item_abc = QTableWidgetItem(f"{abc:.4f}")
-                item_abc.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            else:
-                item_abc = QTableWidgetItem("--")
-                item_abc.setTextAlignment(Qt.AlignCenter)
-            self.grid_table.setItem(i, 4, item_abc)
-
-            # 密度(ind/ha)
-            density = row.get('density_ind_ha')
-            if density is not None and not _isnan(density):
-                item_density = QTableWidgetItem(f"{density:.1f}")
-                item_density.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                # 颜色编码
-                if density > 1000:
-                    item_density.setBackground(QBrush(QColor("#fed7d7")))
-                elif density > 100:
-                    item_density.setBackground(QBrush(QColor("#fefcbf")))
-            else:
-                item_density = QTableWidgetItem("--")
-                item_density.setTextAlignment(Qt.AlignCenter)
-            self.grid_table.setItem(i, 5, item_density)
-
-            # 生物量(kg/ha)
-            biomass = row.get('biomass_kg_ha')
-            if biomass is not None and not _isnan(biomass):
-                item_biomass = QTableWidgetItem(f"{biomass:.2f}")
-                item_biomass.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            else:
-                item_biomass = QTableWidgetItem("--")
-                item_biomass.setTextAlignment(Qt.AlignCenter)
-            self.grid_table.setItem(i, 6, item_biomass)
-
-            # 有效像素
-            n_valid = row.get("n_valid", 0)
-            item_valid = QTableWidgetItem(str(int(n_valid)))
-            item_valid.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.grid_table.setItem(i, 7, item_valid)
-
-        self.grid_table.setSortingEnabled(True)
-
     def update_integration(self, df):
         """更新回声积分结果"""
         if df is None or df.empty:
@@ -653,18 +437,22 @@ class StatsDialog(QDialog):
         self.lbl_integration_info.setText(T("integration_info_fmt", n=len(df)))
 
         parts = []
-        if "nasc" in df.columns:
-            nasc = df["nasc"].dropna()
-            if len(nasc):
-                parts.append(f"NASC mean: {nasc.mean():.2f} m²/nmi²")
+        if "abc" in df.columns:
+            abc = df["abc"].dropna()
+            if len(abc):
+                parts.append(f"ABC: {abc.mean():.2e} m²/m²")
         if "mean_Sv" in df.columns:
             sv = df["mean_Sv"].dropna()
             if len(sv):
                 parts.append(f"Sv: {sv.mean():.1f} dB")
+        if "density_ind_ha" in df.columns:
+            den = df["density_ind_ha"].dropna()
+            if len(den):
+                parts.append(f"Density: {den.mean():.0f} ind/ha")
         self.lbl_integration_stats.setText(" | ".join(parts) if parts else "--")
 
         self._populate_integration_table(df)
-        self.tabs.setCurrentIndex(2)
+        self.tabs.setCurrentIndex(1)
 
     def _populate_integration_table(self, df):
         """填充回声积分表格"""
@@ -693,9 +481,9 @@ class StatsDialog(QDialog):
             else:
                 self.integration_table.setItem(i, 3, self._dash_item())
 
-            nasc = row.get("nasc")
-            if nasc is not None and not _isnan(nasc):
-                item = QTableWidgetItem(f"{nasc:.2f}")
+            abc = row.get("abc")
+            if abc is not None and not _isnan(abc):
+                item = QTableWidgetItem(f"{abc:.4e}")
                 item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.integration_table.setItem(i, 4, item)
             else:
@@ -714,6 +502,18 @@ class StatsDialog(QDialog):
             item_n = QTableWidgetItem(str(int(n_good)))
             item_n.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.integration_table.setItem(i, 7, item_n)
+
+            density = row.get("density_ind_ha")
+            if density is not None and not _isnan(density):
+                item_d = QTableWidgetItem(f"{density:.0f}")
+                item_d.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if density > 1000:
+                    item_d.setBackground(QBrush(QColor("#fed7d7")))
+                elif density > 100:
+                    item_d.setBackground(QBrush(QColor("#fefcbf")))
+                self.integration_table.setItem(i, 8, item_d)
+            else:
+                self.integration_table.setItem(i, 8, self._dash_item())
 
         self.integration_table.setSortingEnabled(True)
 
@@ -746,7 +546,7 @@ class StatsDialog(QDialog):
         self.lbl_single_target_stats.setText(" | ".join(parts) if parts else "--")
 
         self._populate_single_target_table(df)
-        self.tabs.setCurrentIndex(3)
+        self.tabs.setCurrentIndex(2)
 
     def _populate_single_target_table(self, df):
         """填充单体目标表格"""
@@ -834,7 +634,7 @@ class StatsDialog(QDialog):
         self.lbl_real_sed_stats.setText(" | ".join(parts) if parts else "--")
 
         self._populate_real_sed_table(df)
-        self.tabs.setCurrentIndex(4)
+        self.tabs.setCurrentIndex(3)
 
     def _populate_real_sed_table(self, df):
         """填充真实 SED 表格"""
@@ -925,12 +725,6 @@ class StatsDialog(QDialog):
         """鱼群过滤文本改变"""
         filter_column = self.combo_school_filter.currentIndex() - 1  # -1 表示全部列
         self._filter_table(self.school_table, self._schools_df, filter_column, text)
-
-    def _on_grid_filter_changed(self, text):
-        """网格过滤文本改变"""
-        filter_column = self.combo_grid_filter.currentIndex() - 1  # -1 表示全部列
-        self._filter_table(self.grid_table, self._grid_df, filter_column, text)
-
     def _filter_table(self, table, df, column_index, filter_text):
         """过滤表格数据"""
         if df is None or df.empty:
@@ -978,27 +772,6 @@ class StatsDialog(QDialog):
         menu.addAction(copy_all_action)
 
         menu.exec_(self.school_table.viewport().mapToGlobal(position))
-
-    def _on_grid_context_menu(self, position):
-        """网格表格右键菜单"""
-        menu = QMenu(self)
-
-        copy_action = QAction(T("stats_copy_selected"), self)
-        copy_action.triggered.connect(lambda: self._copy_selected_rows(self.grid_table))
-        menu.addAction(copy_action)
-
-        copy_all_action = QAction(T("stats_copy_all"), self)
-        copy_all_action.triggered.connect(lambda: self._copy_all_rows(self.grid_table))
-        menu.addAction(copy_all_action)
-
-        menu.addSeparator()
-
-        export_selected_action = QAction(T("stats_export_selected"), self)
-        export_selected_action.triggered.connect(lambda: self._export_selected_rows(self.grid_table))
-        menu.addAction(export_selected_action)
-
-        menu.exec_(self.grid_table.viewport().mapToGlobal(position))
-
     def _copy_selected_rows(self, table):
         """复制选中的行到剪贴板"""
         selected_rows = set()
@@ -1112,24 +885,18 @@ class StatsDialog(QDialog):
             else:
                 QMessageBox.warning(self, T("dialog_warning"), T("stats_no_school_data"))
         elif current_tab == 1:
-            # 导出网格数据
-            if self._grid_df is not None and not self._grid_df.empty:
-                self._export_dataframe(self._grid_df, T("stats_tab_grid"))
-            else:
-                QMessageBox.warning(self, T("dialog_warning"), T("stats_no_grid_data"))
-        elif current_tab == 2:
             # 导出回声积分数据
             if self._integration_df is not None and not self._integration_df.empty:
                 self._export_dataframe(self._integration_df, T("stats_tab_integration"))
             else:
                 QMessageBox.warning(self, T("dialog_warning"), T("stats_no_integration_data"))
-        elif current_tab == 3:
+        elif current_tab == 2:
             # 导出单体目标数据
             if self._single_target_df is not None and not self._single_target_df.empty:
                 self._export_dataframe(self._single_target_df, T("stats_tab_single_target"))
             else:
                 QMessageBox.warning(self, T("dialog_warning"), T("stats_no_single_target_data"))
-        elif current_tab == 4:
+        elif current_tab == 3:
             # 导出真实 SED 数据
             if self._real_sed_df is not None and not self._real_sed_df.empty:
                 self._export_dataframe(self._real_sed_df, T("stats_tab_real_sed"))
@@ -1153,8 +920,6 @@ class StatsDialog(QDialog):
                         self._density_df.to_excel(writer, sheet_name=T("stats_density_summary"), index=False)
                     if self._schools_df is not None and not self._schools_df.empty:
                         self._schools_df.to_excel(writer, sheet_name=T("stats_school_list"), index=False)
-                    if self._grid_df is not None and not self._grid_df.empty:
-                        self._grid_df.to_excel(writer, sheet_name=T("stats_tab_grid"), index=False)
                     if self._integration_df is not None and not self._integration_df.empty:
                         self._integration_df.to_excel(writer, sheet_name=T("stats_tab_integration"), index=False)
                     if self._single_target_df is not None and not self._single_target_df.empty:
@@ -1167,8 +932,6 @@ class StatsDialog(QDialog):
                     all_data["density"] = self._density_df.to_dict(orient='records')
                 if self._schools_df is not None and not self._schools_df.empty:
                     all_data["schools"] = self._schools_df.to_dict(orient='records')
-                if self._grid_df is not None and not self._grid_df.empty:
-                    all_data["grid"] = self._grid_df.to_dict(orient='records')
                 if self._integration_df is not None and not self._integration_df.empty:
                     all_data["integration"] = self._integration_df.to_dict(orient='records')
                 if self._single_target_df is not None and not self._single_target_df.empty:
@@ -1190,19 +953,11 @@ class StatsDialog(QDialog):
         if current_tab == 0:
             self._copy_all_rows(self.school_table)
         elif current_tab == 1:
-            self._copy_all_rows(self.grid_table)
-        elif current_tab == 2:
             self._copy_all_rows(self.integration_table)
-        elif current_tab == 3:
+        elif current_tab == 2:
             self._copy_all_rows(self.single_target_table)
-        elif current_tab == 4:
+        elif current_tab == 3:
             self._copy_all_rows(self.real_sed_table)
-
-    def _on_refresh_clicked(self):
-        """刷新数据"""
-        if self._grid_df is not None and not self._grid_df.empty:
-            self._populate_grid_table(self._grid_df)
-
     def _export_dataframe(self, df, default_name):
         """导出 DataFrame 到文件"""
         file_path, _selected_filter = QFileDialog.getSaveFileName(

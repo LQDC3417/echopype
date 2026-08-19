@@ -137,31 +137,28 @@ class TestFR06_DensityEstimation:
 # FR-07: 网格分析
 # ═══════════════════════════════════════════════════════
 
-class TestFR07_GridAnalysis:
-    def test_create_grid(self, ds_Sv):
-        from src.core.grid import create_grid
-        cells = create_grid(ds_Sv, surface_depth_m=2.0, vertical_interval_m=2.0, horizontal_interval=100)
-        assert isinstance(cells, list)
-        assert len(cells) > 0
-        assert "ping_start" in cells[0]
-        assert "depth_lo" in cells[0]
+class TestFR07_Integration:
+    def test_create_integration_grid_pings(self, ds_Sv):
+        from src.core.integration import create_integration_grid, ESUType
+        grid = create_integration_grid(ds_Sv, esu_type=ESUType.PINGS, esu_size=100, layer_width=2.0, surface_depth_m=2.0)
+        assert grid.n_intervals > 0
+        assert grid.n_layers > 0
+        assert len(grid.ping_start) > 0
+        assert len(grid.depth_start) > 0
 
-    def test_compute_grid_density(self, ds_Sv):
-        from src.core.grid import create_grid, compute_grid_density
-        cells = create_grid(ds_Sv, surface_depth_m=2.0, vertical_interval_m=2.0, horizontal_interval=100)
-        result = compute_grid_density(ds_Sv, cells, {"density": {"ts_default": -30.0}})
-        assert isinstance(result, pd.DataFrame)
-        assert "mean_sv" in result.columns
+    def test_integrate_abc_density(self, ds_Sv):
+        from src.core.integration import create_integration_grid, integrate, ESUType
+        grid = create_integration_grid(ds_Sv, esu_type=ESUType.PINGS, esu_size=100, layer_width=2.0, surface_depth_m=2.0)
+        result = integrate(ds_Sv, grid, ts_default_db=-30.0)
+        df = result.to_dataframe()
+        assert isinstance(df, pd.DataFrame)
+        assert "abc" in df.columns
+        assert "density_ind_ha" in df.columns
 
-    def test_grid_ping_method(self, ds_Sv):
-        from src.core.grid import create_grid
-        cells = create_grid(ds_Sv, surface_depth_m=2.0, vertical_interval_m=5.0, horizontal_interval=50, method="ping")
-        assert len(cells) > 0
-
-    def test_grid_distance_method(self, ds_Sv):
-        from src.core.grid import create_grid
-        cells = create_grid(ds_Sv, surface_depth_m=2.0, vertical_interval_m=5.0, horizontal_interval=500, method="distance")
-        assert len(cells) > 0
+    def test_integration_distance_method(self, ds_Sv):
+        from src.core.integration import create_integration_grid, ESUType
+        grid = create_integration_grid(ds_Sv, esu_type=ESUType.DISTANCE, esu_size=100, layer_width=5.0, surface_depth_m=2.0)
+        assert grid.n_intervals > 0
 
 
 # ═══════════════════════════════════════════════════════
@@ -220,13 +217,13 @@ class TestFR10_GUI:
         from src.gui.workers import (
             LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
             DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker,
-            GridWorker, BatchProcessWorker, QualityCheckWorker,
+            IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
             MultifreqAnalysisWorker,
         )
         assert all(w is not None for w in [
             LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
             DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker,
-            GridWorker, BatchProcessWorker, QualityCheckWorker,
+            IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
             MultifreqAnalysisWorker,
         ])
 

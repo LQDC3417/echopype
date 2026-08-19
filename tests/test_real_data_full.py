@@ -154,24 +154,24 @@ def run_all_tests():
         report("estimate_density", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
-    # 8. 网格分析 (FR-07)
+    # 8. 回声积分（含 ABC/密度，替代原网格分析 FR-07）
     # ═══════════════════════════════════════════════════════
-    print("\n[8] 网格分析 (FR-07)")
+    print("\n[8] 回声积分 (ABC + 密度)")
     try:
-        from src.core.grid import create_grid, compute_grid_density
-        cells = create_grid(ds_Sv, surface_depth_m=2.0, vertical_interval_m=2.0, horizontal_interval=100)
-        report("create_grid", "OK", f"网格数: {len(cells)}")
+        from src.core.integration import create_integration_grid, integrate, ESUType
+        grid = create_integration_grid(ds_Sv, esu_type=ESUType.PINGS, esu_size=100, layer_width=2.0, surface_depth_m=2.0)
+        report("create_integration_grid", "OK", f"区间×层: {grid.n_intervals}×{grid.n_layers}")
 
-        grid_df = compute_grid_density(ds_Sv, cells, config)
-        cols = list(grid_df.columns)
-        has_lat = "latitude" in cols
-        has_lon = "longitude" in cols
+        result = integrate(ds_Sv, grid, min_threshold=-70, max_threshold=0, ts_default_db=-30.0)
+        df = result.to_dataframe()
+        cols = list(df.columns)
         has_abc = "abc" in cols
-        has_cell_id = "cell_id" in cols
-        report("compute_grid_density", "OK",
-               f"cell_id={has_cell_id}, lat={has_lat}, lon={has_lon}, abc={has_abc}, 行数={len(grid_df)}")
+        has_density = "density_ind_ha" in cols
+        has_mean = "mean_Sv" in cols
+        report("integrate", "OK",
+               f"abc={has_abc}, density={has_density}, mean_Sv={has_mean}, 行数={len(df)}")
     except Exception:
-        report("grid_analysis", "FAIL", traceback.format_exc())
+        report("integration", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
     # 9. 单体目标检测
@@ -243,7 +243,7 @@ def run_all_tests():
     print("\n[13] GUI 模块导入")
     gui_modules = [
         ("main_window", "from src.gui.main_window import MainWindow"),
-        ("workers", "from src.gui.workers import LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker, DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker, GridWorker, BatchProcessWorker, QualityCheckWorker, MultifreqAnalysisWorker, SingleTargetWorker, SvStatsWorker, TransectSplitWorker"),
+        ("workers", "from src.gui.workers import LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker, DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker, IntegrationWorker, BatchProcessWorker, QualityCheckWorker, MultifreqAnalysisWorker, SingleTargetWorker, SvStatsWorker, TransectSplitWorker"),
         ("property_panel", "from src.gui.property_panel import PropertyPanel"),
         ("opengl_renderer", "from src.viz.opengl_renderer import EchogramRenderer"),
         ("theme", "from src.gui.theme import DARK_THEME"),

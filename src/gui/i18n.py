@@ -212,24 +212,9 @@ _TEXTS = {
     "btn_compute_density": {"zh": "计算密度", "en": "Compute Density"},
 
     # 网格分析
-    "grid_group": {"zh": "网格分析", "en": "Grid Analysis"},
-    "grid_vertical_interval": {"zh": "垂直间隔(m):", "en": "Vertical Interval(m):"},
-    "grid_horizontal_interval": {"zh": "水平间隔:", "en": "Horizontal Interval:"},
-    "grid_segment_method": {"zh": "分段方式:", "en": "Segment Method:"},
-    "grid_method_ping": {"zh": "Ping", "en": "Ping"},
-    "grid_method_distance": {"zh": "距离", "en": "Distance"},
-    "grid_distance_unit": {"zh": "距离单位:", "en": "Distance Unit:"},
-    "grid_stats_group": {"zh": "统计指标", "en": "Statistics"},
-    "grid_stat_mean_sv": {"zh": "平均 Sv", "en": "Mean Sv"},
     "grid_stat_abc": {"zh": "ABC (面积背散射系数)", "en": "ABC (Area Backscattering Coeff.)"},
     "grid_stat_density": {"zh": "密度 (ind/ha)", "en": "Density (ind/ha)"},
     "grid_stat_biomass": {"zh": "生物量 (kg/ha)", "en": "Biomass (kg/ha)"},
-    "grid_stat_valid_pixels": {"zh": "有效像素数", "en": "Valid Pixels"},
-    "grid_output_group": {"zh": "输出设置", "en": "Output Settings"},
-    "grid_output_format": {"zh": "输出格式:", "en": "Output Format:"},
-    "grid_include_metadata": {"zh": "包含元数据", "en": "Include Metadata"},
-    "grid_include_summary": {"zh": "包含摘要统计", "en": "Include Summary"},
-    "btn_grid_analysis": {"zh": "网格分析", "en": "Grid Analysis"},
     "btn_statistics": {"zh": "统计结果", "en": "Statistics"},
 
     # 其他功能按钮
@@ -245,12 +230,14 @@ _TEXTS = {
     "integration_group": {"zh": "回声积分", "en": "Echo Integration"},
     "integration_esu_type": {"zh": "ESU 类型:", "en": "ESU Type:"},
     "integration_esu_pings": {"zh": "Ping 数", "en": "Pings"},
-    "integration_esu_seconds": {"zh": "秒", "en": "Seconds"},
-    "integration_esu_nmi": {"zh": "海里", "en": "Nautical Miles"},
+    "integration_esu_distance": {"zh": "GPS 距离 (m)", "en": "GPS Distance (m)"},
     "integration_esu_size": {"zh": "ESU 大小:", "en": "ESU Size:"},
+    "integration_ts_default": {"zh": "TS 默认值:", "en": "TS Default:"},
     "integration_layer_width": {"zh": "垂直层宽:", "en": "Layer Width:"},
     "integration_min_threshold": {"zh": "最小 Sv 阈值:", "en": "Min Sv Threshold:"},
     "integration_max_threshold": {"zh": "最大 Sv 阈值:", "en": "Max Sv Threshold:"},
+    "integration_abc": {"zh": "ABC", "en": "ABC"},
+    "integration_density": {"zh": "密度", "en": "Density"},
     "btn_integration": {"zh": "回声积分", "en": "Echo Integration"},
     "msg_integration_running": {"zh": "回声积分中...", "en": "Echo integration..."},
     "msg_integration_done": {"zh": "回声积分完成: {n} 个单元", "en": "Echo integration done: {n} cells"},
@@ -258,8 +245,8 @@ _TEXTS = {
     "integration_info": {"zh": "回声积分: --", "en": "Integration: --"},
     "integration_info_fmt": {"zh": "回声积分: {n} 个单元", "en": "Integration: {n} cells"},
     "integration_headers": {
-        "zh": ["ESU", "Ping 范围", "深度范围", "平均 Sv", "NASC", "最小 Sv", "最大 Sv", "有效样本"],
-        "en": ["ESU", "Ping Range", "Depth Range", "Mean Sv", "NASC", "Min Sv", "Max Sv", "Good Samples"],
+        "zh": ["ESU", "Ping 范围", "深度范围", "平均 Sv", "ABC", "最小 Sv", "最大 Sv", "有效样本", "密度(ind/ha)"],
+        "en": ["ESU", "Ping Range", "Depth Range", "Mean Sv", "ABC", "Min Sv", "Max Sv", "Good Samples", "Density (ind/ha)"],
     },
     "stats_no_integration_data": {"zh": "没有回声积分数据可导出", "en": "No integration data to export"},
 
@@ -315,11 +302,8 @@ _TEXTS = {
     # ── 统计对话框 ──
     "stats_title": {"zh": "统计结果", "en": "Statistics"},
     "stats_tab_summary": {"zh": "鱼群 / 密度", "en": "Schools / Density"},
-    "stats_tab_grid": {"zh": "网格统计", "en": "Grid Statistics"},
     "stats_density_summary": {"zh": "密度摘要", "en": "Density Summary"},
     "stats_school_list": {"zh": "鱼群列表", "en": "School List"},
-    "stats_grid_info": {"zh": "网格: --", "en": "Grid: --"},
-    "stats_grid_info_fmt": {"zh": "网格: {n} 个单元", "en": "Grid: {n} cells"},
     "stats_filter": {"zh": "过滤:", "en": "Filter:"},
     "stats_filter_placeholder": {"zh": "输入过滤文本...", "en": "Enter filter text..."},
     "stats_refresh": {"zh": "刷新", "en": "Refresh"},
@@ -337,13 +321,8 @@ _TEXTS = {
     "stats_no_data_warn": {"zh": "没有 {name} 数据可导出", "en": "No {name} data to export"},
     "stats_select_rows_warn": {"zh": "请先选择要导出的行", "en": "Please select rows to export first"},
     "stats_no_school_data": {"zh": "没有鱼群数据可导出", "en": "No school data to export"},
-    "stats_no_grid_data": {"zh": "没有网格数据可导出", "en": "No grid data to export"},
 
     # 网格统计表头
-    "grid_headers": {
-        "zh": ["单元", "Ping 范围", "深度范围", "平均 Sv", "ABC", "密度(ind/ha)", "生物量(kg/ha)", "有效像素"],
-        "en": ["Cell", "Ping Range", "Depth Range", "Mean Sv", "ABC", "Density(ind/ha)", "Biomass(kg/ha)", "Valid Pixels"],
-    },
     # 鱼群统计表头
     "school_headers": {
         "zh": ["ID", "Ping 范围", "深度范围", "面积", "平均 Sv", "中心深度"],
@@ -470,7 +449,6 @@ _TEXTS = {
     "msg_bottom_detected": {"zh": "底部检测完成 — 分析区域已启用，已进入绘制底线模式", "en": "Bottom detected — analysis region enabled, entered draw-bottom mode"},
     "msg_schools_detected": {"zh": "鱼群检测完成: {n} 个鱼群像素", "en": "School detection done: {n} pixels"},
     "msg_density_computed": {"zh": "密度计算完成", "en": "Density computed"},
-    "msg_grid_done": {"zh": "网格分析完成: {n} 个单元", "en": "Grid analysis done: {n} cells"},
     "msg_export_done": {"zh": "导出完成: {n} 个文件 → {dir}", "en": "Export done: {n} files → {dir}"},
     "msg_batch_processing": {"zh": "批量处理 {n} 个文件...", "en": "Batch processing {n} files..."},
     "msg_batch_done": {"zh": "批量处理完成: 成功 {ok}, 失败 {fail}", "en": "Batch done: {ok} success, {fail} failed"},
@@ -495,7 +473,6 @@ _TEXTS = {
     "msg_bottom_detection": {"zh": "检测底部 (方法: {method})...", "en": "Detecting bottom (method: {method})..."},
     "msg_detecting_schools": {"zh": "检测鱼群...", "en": "Detecting schools..."},
     "msg_computing_density": {"zh": "计算密度...", "en": "Computing density..."},
-    "msg_grid_analysis": {"zh": "网格分析...", "en": "Grid analysis..."},
     "msg_quality_checking": {"zh": "正在检查数据质量...", "en": "Checking data quality..."},
     "msg_multifreq_analyzing": {"zh": "正在分析多频率通道...", "en": "Analyzing multi-frequency channels..."},
     "msg_single_target": {"zh": "正在检测单体目标...", "en": "Detecting single targets..."},
@@ -518,9 +495,6 @@ _TEXTS = {
     "quality_report_bottom": {"zh": "底线: {n} 个有效 ping", "en": "Bottom: {n} valid pings"},
 
     # ── 网格分析错误 ──
-    "grid_error_vertical": {"zh": "垂直间隔必须大于0", "en": "Vertical interval must be > 0"},
-    "grid_error_horizontal": {"zh": "水平间隔必须大于0", "en": "Horizontal interval must be > 0"},
-    "grid_error_no_metrics": {"zh": "请至少选择一个统计指标", "en": "Please select at least one metric"},
 
     # ── 管线步骤名 ──
     "pipeline_sv": {"zh": "计算 Sv", "en": "Compute Sv"},
@@ -561,22 +535,6 @@ _TEXTS = {
     "quality_bottom_nan_high": {"zh": "底线 NaN 比例 {ratio:.1%} 过高（>30%）", "en": "Bottom NaN ratio {ratio:.1%} too high (>30%)"},
 
     # ── 网格分析错误/进度 ──
-    "grid_cancelled": {"zh": "网格分析已取消: {error}", "en": "Grid analysis cancelled: {error}"},
-    "grid_import_error": {"zh": "缺少必要的模块: {error}\n请检查 echopype 和相关依赖是否正确安装", "en": "Missing required module: {error}\nPlease check echopype and dependencies are correctly installed"},
-    "grid_key_error": {"zh": "配置参数错误: 缺少必要的参数 {error}\n请检查网格配置是否完整", "en": "Config error: missing required parameter {error}\nPlease check grid configuration"},
-    "grid_value_error": {"zh": "参数值错误: {error}\n请检查输入参数是否有效", "en": "Parameter value error: {error}\nPlease check input parameters"},
-    "grid_memory_error": {"zh": "内存不足：请尝试减小网格间隔或使用更小的数据集", "en": "Out of memory: try reducing grid interval or using a smaller dataset"},
-    "grid_unexpected_error": {"zh": "网格分析过程中发生错误: {error}\n\n详细错误信息:\n{detail}", "en": "Grid analysis error: {error}\n\nDetail:\n{detail}"},
-    "grid_validate_empty_ds": {"zh": "输入数据集为空", "en": "Input dataset is empty"},
-    "grid_validate_negative_surface": {"zh": "表面深度不能为负数", "en": "Surface depth cannot be negative"},
-    "grid_validate_missing_vertical": {"zh": "缺少垂直间隔参数 (vertical_interval_m)", "en": "Missing vertical interval parameter (vertical_interval_m)"},
-    "grid_validate_missing_horizontal": {"zh": "缺少水平间隔参数 (horizontal_interval)", "en": "Missing horizontal interval parameter (horizontal_interval)"},
-    "grid_validate_missing_method": {"zh": "缺少水平分段方法参数 (horizontal_method)", "en": "Missing horizontal method parameter (horizontal_method)"},
-    "grid_validate_vertical_zero": {"zh": "垂直间隔必须大于0", "en": "Vertical interval must be > 0"},
-    "grid_validate_horizontal_zero": {"zh": "水平间隔必须大于0", "en": "Horizontal interval must be > 0"},
-    "grid_validate_method_invalid": {"zh": "水平分段方法必须是 'ping' 或 'distance'", "en": "Horizontal method must be 'ping' or 'distance'"},
-    "grid_validate_missing_ts": {"zh": "缺少默认目标强度参数 (ts_default)", "en": "Missing default target strength parameter (ts_default)"},
-    "grid_validate_missing_weight": {"zh": "缺少平均体重参数 (avg_weight_kg)", "en": "Missing average weight parameter (avg_weight_kg)"},
     "batch_file_fail": {"zh": "✗ 失败 [{done}/{total}]: {name}", "en": "✗ Fail [{done}/{total}]: {name}"},
     "batch_file_ok": {"zh": "✓ 完成 [{done}/{total}]: {name}", "en": "✓ Done [{done}/{total}]: {name}"},
 

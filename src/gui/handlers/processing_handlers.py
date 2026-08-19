@@ -14,7 +14,6 @@ from src.gui.workers import (
     DetectSchoolsWorker,
     DetectSeafloorWorker,
     ComputeDensityWorker as DensityWorker,
-    GridWorker,
     IntegrationWorker,
     NoiseRemovalWorker,
 )
@@ -349,52 +348,6 @@ class ProcessingMixin:
         self.stats_dialog.raise_()
         self.stats_dialog.activateWindow()
 
-    def _run_grid_analysis(self):
-        if self._ds_Sv is None or self._config is None:
-            QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
-            return
-        grid_cfg = self.property_panel.processing.get_grid_config()
-        density_cfg = self.property_panel.processing.get_density_config()
-
-        # 统一使用 _get_analysis_ds() 获取裁剪后的数据（表线→底线区域）
-        ds_for_grid = self._get_analysis_ds()
-        if ds_for_grid is None:
-            QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
-            return
-
-        # 计算底线深度（米）：直接从 bottom_depth 变量取最大正值
-        bottom_depth_m = None
-        if "bottom_depth" in ds_for_grid:
-            bd = ds_for_grid["bottom_depth"].values
-            if bd.ndim > 1:
-                bd = bd.flatten()
-            valid_bd = bd[np.isfinite(bd)]
-            positive_bd = valid_bd[valid_bd > 0]
-            if len(positive_bd) > 0:
-                bottom_depth_m = float(np.max(positive_bd))
-            elif len(valid_bd) > 0:
-                bottom_depth_m = float(np.max(valid_bd))
-
-        self.statusbar.show_progress(T("msg_grid_analysis"))
-        self._ds_for_grid = ds_for_grid
-        self._current_worker = GridWorker(
-            ds_for_grid, self._surface_depth_m, grid_cfg, density_cfg,
-            bottom_depth_m=bottom_depth_m
-        )
-        self._current_worker.finished.connect(self._on_grid_done)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
-
-    def _on_grid_done(self, df):
-        self._grid_df = df
-        self.stats_dialog.update_grid(df)
-        self.statusbar.hide_progress()
-        self.statusbar.set_status(T("msg_grid_done", n=len(df)))
-        # 网格颜色叠加到回波图（使用裁剪后数据，确保坐标一致）
-        self.echogram.set_grid_data(df, self._ds_for_grid, color_by="mean_sv")
-        # 显示统计对话框
-        self._show_stats()
 
     def _run_integration(self):
         """运行回声积分分析"""
@@ -438,13 +391,19 @@ class ProcessingMixin:
         self._current_worker.start()
 
     def _on_integration_done(self, result):
-        """回声积分完成 → 展示结果表格"""
+        """回声积分完成 → 展示结果表格 + echogram 网格叠加"""
         self._integration_result = result
         self.statusbar.hide_progress()
         df = result.to_dataframe()
         self._integration_df = df
         self.stats_dialog.update_integration(df)
         self.statusbar.set_status(T("msg_integration_done", n=len(df)))
+        # echogram 网格叠加（按 mean_Sv 着色，列名映射到渲染器期望格式）
+        try:
+            overlay_df = df.rename(columns={"depth_start": "depth_lo", "depth_end": "depth_hi"})
+            self.echogram.set_grid_data(overlay_df, self._ds_for_integration, color_by="mean_Sv")
+        except Exception:
+            logger.exception("积分结果叠加到 echogram 失败")
         self._show_stats()
 
     # ═══════════════════════════════════════════════════════

@@ -1,7 +1,7 @@
 """后台处理工作线程（增强版）
 
 功能增强：
-- GridWorker 添加更详细的进度显示
+- IntegrationWorker 支持 pings/distance EDSU 与 ABC 积分
 - 改进错误处理，提供更友好的错误信息
 - 添加进度百分比信号
 - 支持取消操作
@@ -208,194 +208,6 @@ class ComputeDensityWorker(QThread):
             self.finished.emit(df)
         except Exception:
             self.error.emit(traceback.format_exc())
-
-
-class GridWorker(QThread):
-    """网格化分析（增强版）
-
-    功能增强：
-    - 添加详细的进度显示和百分比
-    - 改进错误处理，提供更友好的错误信息
-    - 支持取消操作
-    - 添加统计指标选择和输出格式支持
-    """
-
-    # 信号
-    finished = Signal(object)  # DataFrame
-    error = Signal(str)
-    progress = Signal(str)
-    progress_percent = Signal(int)  # 进度百分比 (0-100)
-    status_changed = Signal(str)  # 状态变化
-
-    def __init__(self, ds_Sv, surface_depth_m, grid_config, density_config, bottom_depth_m=None):
-        super().__init__()
-        self.ds_Sv = ds_Sv
-        self.surface_depth_m = surface_depth_m
-        self.grid_config = grid_config
-        self.density_config = density_config
-        self.bottom_depth_m = bottom_depth_m
-        self._cancelled = False
-        self._current_step = ""
-        self._total_steps = 4  # 总步骤数
-
-    def cancel(self):
-        """取消网格分析"""
-        self._cancelled = True
-        self.status_changed.emit(T("msg_processing"))
-
-    def _check_cancelled(self):
-        """检查是否已取消"""
-        if self._cancelled:
-            raise InterruptedError("Cancelled")
-
-    def _emit_progress(self, step_name, step_number):
-        """发射进度信号"""
-        self._current_step = step_name
-        progress_percent = int((step_number / self._total_steps) * 100)
-        self.progress.emit(step_name)
-        self.progress_percent.emit(progress_percent)
-        self.status_changed.emit(f"{step_number}/{self._total_steps}: {step_name}")
-
-    def run(self):
-        """执行网格分析"""
-        try:
-            # 导入必要的模块
-            from src.core.grid import compute_grid_density, create_grid
-
-            # 步骤 1: 参数验证
-            self._emit_progress(T("msg_processing"), 1)
-            self._check_cancelled()
-            self._validate_parameters()
-
-            # 步骤 2: 创建网格
-            self._emit_progress(T("msg_grid_analysis"), 2)
-            self._check_cancelled()
-
-            grid_cells = create_grid(
-                self.ds_Sv,
-                surface_depth_m=self.surface_depth_m,
-                vertical_interval_m=self.grid_config["vertical_interval_m"],
-                horizontal_interval=self.grid_config["horizontal_interval"],
-                method=self.grid_config["horizontal_method"],
-                max_depth=self.bottom_depth_m,
-            )
-
-            # 验证网格创建结果
-            if not grid_cells:
-                raise ValueError("Grid creation failed")
-
-            self.progress.emit(f"Grid: {len(grid_cells)}")
-
-            # 步骤 3: 计算网格统计
-            self._emit_progress(T("msg_grid_analysis"), 3)
-            self._check_cancelled()
-
-            # 准备配置
-            config = {"density": self.density_config}
-
-            # 添加选中的统计指标
-            if "selected_metrics" in self.grid_config:
-                config["selected_metrics"] = self.grid_config["selected_metrics"]
-
-            # 添加输出格式
-            if "output_format" in self.grid_config:
-                config["output_format"] = self.grid_config["output_format"]
-
-            # 添加元数据选项
-            if "include_metadata" in self.grid_config:
-                config["include_metadata"] = self.grid_config["include_metadata"]
-
-            df = compute_grid_density(self.ds_Sv, grid_cells, config, bottom_depth_m=self.bottom_depth_m)
-
-            # 步骤 4: 完成
-            self._emit_progress(T("dialog_success"), 4)
-            self._check_cancelled()
-
-            # 验证结果
-            if df is None:
-                raise ValueError("Grid stats returned empty")
-
-            if df.empty:
-                logger.warning("网格统计结果为空，可能是因为数据不足或参数设置不当")
-
-            self.finished.emit(df)
-
-        except InterruptedError as e:
-            # 用户取消
-            logger.info(f"网格分析被取消: {e!s}")
-            self.error.emit(T("grid_cancelled", error=str(e)))
-
-        except ImportError as e:
-            # 导入错误
-            error_msg = T("grid_import_error", error=str(e))
-            logger.error(error_msg)
-            self.error.emit(error_msg)
-
-        except KeyError as e:
-            # 配置键错误
-            error_msg = T("grid_key_error", error=str(e))
-            logger.error(error_msg)
-            self.error.emit(error_msg)
-
-        except ValueError as e:
-            # 值错误
-            error_msg = T("grid_value_error", error=str(e))
-            logger.error(error_msg)
-            self.error.emit(error_msg)
-
-        except MemoryError:
-            # 内存错误
-            error_msg = T("grid_memory_error")
-            logger.error(error_msg)
-            self.error.emit(error_msg)
-
-        except Exception as e:
-            # 其他错误
-            error_msg = T("grid_unexpected_error", error=str(e), detail=traceback.format_exc())
-            logger.error(error_msg)
-            self.error.emit(error_msg)
-
-    def _validate_parameters(self):
-        """验证参数有效性"""
-        # 验证数据集
-        if self.ds_Sv is None:
-            raise ValueError(T("grid_validate_empty_ds"))
-
-        # 验证表面深度
-        if self.surface_depth_m < 0:
-            raise ValueError(T("grid_validate_negative_surface"))
-
-        # 验证网格配置
-        if "vertical_interval_m" not in self.grid_config:
-            raise KeyError(T("grid_validate_missing_vertical"))
-
-        if "horizontal_interval" not in self.grid_config:
-            raise KeyError(T("grid_validate_missing_horizontal"))
-
-        if "horizontal_method" not in self.grid_config:
-            raise KeyError(T("grid_validate_missing_method"))
-
-        # 验证垂直间隔
-        v_interval = self.grid_config["vertical_interval_m"]
-        if v_interval <= 0:
-            raise ValueError(T("grid_validate_vertical_zero"))
-
-        # 验证水平间隔
-        h_interval = self.grid_config["horizontal_interval"]
-        if h_interval <= 0:
-            raise ValueError(T("grid_validate_horizontal_zero"))
-
-        # 验证水平分段方法
-        h_method = self.grid_config["horizontal_method"]
-        if h_method not in ["ping", "distance"]:
-            raise ValueError(T("grid_validate_method_invalid"))
-
-        # 验证密度配置
-        if "ts_default" not in self.density_config:
-            raise KeyError(T("grid_validate_missing_ts"))
-
-        if "avg_weight_kg" not in self.density_config:
-            raise KeyError(T("grid_validate_missing_weight"))
 
 
 class BatchProcessWorker(QThread):
@@ -705,6 +517,7 @@ class IntegrationWorker(QThread):
             layer_width = float(cfg.get("layer_width", 5.0))
             min_threshold = float(cfg.get("min_threshold", -70.0))
             max_threshold = float(cfg.get("max_threshold", 0.0))
+            ts_default = float(cfg.get("ts_default", -30.0))
 
             self.progress.emit(T("msg_integration_running"))
             grid = create_integration_grid(
@@ -726,6 +539,7 @@ class IntegrationWorker(QThread):
                 min_threshold=min_threshold,
                 max_threshold=max_threshold,
                 exclude_below_bottom=False,
+                ts_default_db=ts_default,
                 progress_callback=_progress_cb,
             )
             self.finished.emit(result)

@@ -320,7 +320,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.property_panel.detect_schools_clicked.connect(self._detect_schools)
         self.property_panel.compute_density_clicked.connect(self._compute_density)
         self.property_panel.stats_clicked.connect(self._show_stats)
-        self.property_panel.grid_clicked.connect(self._run_grid_analysis)
         self.property_panel.noise_params_changed.connect(self._on_noise_params_changed)
         self.property_panel.quality_check_clicked.connect(self._run_quality_check)
         self.property_panel.multifreq_clicked.connect(self._run_multifreq_analysis)
@@ -362,6 +361,11 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
                 "mincan": [3, 10], "maxlink": [3, 15], "minsho": [3, 15],
             },
             "density": {"ts_default": -30.0},
+            "integration": {
+                "esu_type": "pings", "esu_size": 500,
+                "layer_width": 5.0, "min_threshold": -70.0,
+                "max_threshold": 0.0, "ts_default": -30.0,
+            },
             "single_target": {
                 "sv_threshold_db": -50.0, "min_area": 3, "max_area": 500,
             },
@@ -397,6 +401,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
 
     # -- Mixin methods split into handlers/ modules --
     # FileMixin:       file import, batch, cache, switch, variable list
-    # ProcessingMixin:  Sv, noise, bottom, schools, density, grid
+    # ProcessingMixin:  Sv, noise, bottom, schools, density, integration
     # AnalysisMixin:    quality, multifreq, single target, Sv stats, transect
     # InteractionMixin: mouse, region, undo/redo, view, export

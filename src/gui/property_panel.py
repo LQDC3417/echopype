@@ -15,12 +15,10 @@ from pathlib import Path
 import yaml
 from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -115,7 +113,6 @@ class ProcessingTab(QWidget):
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
     compute_density_clicked = Signal()
-    grid_clicked = Signal()
     stats_clicked = Signal()
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
@@ -308,109 +305,6 @@ class ProcessingTab(QWidget):
 
         self.btn_compute_density.clicked.connect(self.compute_density_clicked)
 
-        # ── 网格分析（增强版）──
-        grid_group = QGroupBox(T("grid_group"))
-        grid_layout = QVBoxLayout()
-        grid_layout.setSpacing(8)
-        grid_layout.setContentsMargins(8, 12, 8, 8)
-
-        grid_params_layout = QGridLayout()
-        grid_params_layout.setSpacing(6)
-
-        # 垂直间隔
-        lbl_v_interval = QLabel(T("grid_vertical_interval"))
-        self.spin_grid_v = QDoubleSpinBox()
-        self.spin_grid_v.setRange(0.1, 100.0)
-        self.spin_grid_v.setValue(2.0)
-        self.spin_grid_v.setSingleStep(0.5)
-        self.spin_grid_v.setDecimals(1)
-        grid_params_layout.addWidget(lbl_v_interval, 0, 0)
-        grid_params_layout.addWidget(self.spin_grid_v, 0, 1)
-
-        # 水平间隔
-        lbl_h_interval = QLabel(T("grid_horizontal_interval"))
-        self.spin_grid_h = QSpinBox()
-        self.spin_grid_h.setRange(1, 10000)
-        self.spin_grid_h.setValue(100)
-        grid_params_layout.addWidget(lbl_h_interval, 1, 0)
-        grid_params_layout.addWidget(self.spin_grid_h, 1, 1)
-
-        # 水平分段方式
-        lbl_h_method = QLabel(T("grid_segment_method"))
-        self.combo_grid_h_method = QComboBox()
-        self.combo_grid_h_method.addItems([T("grid_method_ping"), T("grid_method_distance")])
-        grid_params_layout.addWidget(lbl_h_method, 2, 0)
-        grid_params_layout.addWidget(self.combo_grid_h_method, 2, 1)
-
-        # 距离单位
-        lbl_distance_unit = QLabel(T("grid_distance_unit"))
-        self.combo_distance_unit = QComboBox()
-        self.combo_distance_unit.addItems(["m", "km", "nm"])
-        self.combo_distance_unit.setEnabled(False)
-        grid_params_layout.addWidget(lbl_distance_unit, 3, 0)
-        grid_params_layout.addWidget(self.combo_distance_unit, 3, 1)
-
-        grid_layout.addLayout(grid_params_layout)
-
-        # 统计指标选择
-        stats_group = QGroupBox(T("grid_stats_group"))
-        stats_layout = QVBoxLayout()
-        stats_layout.setSpacing(4)
-        stats_layout.setContentsMargins(8, 12, 8, 8)
-
-        self.chk_mean_sv = QCheckBox(T("grid_stat_mean_sv"))
-        self.chk_mean_sv.setChecked(True)
-        self.chk_abc = QCheckBox(T("grid_stat_abc"))
-        self.chk_abc.setChecked(True)
-        self.chk_density = QCheckBox(T("grid_stat_density"))
-        self.chk_density.setChecked(True)
-        self.chk_biomass = QCheckBox(T("grid_stat_biomass"))
-        self.chk_biomass.setChecked(True)
-        self.chk_valid_pixels = QCheckBox(T("grid_stat_valid_pixels"))
-        self.chk_valid_pixels.setChecked(True)
-
-        stats_layout.addWidget(self.chk_mean_sv)
-        stats_layout.addWidget(self.chk_abc)
-        stats_layout.addWidget(self.chk_density)
-        stats_layout.addWidget(self.chk_biomass)
-        stats_layout.addWidget(self.chk_valid_pixels)
-        stats_group.setLayout(stats_layout)
-        grid_layout.addWidget(stats_group)
-
-        # 输出格式选择
-        output_group = QGroupBox(T("grid_output_group"))
-        output_layout = QFormLayout()
-        output_layout.setSpacing(6)
-        output_layout.setContentsMargins(8, 12, 8, 8)
-
-        self.combo_output_format = QComboBox()
-        self.combo_output_format.addItems(["DataFrame", "CSV", "Excel", "JSON"])
-
-        self.chk_include_metadata = QCheckBox(T("grid_include_metadata"))
-        self.chk_include_metadata.setChecked(True)
-        self.chk_include_summary = QCheckBox(T("grid_include_summary"))
-        self.chk_include_summary.setChecked(True)
-
-        output_layout.addRow(T("grid_output_format"), self.combo_output_format)
-        output_layout.addRow(self.chk_include_metadata)
-        output_layout.addRow(self.chk_include_summary)
-        output_group.setLayout(output_layout)
-        grid_layout.addWidget(output_group)
-
-        # 网格分析按钮
-        self.btn_grid = QPushButton(T("btn_grid_analysis"))
-        self.btn_grid.setProperty("cssClass", "primary")
-        self.btn_grid.clicked.connect(self._on_grid_clicked)
-
-        self.btn_stats = QPushButton(T("btn_statistics"))
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addWidget(self.btn_grid)
-        btn_layout.addWidget(self.btn_stats)
-        grid_layout.addLayout(btn_layout)
-
-        grid_group.setLayout(grid_layout)
-        layout.addWidget(grid_group)
 
         # ── 回声积分 ──
         integration_group = QGroupBox(T("integration_group"))
@@ -421,16 +315,22 @@ class ProcessingTab(QWidget):
         self.combo_integration_esu = QComboBox()
         self.combo_integration_esu.addItems([
             T("integration_esu_pings"),
-            T("integration_esu_seconds"),
-            T("integration_esu_nmi"),
+            T("integration_esu_distance"),
         ])
+        self.combo_integration_esu.currentIndexChanged.connect(self._on_esu_type_changed)
         integration_layout.addRow(T("integration_esu_type"), self.combo_integration_esu)
 
         self.spin_integration_esu_size = QDoubleSpinBox()
         self.spin_integration_esu_size.setRange(1.0, 1000000.0)
         self.spin_integration_esu_size.setValue(500.0)
-        self.spin_integration_esu_size.setDecimals(1)
+        self.spin_integration_esu_size.setDecimals(0)
         integration_layout.addRow(T("integration_esu_size"), self.spin_integration_esu_size)
+
+        self.spin_integration_ts_default = QDoubleSpinBox()
+        self.spin_integration_ts_default.setRange(-80.0, 0.0)
+        self.spin_integration_ts_default.setValue(-30.0)
+        self.spin_integration_ts_default.setSuffix(" dB")
+        integration_layout.addRow(T("integration_ts_default"), self.spin_integration_ts_default)
 
         self.spin_integration_layer_width = QDoubleSpinBox()
         self.spin_integration_layer_width.setRange(0.5, 100.0)
@@ -459,7 +359,6 @@ class ProcessingTab(QWidget):
         integration_group.setLayout(integration_layout)
         layout.addWidget(integration_group)
 
-        self.combo_grid_h_method.currentIndexChanged.connect(self._on_h_method_changed)
         self.btn_stats.clicked.connect(self.stats_clicked)
 
         # ── 质量检查 ──
@@ -652,29 +551,14 @@ class ProcessingTab(QWidget):
         config = self.get_all_config()
         self._settings.setValue("last_config", config)
 
-    def _on_h_method_changed(self, index):
-        """水平分段方式改变时更新距离单位的启用状态"""
-        self.combo_distance_unit.setEnabled(index == 1)
-
-    def _on_grid_clicked(self):
-        """网格分析按钮点击时进行输入验证"""
-        v_interval = self.spin_grid_v.value()
-        if v_interval <= 0:
-            QMessageBox.warning(self, T("dialog_input_error"), T("grid_error_vertical"))
-            return
-
-        h_interval = self.spin_grid_h.value()
-        if h_interval <= 0:
-            QMessageBox.warning(self, T("dialog_input_error"), T("grid_error_horizontal"))
-            return
-
-        if not (self.chk_mean_sv.isChecked() or self.chk_abc.isChecked() or
-                self.chk_density.isChecked() or self.chk_biomass.isChecked() or
-                self.chk_valid_pixels.isChecked()):
-            QMessageBox.warning(self, T("dialog_input_error"), T("grid_error_no_metrics"))
-            return
-
-        self.grid_clicked.emit()
+    def _on_esu_type_changed(self, index):
+        """EDSU 类型切换时更新大小单位（pings 无单位 / distance 米）"""
+        if index == 1:  # distance
+            self.spin_integration_esu_size.setSuffix(" m")
+            self.spin_integration_esu_size.setDecimals(1)
+        else:
+            self.spin_integration_esu_size.setSuffix("")
+            self.spin_integration_esu_size.setDecimals(0)
 
     def _emit_noise_params(self):
         self.noise_params_changed.emit({
@@ -707,43 +591,16 @@ class ProcessingTab(QWidget):
             "avg_weight_kg": self.spin_avg_weight.value(),
         }
 
-    def get_grid_config(self) -> dict:
-        """获取网格配置（增强版）"""
-        v_interval = self.spin_grid_v.value()
-        h_method = "ping" if self.combo_grid_h_method.currentIndex() == 0 else "distance"
-
-        selected_metrics = []
-        if self.chk_mean_sv.isChecked():
-            selected_metrics.append("mean_sv")
-        if self.chk_abc.isChecked():
-            selected_metrics.append("abc")
-        if self.chk_density.isChecked():
-            selected_metrics.append("density")
-        if self.chk_biomass.isChecked():
-            selected_metrics.append("biomass")
-        if self.chk_valid_pixels.isChecked():
-            selected_metrics.append("valid_pixels")
-
-        return {
-            "vertical_interval_m": v_interval,
-            "horizontal_interval": float(self.spin_grid_h.value()),
-            "horizontal_method": h_method,
-            "distance_unit": self.combo_distance_unit.currentText() if h_method == "distance" else None,
-            "selected_metrics": selected_metrics,
-            "output_format": self.combo_output_format.currentText(),
-            "include_metadata": self.chk_include_metadata.isChecked(),
-            "include_summary": self.chk_include_summary.isChecked(),
-        }
-
     def get_integration_config(self) -> dict:
         """获取回声积分配置"""
-        esu_map = {0: "pings", 1: "seconds", 2: "nmi"}
+        esu_map = {0: "pings", 1: "distance"}
         return {
             "esu_type": esu_map.get(self.combo_integration_esu.currentIndex(), "pings"),
             "esu_size": self.spin_integration_esu_size.value(),
             "layer_width": self.spin_integration_layer_width.value(),
             "min_threshold": self.spin_integration_min_thr.value(),
             "max_threshold": self.spin_integration_max_thr.value(),
+            "ts_default": self.spin_integration_ts_default.value(),
         }
 
     def get_single_target_config(self) -> dict:
@@ -806,7 +663,7 @@ class ProcessingTab(QWidget):
 
         integ = config.get("integration", {})
         if "esu_type" in integ:
-            esu_map = {"pings": 0, "seconds": 1, "nmi": 2}
+            esu_map = {"pings": 0, "distance": 1}
             self.combo_integration_esu.setCurrentIndex(esu_map.get(integ["esu_type"], 0))
         if "esu_size" in integ:
             self.spin_integration_esu_size.setValue(float(integ["esu_size"]))
@@ -816,6 +673,8 @@ class ProcessingTab(QWidget):
             self.spin_integration_min_thr.setValue(float(integ["min_threshold"]))
         if "max_threshold" in integ:
             self.spin_integration_max_thr.setValue(float(integ["max_threshold"]))
+        if "ts_default" in integ:
+            self.spin_integration_ts_default.setValue(float(integ["ts_default"]))
 
         st = config.get("single_target", {})
         if "sv_threshold_db" in st:
@@ -937,7 +796,6 @@ class PropertyPanel(QTabWidget):
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
     compute_density_clicked = Signal()
-    grid_clicked = Signal()
     stats_clicked = Signal()
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
@@ -967,7 +825,6 @@ class PropertyPanel(QTabWidget):
         self.processing.surface_line_changed.connect(self.surface_line_changed)
         self.processing.detect_schools_clicked.connect(self.detect_schools_clicked)
         self.processing.compute_density_clicked.connect(self.compute_density_clicked)
-        self.processing.grid_clicked.connect(self.grid_clicked)
         self.processing.stats_clicked.connect(self.stats_clicked)
         self.processing.detect_bottom_clicked.connect(self.detect_bottom_clicked)
         self.processing.draw_bottom_clicked.connect(self.draw_bottom_clicked)

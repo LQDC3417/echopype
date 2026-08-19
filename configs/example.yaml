@@ -44,13 +44,14 @@ processing:
     window_len: 11                    # Hanning 窗口长度
     backstep: 35.0                    # 回步值 (dB)
 
-# 回声积分配置（新增）
+# 回声积分配置（合并网格分析后）
 integration:
-  esu_type: "pings"                   # ESU 类型: pings / seconds / nmi
-  esu_size: 500                       # ESU 大小: ping 数 / 秒数 / 海里数
+  esu_type: "pings"                   # EDSU 类型: pings / distance (GPS 距离 m)
+  esu_size: 500                       # EDSU 大小: ping 数 / 距离米数
   layer_width: 5.0                    # 垂直层宽度 (米)
   min_threshold: -70.0                # 最小 Sv 阈值 (dB)
   max_threshold: 0.0                  # 最大 Sv 阈值 (dB)
+  ts_default: -30.0                   # 默认目标强度 (dB)，用于密度估算
 
 school_detection:
   # 方法选择: echoview / advanced

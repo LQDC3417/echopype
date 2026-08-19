@@ -1,4 +1,4 @@
-﻿# -*- mode: python ; coding: utf-8 -*-
+# -*- mode: python ; coding: utf-8 -*-
 """PyInstaller 打包配置 — Echogram 鱼类声学资源评估系统"""
 
 import sys
@@ -46,7 +46,7 @@ hiddenimports = [
     "yaml",
     "src.core.acoustic",
     "src.core.density",
-    "src.core.grid",
+    "src.core.integration",
     "src.core.school",
     "src.core.region",
     "src.core.quality",

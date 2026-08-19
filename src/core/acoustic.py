@@ -8,6 +8,7 @@ os.environ["PYTHONUTF8"] = "1"
 
 from pathlib import Path
 
+import numpy as np
 import xarray as xr
 
 logger = logging.getLogger("fish_acoustics")
@@ -105,6 +106,51 @@ def _add_depth(ds_Sv: xr.Dataset, echodata) -> xr.Dataset:
     return ds_Sv
 
 
+def _attach_gps(ds_Sv: xr.Dataset, echodata) -> xr.Dataset:
+    """把 echodata Platform 组的 GPS 坐标插值到每 ping，附加为 latitude/longitude。
+
+    GPS 记录频率通常低于 ping 频率（且可能含重复时间戳），
+    这里按时间插值到 ping_time，供 distance 模式 EDSU 分段使用。
+    """
+    if "latitude" in ds_Sv and "longitude" in ds_Sv:
+        return ds_Sv
+    try:
+        plat = echodata["Platform"]
+        if "latitude" not in plat or "longitude" not in plat:
+            return ds_Sv
+        # GPS 时间轴（time1）
+        t_gps = plat["time1"].values.astype("datetime64[ns]").astype(float)
+        lat = np.asarray(plat["latitude"].values, dtype=float)
+        lon = np.asarray(plat["longitude"].values, dtype=float)
+        if lat.ndim > 1:
+            lat = lat.ravel()
+            lon = lon.ravel()
+        valid = np.isfinite(lat) & np.isfinite(lon) & np.isfinite(t_gps)
+        if np.count_nonzero(valid) < 2:
+            logger.warning("GPS 有效点不足，跳过附加")
+            return ds_Sv
+        t_gps, lat, lon = t_gps[valid], lat[valid], lon[valid]
+        # 按时间排序 + 去重
+        order = np.argsort(t_gps)
+        t_gps, lat, lon = t_gps[order], lat[order], lon[order]
+        _, uniq = np.unique(t_gps, return_index=True)
+        t_gps, lat, lon = t_gps[uniq], lat[uniq], lon[uniq]
+        # 插值到 ping_time
+        ping_t = ds_Sv["ping_time"].values.astype("datetime64[ns]").astype(float)
+        lat_i = np.interp(ping_t, t_gps, lat)
+        lon_i = np.interp(ping_t, t_gps, lon)
+        ds_Sv = ds_Sv.assign_coords(
+            latitude=("ping_time", lat_i),
+            longitude=("ping_time", lon_i),
+        )
+        logger.info(f"GPS 已附加: {len(t_gps)} 个有效点插值到 {len(ping_t)} pings")
+    except Exception as e:
+        import traceback as _tb
+        logger.warning(f"GPS 附加失败: {e}")
+        _tb.print_exc()
+    return ds_Sv
+
+
 def compute_sv(echodata, config: dict) -> xr.Dataset:
     """
     计算 Sv 并添加深度信息（不做噪声去除和底部检测）。
@@ -135,6 +181,9 @@ def compute_sv(echodata, config: dict) -> xr.Dataset:
 
     # 深度是几何量，应在噪声去除前独立计算
     ds_Sv = _add_depth(ds_Sv, echodata)
+
+    # GPS 附加（供 distance 模式 EDSU 分段）
+    ds_Sv = _attach_gps(ds_Sv, echodata)
 
     logger.info("Sv + depth 计算完成")
     return ds_Sv
