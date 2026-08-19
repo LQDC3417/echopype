@@ -5,7 +5,7 @@ import pandas as pd
 import xarray as xr
 
 from src.core.density import (
-    calculate_abc, calculate_nasc, estimate_density,
+    calculate_abc, estimate_density,
     estimate_density_by_depth, sv_statistics_summary,
 )
 
@@ -43,16 +43,6 @@ def test_calculate_abc_positive():
     ds = _make_ds_sv()
     df = calculate_abc(ds, {})
     assert (df["abc"] >= 0).all()
-
-
-def test_calculate_abc_matches_nasc():
-    """ABC 和 NASC 的关系: NASC = ABC * 1852^2"""
-    ds = _make_ds_sv()
-    abc_df = calculate_abc(ds, {})
-    nasc_df = calculate_nasc(ds, {})
-
-    ratio = nasc_df["nasc"].values / abc_df["abc"].values
-    np.testing.assert_array_almost_equal(ratio, 1852 ** 2, decimal=0)
 
 
 # ── estimate_density ──────────────────────────────────────

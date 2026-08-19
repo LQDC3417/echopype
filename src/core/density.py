@@ -13,7 +13,6 @@ logger = logging.getLogger("fish_acoustics")
 
 # 物理常数
 FOUR_PI = 4 * np.pi
-NMI_TO_M = 1852  # 1 海里 = 1852 米
 DEFAULT_N_DEPTH_LAYERS = 5
 
 
@@ -33,6 +32,16 @@ def _get_depth_resolution(ds_Sv: xr.Dataset) -> np.ndarray:
     if sv.ndim == 2 and dr.ndim == 1:
         dr = np.broadcast_to(dr, sv.shape)
     return dr
+
+
+def density_from_abc(abc: float, ts_default_db: float = -30.0) -> float:
+    """ABC → 鱼类密度 (ind/ha)。
+
+    ρ = ABC / (4π·σ_bs) × 10000，σ_bs = 10^(TS/10)
+    项目内密度换算的单一来源（回声积分 integration.py 与本模块共用）。
+    """
+    sigma_bs = 10 ** (ts_default_db / 10)
+    return abc / (FOUR_PI * sigma_bs) * 10000
 
 
 def _abc_to_density(abc: float, sigma_bs: float, avg_weight_kg: float) -> dict:
@@ -86,43 +95,6 @@ def calculate_abc(
     })
 
     logger.info(f"ABC 计算完成: mean={np.nanmean(abc):.6f} m²/m²")
-    return df
-
-
-def calculate_nasc(
-    ds_Sv: xr.Dataset,
-    config: dict,
-) -> pd.DataFrame:
-    """
-    计算 Nautical Area Scattering Coefficient (NASC)
-
-    NASC = 4π × 1852² × ∫ Sv_linear × dz    [m²/nmi²]
-
-    Parameters
-    ----------
-    ds_Sv : xr.Dataset
-    config : dict
-
-    Returns
-    -------
-    pd.DataFrame
-        包含 ping_idx, ping_time, nasc 的 DataFrame
-    """
-    Sv = get_sv_array(ds_Sv)
-    dr = _get_depth_resolution(ds_Sv)
-
-    integrated = np.nansum(sv_to_linear(Sv) * dr, axis=1)
-    nasc = FOUR_PI * (NMI_TO_M ** 2) * integrated
-
-    ping_time = ds_Sv["ping_time"].values
-
-    df = pd.DataFrame({
-        "ping_idx": np.arange(len(ping_time)),
-        "ping_time": ping_time,
-        "nasc": nasc,
-    })
-
-    logger.info(f"NASC 计算完成: mean={np.nanmean(nasc):.2f} m²/nmi²")
     return df
 
 

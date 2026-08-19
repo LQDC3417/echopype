@@ -298,10 +298,9 @@ def _compute_abc_density(
     """
     sv_linear = sv_to_linear(sv_layer)
     abc = FOUR_PI * float(np.nansum(sv_linear * dr_layer))
-    # 密度: ρ = ABC / (4π·σ_bs)，σ_bs = 10^(TS/10)
-    sigma_bs = 10 ** (ts_default_db / 10)
-    density_m2 = abc / (FOUR_PI * sigma_bs)
-    density_ha = density_m2 * 10000
+    # 密度换算复用 density.py 的单一来源（ρ = ABC/(4π·σ_bs)·10000）
+    from src.core.density import density_from_abc
+    density_ha = density_from_abc(abc, ts_default_db)
     return abc, density_ha
 
 
