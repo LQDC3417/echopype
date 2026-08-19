@@ -492,6 +492,7 @@ _TEXTS = {
     "msg_computing_sv": {"zh": "计算 Sv...", "en": "Computing Sv..."},
     "msg_removing_noise": {"zh": "去除噪声...", "en": "Removing noise..."},
     "msg_detecting_bottom": {"zh": "检测底部...", "en": "Detecting bottom..."},
+    "msg_bottom_detection": {"zh": "检测底部 (方法: {method})...", "en": "Detecting bottom (method: {method})..."},
     "msg_detecting_schools": {"zh": "检测鱼群...", "en": "Detecting schools..."},
     "msg_computing_density": {"zh": "计算密度...", "en": "Computing density..."},
     "msg_grid_analysis": {"zh": "网格分析...", "en": "Grid analysis..."},

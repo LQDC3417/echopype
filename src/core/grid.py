@@ -646,7 +646,7 @@ def compute_grid_density(
 
     # 创建结果 DataFrame（包含经纬度）
     export_cols = ["cell_id", "ping_start", "ping_end", "depth_lo", "depth_hi",
-                   "latitude", "longitude", "mean_sv", "abc"]
+                   "latitude", "longitude", "mean_sv", "abc", "n_valid"]
     result = stats_df[export_cols].copy()
     result["density_ind_m2"] = density_m2
     result["density_ind_ha"] = density_ha
