@@ -1,10 +1,8 @@
 """Mixin: 文件操作：导入、批量处理、文件缓存、切换、变量列表"""
 
 import logging
-import traceback
 
 import numpy as np
-import pandas as pd
 from pathlib import Path
 
 from src.gui.i18n import T

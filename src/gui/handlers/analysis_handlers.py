@@ -1,10 +1,7 @@
 """Mixin: 高级分析：质量检查、多频分析、单体目标检测、Sv统计、Transect分段"""
 
 import logging
-import traceback
 
-import numpy as np
-import pandas as pd
 from src.gui.i18n import T
 from PySide6.QtWidgets import QMessageBox
 

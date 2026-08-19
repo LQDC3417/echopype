@@ -18,49 +18,24 @@
 import logging
 from pathlib import Path
 
-import pandas as pd
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
-    QFileDialog,
-    QInputDialog,
     QMainWindow,
     QMessageBox,
     QSplitter,
 )
 
-from src.core.utils import load_config
-from src.gui.export_dialog import ExportDialog
 from src.gui.fileset import Fileset
-from src.gui.fileset_tree import BatchImportDialog, FilesetTreeWidget
-from src.gui.i18n import T, set_language, get_language
+from src.gui.fileset_tree import FilesetTreeWidget
+from src.gui.i18n import T, set_language
 from src.gui.property_panel import PropertyPanel
 from src.gui.region_panel import RegionTableWidget
 from src.gui.stats_dialog import StatsDialog
 from src.gui.status_bar import MainStatusBar
 from src.gui.toolbars import EchogramToolBar, MouseMode, StandardToolBar
-from src.gui.workers import (
-    BatchProcessWorker,
-    ComputeSvWorker,
-    DetectSchoolsWorker,
-    DetectSeafloorWorker,
-    GridWorker,
-    LoadFileWorker,
-    MultifreqAnalysisWorker,
-    NoiseRemovalWorker,
-    QualityCheckWorker,
-    SingleTargetWorker,
-    SvStatsWorker,
-    TransectSplitWorker,
-)
-from src.gui.workers import (
-    ComputeDensityWorker as DensityWorker,
-)
 from src.viz.opengl_renderer import EchogramRenderer
-
-logger = logging.getLogger(__name__)
-
 
 from src.gui.handlers import (
     FileMixin,
@@ -68,6 +43,8 @@ from src.gui.handlers import (
     AnalysisMixin,
     InteractionMixin,
 )
+
+logger = logging.getLogger(__name__)
 
 class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, InteractionMixin):
     """Echoview 风格主窗口 — 鱼类声学资源评估系统"""
@@ -139,7 +116,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         fm.addAction(self._act(T("open_config"), self._open_config, "Ctrl+O"))
         fm.addAction(self._act(T("save_config"), self._save_config, "Ctrl+Shift+S"))
         fm.addSeparator()
-        fm.addAction(self._act(T("export_csv"), self._export, "Ctrl+E"))
+        fm.addAction(self._act(T("menu_export"), self._export, "Ctrl+E"))
         fm.addSeparator()
         fm.addAction(self._act(T("quit"), self.close, "Ctrl+Q"))
 
@@ -190,7 +167,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         am.addAction(self._act(T("menu_single_target"), self._run_single_target_detection))
         am.addSeparator()
         am.addAction(self._act(T("export_density_report"), self._export))
-        am.addAction(self._act(T("export_school_list"), self._export_schools))
+        am.addAction(self._act(T("menu_export_schools"), self._export_schools))
 
         # ── 帮助 ──
         hm = mb.addMenu(T("menu_help"))
@@ -394,7 +371,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
 
     def _switch_language(self, lang: str):
         """切换语言（需要重启应用生效）"""
-        from src.gui.i18n import set_language
         set_language(lang)
         QMessageBox.information(self, T("dialog_info"), T("lang_switch_prompt"))
 

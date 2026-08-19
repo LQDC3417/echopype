@@ -77,7 +77,7 @@ _TEXTS = {
     "import_raw_files": {"zh": "导入 Raw 文件...", "en": "Import Raw Files..."},
     "open_config": {"zh": "打开配置文件...", "en": "Open Config..."},
     "save_config": {"zh": "保存配置...", "en": "Save Config..."},
-    "export_csv": {"zh": "导出结果...", "en": "Export Results..."},
+    "menu_export": {"zh": "导出结果...", "en": "Export Results..."},
     "quit": {"zh": "退出", "en": "Quit"},
 
     # 编辑菜单
@@ -104,7 +104,7 @@ _TEXTS = {
 
     # 分析菜单
     "export_density_report": {"zh": "导出密度报告", "en": "Export Density Report"},
-    "export_school_list": {"zh": "导出鱼群清单", "en": "Export School List"},
+    "menu_export_schools": {"zh": "导出鱼群清单", "en": "Export School List"},
 
     # 帮助菜单
     "about": {"zh": "关于", "en": "About"},
@@ -537,6 +537,26 @@ _TEXTS = {
     "quality_bottom_exceed": {"zh": "底线超出采样范围", "en": "Bottom exceeds sample range"},
     "quality_bottom_jump": {"zh": "底线跳变过大（最大 {val:.0f} samples）", "en": "Bottom jump too large (max {val:.0f} samples)"},
     "quality_bottom_nan_high": {"zh": "底线 NaN 比例 {ratio:.1%} 过高（>30%）", "en": "Bottom NaN ratio {ratio:.1%} too high (>30%)"},
+
+    # ── 网格分析错误/进度 ──
+    "grid_cancelled": {"zh": "网格分析已取消: {error}", "en": "Grid analysis cancelled: {error}"},
+    "grid_import_error": {"zh": "缺少必要的模块: {error}\n请检查 echopype 和相关依赖是否正确安装", "en": "Missing required module: {error}\nPlease check echopype and dependencies are correctly installed"},
+    "grid_key_error": {"zh": "配置参数错误: 缺少必要的参数 {error}\n请检查网格配置是否完整", "en": "Config error: missing required parameter {error}\nPlease check grid configuration"},
+    "grid_value_error": {"zh": "参数值错误: {error}\n请检查输入参数是否有效", "en": "Parameter value error: {error}\nPlease check input parameters"},
+    "grid_memory_error": {"zh": "内存不足：请尝试减小网格间隔或使用更小的数据集", "en": "Out of memory: try reducing grid interval or using a smaller dataset"},
+    "grid_unexpected_error": {"zh": "网格分析过程中发生错误: {error}\n\n详细错误信息:\n{detail}", "en": "Grid analysis error: {error}\n\nDetail:\n{detail}"},
+    "grid_validate_empty_ds": {"zh": "输入数据集为空", "en": "Input dataset is empty"},
+    "grid_validate_negative_surface": {"zh": "表面深度不能为负数", "en": "Surface depth cannot be negative"},
+    "grid_validate_missing_vertical": {"zh": "缺少垂直间隔参数 (vertical_interval_m)", "en": "Missing vertical interval parameter (vertical_interval_m)"},
+    "grid_validate_missing_horizontal": {"zh": "缺少水平间隔参数 (horizontal_interval)", "en": "Missing horizontal interval parameter (horizontal_interval)"},
+    "grid_validate_missing_method": {"zh": "缺少水平分段方法参数 (horizontal_method)", "en": "Missing horizontal method parameter (horizontal_method)"},
+    "grid_validate_vertical_zero": {"zh": "垂直间隔必须大于0", "en": "Vertical interval must be > 0"},
+    "grid_validate_horizontal_zero": {"zh": "水平间隔必须大于0", "en": "Horizontal interval must be > 0"},
+    "grid_validate_method_invalid": {"zh": "水平分段方法必须是 'ping' 或 'distance'", "en": "Horizontal method must be 'ping' or 'distance'"},
+    "grid_validate_missing_ts": {"zh": "缺少默认目标强度参数 (ts_default)", "en": "Missing default target strength parameter (ts_default)"},
+    "grid_validate_missing_weight": {"zh": "缺少平均体重参数 (avg_weight_kg)", "en": "Missing average weight parameter (avg_weight_kg)"},
+    "batch_file_fail": {"zh": "✗ 失败 [{done}/{total}]: {name}", "en": "✗ Fail [{done}/{total}]: {name}"},
+    "batch_file_ok": {"zh": "✓ 完成 [{done}/{total}]: {name}", "en": "✓ Done [{done}/{total}]: {name}"},
 
     # ── 语言切换 ──
     "menu_language": {"zh": "语言(&L)", "en": "&Language"},

@@ -66,14 +66,14 @@ from OpenGL.GL import (
     glViewport,
 )
 
-logger = logging.getLogger(__name__)
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QMenu
 
 from src.gui.toolbars import MouseMode
+
+logger = logging.getLogger(__name__)
 
 
 class EchogramRenderer(QOpenGLWidget):
@@ -119,7 +119,7 @@ class EchogramRenderer(QOpenGLWidget):
         self._surface_line_width = 1.5
         self._preview_line_color = (1.0, 0.5, 0.0, 0.8)  # ??
         self._preview_line_width = 2.0
-        
+
         # ??????
         self._draw_precision = 1.0  # ???????1.0?????
         self._smooth_window_size = 5  # ??????
@@ -331,11 +331,11 @@ class EchogramRenderer(QOpenGLWidget):
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
-        
+
         # ???????
         glEnable(GL_LINE_SMOOTH)
         glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
-        
+
         self._texture_id = int(glGenTextures(1))
         # ?? GPU ???????????
         max_size = glGetIntegerv(GL_MAX_TEXTURE_SIZE)
@@ -462,10 +462,14 @@ class EchogramRenderer(QOpenGLWidget):
         sh = self._n_samples * self._zoom_y
         glColor4f(1.0, 1.0, 1.0, 1.0)
         glBegin(GL_QUADS)
-        glTexCoord2f(0, 0); glVertex2f(sx, sy)
-        glTexCoord2f(1, 0); glVertex2f(sx + sw, sy)
-        glTexCoord2f(1, 1); glVertex2f(sx + sw, sy + sh)
-        glTexCoord2f(0, 1); glVertex2f(sx, sy + sh)
+        glTexCoord2f(0, 0)
+        glVertex2f(sx, sy)
+        glTexCoord2f(1, 0)
+        glVertex2f(sx + sw, sy)
+        glTexCoord2f(1, 1)
+        glVertex2f(sx + sw, sy + sh)
+        glTexCoord2f(0, 1)
+        glVertex2f(sx, sy + sh)
         glEnd()
         glDisable(GL_TEXTURE_2D)
 
@@ -519,16 +523,16 @@ class EchogramRenderer(QOpenGLWidget):
         bl = self._bottom_line
         if bl is None or bl.ndim == 0:
             return
-        
+
         # ?????????????????????
         base_width = 2.0
         zoom_factor = min(self._zoom_x, self._zoom_y)
         line_width = base_width * min(2.0, max(0.5, zoom_factor * 0.5))
-        
+
         # ?????????Echoview ??
         glColor4f(0.8, 0.6, 0.0, 1.0)
         glLineWidth(line_width)
-        
+
         # ??GL_LINE_STRIP??????
         glBegin(GL_LINE_STRIP)
         for i, val in enumerate(bl):
@@ -547,31 +551,31 @@ class EchogramRenderer(QOpenGLWidget):
         sl = self._surface_line
         if sl is None:
             return
-        
+
         # ?????????????
         base_width = 1.5
         zoom_factor = min(self._zoom_x, self._zoom_y)
         line_width = base_width * min(2.0, max(0.5, zoom_factor * 0.5))
-        
+
         # ??????
         glEnable(GL_LINE_STIPPLE)
         glLineStipple(4, 0x0F0F)  # ?????4?????0x0F0F??
-        
+
         # ????????????
         glColor4f(0.2, 1.0, 0.4, 0.8)
         glLineWidth(line_width)
-        
+
         # ???????????
         y = self._offset_y + sl * self._zoom_y
         x0 = self._offset_x
         x1 = self._offset_x + self._n_pings * self._zoom_x
-        
+
         # ??????
         glBegin(GL_LINES)
         glVertex2f(x0, y)
         glVertex2f(x1, y)
         glEnd()
-        
+
         glDisable(GL_LINE_STIPPLE)
 
     def _draw_grid_overlay(self) -> None:
@@ -618,13 +622,17 @@ class EchogramRenderer(QOpenGLWidget):
             y0 = self._offset_y + cell["sample_start"] * self._zoom_y
             y1 = self._offset_y + cell["sample_end"] * self._zoom_y
             # 上边
-            glVertex2f(x0, y0); glVertex2f(x1, y0)
+            glVertex2f(x0, y0)
+            glVertex2f(x1, y0)
             # 下边
-            glVertex2f(x0, y1); glVertex2f(x1, y1)
+            glVertex2f(x0, y1)
+            glVertex2f(x1, y1)
             # 左边
-            glVertex2f(x0, y0); glVertex2f(x0, y1)
+            glVertex2f(x0, y0)
+            glVertex2f(x0, y1)
             # 右边
-            glVertex2f(x1, y0); glVertex2f(x1, y1)
+            glVertex2f(x1, y0)
+            glVertex2f(x1, y1)
         glEnd()
 
         # 在足够大的单元格内绘制 mean_sv 数值
@@ -708,19 +716,19 @@ class EchogramRenderer(QOpenGLWidget):
         """???????? ? ??????????"""
         if not self._bottom_draw_points:
             return
-        
+
         # ??????????
         points = self._smooth_draw_points(self._bottom_draw_points, window_size=3)
-        
+
         # ??????????????
         base_width = 2.0
         zoom_factor = min(self._zoom_x, self._zoom_y)
         line_width = base_width * min(2.0, max(0.5, zoom_factor * 0.5))
-        
+
         # ???????????
         glColor4f(1.0, 0.5, 0.0, 0.8)
         glLineWidth(line_width)
-        
+
         # ?????????
         glBegin(GL_LINE_STRIP)
         for ping, sample in points:
@@ -746,8 +754,10 @@ class EchogramRenderer(QOpenGLWidget):
                 x1 = x0 + self._zoom_x
                 y0 = self._offset_y + start * self._zoom_y
                 y1 = self._offset_y + end * self._zoom_y
-                glVertex2f(x0, y0); glVertex2f(x1, y0)
-                glVertex2f(x1, y1); glVertex2f(x0, y1)
+                glVertex2f(x0, y0)
+                glVertex2f(x1, y0)
+                glVertex2f(x1, y1)
+                glVertex2f(x0, y1)
         glEnd()
         # 边界线条 — 批量绘制
         self._draw_school_boundaries(mask, h, w)
@@ -775,13 +785,15 @@ class EchogramRenderer(QOpenGLWidget):
             py = self._offset_y + (s + 1) * self._zoom_y
             x0 = self._offset_x + p * self._zoom_x
             x1 = x0 + self._zoom_x
-            glVertex2f(x0, py); glVertex2f(x1, py)
+            glVertex2f(x0, py)
+            glVertex2f(x1, py)
         # 右边界线段
         for i in range(len(right_pings)):
             p, s = int(right_pings[i]), int(right_samples[i])
             px = self._offset_x + (p + 1) * self._zoom_x
             y0 = self._offset_y + s * self._zoom_y
-            glVertex2f(px, y0); glVertex2f(px, y0 + self._zoom_y)
+            glVertex2f(px, y0)
+            glVertex2f(px, y0 + self._zoom_y)
         glEnd()
 
     def _draw_selection_rect(self) -> None:
@@ -791,14 +803,18 @@ class EchogramRenderer(QOpenGLWidget):
         x1, y1 = self._select_end
         glColor4f(0.2, 0.4, 1.0, 0.3)
         glBegin(GL_QUADS)
-        glVertex2f(x0, y0); glVertex2f(x1, y0)
-        glVertex2f(x1, y1); glVertex2f(x0, y1)
+        glVertex2f(x0, y0)
+        glVertex2f(x1, y0)
+        glVertex2f(x1, y1)
+        glVertex2f(x0, y1)
         glEnd()
         glColor4f(0.2, 0.4, 1.0, 0.8)
         glLineWidth(1.5)
         glBegin(GL_LINE_STRIP)
-        glVertex2f(x0, y0); glVertex2f(x1, y0)
-        glVertex2f(x1, y1); glVertex2f(x0, y1)
+        glVertex2f(x0, y0)
+        glVertex2f(x1, y0)
+        glVertex2f(x1, y1)
+        glVertex2f(x0, y1)
         glVertex2f(x0, y0)
         glEnd()
 
@@ -985,11 +1001,11 @@ class EchogramRenderer(QOpenGLWidget):
         if self._bottom_line is not None:
             # ??????????
             self._bottom_undo_stack.append(self._bottom_line.copy())
-            
+
             # ???????
             if len(self._bottom_undo_stack) > self._max_undo_steps:
                 self._bottom_undo_stack.pop(0)
-            
+
             # ????????????????????
             self._bottom_redo_stack.clear()
 
@@ -997,11 +1013,11 @@ class EchogramRenderer(QOpenGLWidget):
         """??????????????????"""
         if not self._bottom_undo_stack:
             return
-        
+
         # ??????????
         if self._bottom_line is not None:
             self._bottom_redo_stack.append(self._bottom_line.copy())
-        
+
         # ????????
         self._bottom_line = self._bottom_undo_stack.pop()
         self._bottom_draw_points.clear()
@@ -1013,11 +1029,11 @@ class EchogramRenderer(QOpenGLWidget):
         """???????????????"""
         if not self._bottom_redo_stack:
             return
-        
+
         # ??????????
         if self._bottom_line is not None:
             self._bottom_undo_stack.append(self._bottom_line.copy())
-        
+
         # ????????
         self._bottom_line = self._bottom_redo_stack.pop()
         self._bottom_draw_points.clear()
@@ -1030,59 +1046,59 @@ class EchogramRenderer(QOpenGLWidget):
         # ???????????
         if window_size is None:
             window_size = self._smooth_window_size
-        
+
         # ?????????????????
         if not self._enable_smoothing:
             return points
-        
+
         # ????????????
         adjusted_window = max(3, int(window_size * self._draw_precision))
-        
+
         if len(points) < adjusted_window:
             return points
-        
+
         # ??????????
         smoothed = []
         for i in range(len(points)):
             # ??????
             start = max(0, i - adjusted_window // 2)
             end = min(len(points), i + adjusted_window // 2 + 1)
-            
+
             # ??????????
             avg_ping = sum(p[0] for p in points[start:end]) / (end - start)
             avg_sample = sum(p[1] for p in points[start:end]) / (end - start)
             smoothed.append((avg_ping, avg_sample))
-        
+
         return smoothed
 
     def _apply_drawn_segment(self):
         """????????????????"""
         if not self._bottom_draw_points:
             return
-        
+
         # ???????????????
         points = self._smooth_draw_points(self._bottom_draw_points, window_size=5)
-        
+
         if len(points) < 2:
             self._bottom_draw_points.clear()
             return
-        
+
         # ??????? Ping ??
         pings = [p[0] for p in points]
         ping_min = max(0, round(min(pings)))
         ping_max = min(self._n_pings - 1, round(max(pings)))
-        
+
         if ping_min > ping_max:
             self._bottom_draw_points.clear()
             return
-        
+
         # ????????????
         if self._bottom_line is None:
             self._bottom_line = np.full(self._n_pings, np.nan, dtype=np.float32)
-        
+
         # ????? ping ??
         sorted_points = sorted(points, key=lambda p: p[0])
-        
+
         # ????????????????
         for ping_idx in range(ping_min, ping_max + 1):
             # ?? ping_idx ????????????
@@ -1093,7 +1109,7 @@ class EchogramRenderer(QOpenGLWidget):
                     left = (p, s, i)
                 if p >= ping_idx and right is None:
                     right = (p, s, i)
-            
+
             if left is not None and right is not None:
                 if left[2] == right[2]:
                     # ????
@@ -1106,11 +1122,11 @@ class EchogramRenderer(QOpenGLWidget):
                 self._bottom_line[ping_idx] = left[1]
             elif right is not None:
                 self._bottom_line[ping_idx] = right[1]
-        
+
         # ?????
         self._bottom_draw_points.clear()
         self._bottom_editing = False
-        
+
         # ??????
         self.bottom_line_edited.emit(self._bottom_line.copy())
         self.update()

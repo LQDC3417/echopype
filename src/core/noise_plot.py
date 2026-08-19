@@ -41,7 +41,7 @@ def plot_noise_check(
     """
     try:
         import matplotlib.pyplot as plt
-        
+
     except ImportError:
         logger.warning("matplotlib 未安装，跳过噪声检查图生成")
         return {}

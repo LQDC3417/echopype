@@ -1,11 +1,8 @@
 """Mixin: 交互操作：鼠标/区域交互、撤销重做、视图控制、导出"""
 
 import logging
-import traceback
 
 import numpy as np
-import pandas as pd
-from pathlib import Path
 
 from src.gui.i18n import T
 from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -222,7 +219,7 @@ class InteractionMixin:
         if self._schools_df is None or self._schools_df.empty:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_detect_schools_first"))
             return
-        path, _ = QFileDialog.getSaveFileName(self, T("export_school_list"), "", "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, T("menu_export_schools"), "", "CSV (*.csv)")
         if path:
             self._schools_df.to_csv(path, index=False, encoding="utf-8-sig")
             self.statusbar.set_status(f"{T('export_school_list')}: {path}")

@@ -16,7 +16,6 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 
-from src.gui.i18n import T
 
 logger = logging.getLogger(__name__)
 
@@ -262,16 +261,16 @@ class GridWorker(QThread):
         try:
             # 导入必要的模块
             from src.core.grid import compute_grid_density, create_grid
-            
+
             # 步骤 1: 参数验证
             self._emit_progress(T("msg_processing"), 1)
             self._check_cancelled()
             self._validate_parameters()
-            
+
             # 步骤 2: 创建网格
             self._emit_progress(T("msg_grid_analysis"), 2)
             self._check_cancelled()
-            
+
             grid_cells = create_grid(
                 self.ds_Sv,
                 surface_depth_m=self.surface_depth_m,
@@ -280,79 +279,79 @@ class GridWorker(QThread):
                 method=self.grid_config["horizontal_method"],
                 max_depth=self.bottom_depth_m,
             )
-            
+
             # 验证网格创建结果
             if not grid_cells:
                 raise ValueError("Grid creation failed")
-            
+
             self.progress.emit(f"Grid: {len(grid_cells)}")
-            
+
             # 步骤 3: 计算网格统计
             self._emit_progress(T("msg_grid_analysis"), 3)
             self._check_cancelled()
-            
+
             # 准备配置
             config = {"density": self.density_config}
-            
+
             # 添加选中的统计指标
             if "selected_metrics" in self.grid_config:
                 config["selected_metrics"] = self.grid_config["selected_metrics"]
-            
+
             # 添加输出格式
             if "output_format" in self.grid_config:
                 config["output_format"] = self.grid_config["output_format"]
-            
+
             # 添加元数据选项
             if "include_metadata" in self.grid_config:
                 config["include_metadata"] = self.grid_config["include_metadata"]
-            
+
             df = compute_grid_density(self.ds_Sv, grid_cells, config, bottom_depth_m=self.bottom_depth_m)
-            
+
             # 步骤 4: 完成
             self._emit_progress(T("dialog_success"), 4)
             self._check_cancelled()
-            
+
             # 验证结果
             if df is None:
                 raise ValueError("Grid stats returned empty")
-            
+
             if df.empty:
                 logger.warning("网格统计结果为空，可能是因为数据不足或参数设置不当")
-            
+
             self.finished.emit(df)
-            
+
         except InterruptedError as e:
             # 用户取消
             logger.info(f"网格分析被取消: {e!s}")
-            self.error.emit(f"网格分析已取消: {e!s}")
-            
+            self.error.emit(T("grid_cancelled", error=str(e)))
+
         except ImportError as e:
             # 导入错误
-            error_msg = f"缺少必要的模块: {e!s}\n请检查 echopype 和相关依赖是否正确安装"
+            error_msg = T("grid_import_error", error=str(e))
             logger.error(error_msg)
             self.error.emit(error_msg)
-            
+
         except KeyError as e:
             # 配置键错误
-            error_msg = f"配置参数错误: 缺少必要的参数 {e!s}\n请检查网格配置是否完整"
+            error_msg = T("grid_key_error", error=str(e))
             logger.error(error_msg)
             self.error.emit(error_msg)
-            
+
         except ValueError as e:
             # 值错误
-            error_msg = f"参数值错误: {e!s}\n请检查输入参数是否有效"
+            error_msg = T("grid_value_error", error=str(e))
             logger.error(error_msg)
             self.error.emit(error_msg)
-            
+
         except MemoryError:
             # 内存错误
-            error_msg = "内存不足：请尝试减小网格间隔或使用更小的数据集"
+            error_msg = T("grid_memory_error")
             logger.error(error_msg)
             self.error.emit(error_msg)
-            
+
         except Exception as e:
             # 其他错误
-            error_msg = f"网格分析过程中发生错误: {e!s}\n\n详细错误信息:\n{traceback.format_exc()}"
+            error_msg = T("grid_unexpected_error", error=str(e), detail=traceback.format_exc())
             logger.error(error_msg)
             self.error.emit(error_msg)
 
@@ -360,43 +359,43 @@ class GridWorker(QThread):
         """验证参数有效性"""
         # 验证数据集
         if self.ds_Sv is None:
-            raise ValueError("输入数据集为空")
-        
+            raise ValueError(T("grid_validate_empty_ds"))
+
         # 验证表面深度
         if self.surface_depth_m < 0:
-            raise ValueError("表面深度不能为负数")
-        
+            raise ValueError(T("grid_validate_negative_surface"))
+
         # 验证网格配置
         if "vertical_interval_m" not in self.grid_config:
-            raise KeyError("缺少垂直间隔参数 (vertical_interval_m)")
-        
+            raise KeyError(T("grid_validate_missing_vertical"))
+
         if "horizontal_interval" not in self.grid_config:
-            raise KeyError("缺少水平间隔参数 (horizontal_interval)")
-        
+            raise KeyError(T("grid_validate_missing_horizontal"))
+
         if "horizontal_method" not in self.grid_config:
-            raise KeyError("缺少水平分段方法参数 (horizontal_method)")
-        
+            raise KeyError(T("grid_validate_missing_method"))
+
         # 验证垂直间隔
         v_interval = self.grid_config["vertical_interval_m"]
         if v_interval <= 0:
-            raise ValueError("垂直间隔必须大于0")
-        
+            raise ValueError(T("grid_validate_vertical_zero"))
+
         # 验证水平间隔
         h_interval = self.grid_config["horizontal_interval"]
         if h_interval <= 0:
-            raise ValueError("水平间隔必须大于0")
-        
+            raise ValueError(T("grid_validate_horizontal_zero"))
+
         # 验证水平分段方法
         h_method = self.grid_config["horizontal_method"]
         if h_method not in ["ping", "distance"]:
-            raise ValueError("水平分段方法必须是 'ping' 或 'distance'")
-        
+            raise ValueError(T("grid_validate_method_invalid"))
+
         # 验证密度配置
         if "ts_default" not in self.density_config:
-            raise KeyError("缺少默认目标强度参数 (ts_default)")
-        
+            raise KeyError(T("grid_validate_missing_ts"))
+
         if "avg_weight_kg" not in self.density_config:
-            raise KeyError("缺少平均体重参数 (avg_weight_kg)")
+            raise KeyError(T("grid_validate_missing_weight"))
 
 
 class BatchProcessWorker(QThread):
@@ -472,11 +471,11 @@ class BatchProcessWorker(QThread):
                 if error_msg:
                     error_count += 1
                     self.file_error.emit(path_str, error_msg)
-                    self.progress.emit(f"✗ 失败 [{success_count + error_count}/{total}]: {raw_file.name}")
+                    self.progress.emit(T("batch_file_fail", done=success_count + error_count, total=total, name=raw_file.name))
                 else:
                     success_count += 1
                     self.file_finished.emit(path_str, ds_Sv)
-                    self.progress.emit(f"✓ 完成 [{success_count + error_count}/{total}]: {raw_file.name}")
+                    self.progress.emit(T("batch_file_ok", done=success_count + error_count, total=total, name=raw_file.name))
 
         self.all_finished.emit(success_count, error_count)
         self.progress.emit(T("msg_batch_done", ok=success_count, fail=error_count))

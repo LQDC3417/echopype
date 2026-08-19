@@ -1,7 +1,6 @@
 """Mixin: 处理流水线：Sv计算、噪声去除、底部检测、鱼群检测、密度估算、网格分析"""
 
 import logging
-import traceback
 
 import numpy as np
 import pandas as pd
@@ -259,14 +258,7 @@ class ProcessingMixin:
         self.echogram.set_analysis_region_enabled(enabled)
         self._apply_analysis_region_to_ds()
         if enabled:
-            if self._ds_Sv_analysis is not None:
-                n_pings = len(self._ds_Sv_analysis["ping_time"])
-                n_samples = len(self._ds_Sv_analysis["range_sample"])
-                self.statusbar.set_status(
-                    T("msg_analysis_region_on")
-                )
-            else:
-                self.statusbar.set_status(T("msg_analysis_region_on"))
+            self.statusbar.set_status(T("msg_analysis_region_on"))
         else:
             self.statusbar.set_status(T("msg_analysis_region_off"))
 
@@ -295,7 +287,7 @@ class ProcessingMixin:
         self._schools_mask = mask_da.values if hasattr(mask_da, "values") else mask_da
         self.echogram.set_school_mask(self._schools_mask)
         n_pixels = int(np.sum(self._schools_mask)) if self._schools_mask.dtype == bool else 0
-        
+
         # 将 mask 转换为 DataFrame
         schools_df = schools_to_dataframe(mask_da, self._ds_Sv)
         self._schools_df = schools_df

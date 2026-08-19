@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QSlider,
     QToolBar,
-    QWidget,
 )
 
 from src.gui.i18n import T
