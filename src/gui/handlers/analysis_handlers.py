@@ -140,10 +140,12 @@ class AnalysisMixin:
         self.statusbar.hide_progress()
         n = len(targets_df) if targets_df is not None and not targets_df.empty else 0
         if n == 0:
+            self.echogram.clear_single_targets()
             QMessageBox.information(self, T("msg_single_target_result"), T("msg_no_single_target"))
             return
         self._single_target_df = targets_df
         self.stats_dialog.update_single_target(targets_df)
+        self.echogram.set_single_targets(targets_df)
         self.statusbar.set_status(T("msg_single_target_done", n=n))
         self._show_stats()
 

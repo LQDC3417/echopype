@@ -102,6 +102,7 @@ class EchogramRenderer(QOpenGLWidget):
         self._bottom_line = None  # (n_pings,) sample indices
         self._surface_line = None  # float — 表线深度(in sample index units)
         self._school_mask = None
+        self._single_targets = None  # np.ndarray (N, 2) — ping_idx, sample_idx
 
         # 网格叠加
         self._grid_cells = None   # list[dict] — ping_start/end, depth_lo/hi (sample index)
@@ -297,6 +298,27 @@ class EchogramRenderer(QOpenGLWidget):
         self._grid_colors_dirty = True
         self.update()
 
+    def set_single_targets(self, targets_df) -> None:
+        """设置单体目标标记。
+
+        Parameters
+        ----------
+        targets_df : pd.DataFrame or None
+            单体目标检测结果，需含 ping_idx_center / depth_idx_center 列
+        """
+        if targets_df is None or targets_df.empty:
+            self._single_targets = None
+        else:
+            pings = np.asarray(targets_df["ping_idx_center"].values, dtype=np.float32)
+            samples = np.asarray(targets_df["depth_idx_center"].values, dtype=np.float32)
+            self._single_targets = np.column_stack([pings, samples])
+        self.update()
+
+    def clear_single_targets(self) -> None:
+        """清除单体目标标记"""
+        self._single_targets = None
+        self.update()
+
     def set_colormap(self, name: str = "jet", vmin: float = -70.0, vmax: float = -20.0) -> None:
         self._cmap_name = "gray" if name == "grayscale" else name
         self._vmin = vmin
@@ -368,6 +390,8 @@ class EchogramRenderer(QOpenGLWidget):
             self._draw_surface_line()
         if self._school_mask is not None:
             self._draw_school_overlay()
+        if self._single_targets is not None:
+            self._draw_single_targets()
         if self._selecting and self._select_start and self._select_end:
             self._draw_selection_rect()
 
@@ -794,6 +818,24 @@ class EchogramRenderer(QOpenGLWidget):
             y0 = self._offset_y + s * self._zoom_y
             glVertex2f(px, y0)
             glVertex2f(px, y0 + self._zoom_y)
+        glEnd()
+
+    def _draw_single_targets(self) -> None:
+        """绘制单体目标标记（红色十字）。"""
+        if self._single_targets is None:
+            return
+        glColor4f(1.0, 0.25, 0.2, 0.95)
+        glLineWidth(1.5)
+        half_x = self._zoom_x * 0.35
+        half_y = self._zoom_y * 0.35
+        glBegin(GL_LINES)
+        for ping, sample in self._single_targets:
+            x = self._offset_x + ping * self._zoom_x
+            y = self._offset_y + sample * self._zoom_y
+            glVertex2f(x - half_x, y)
+            glVertex2f(x + half_x, y)
+            glVertex2f(x, y - half_y)
+            glVertex2f(x, y + half_y)
         glEnd()
 
     def _draw_selection_rect(self) -> None:
