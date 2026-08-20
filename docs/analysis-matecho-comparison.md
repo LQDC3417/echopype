@@ -710,24 +710,24 @@ def invert(
 
 ### 8.1 任务看板
 
-| 任务 | 优先级 | 状态 | 开始日期 | 完成日期 | 备注 |
+| 任务 | 优先级 | 状态 | 完成日期 | 实现位置 | 备注 |
 |------|--------|------|----------|----------|------|
-| 回声积分模块 | P0 | 待开始 | - | - | 参考 pyEcholab |
-| 增强底部检测 | P0 | 待开始 | - | - | 参考 Matecho |
-| 高级鱼群提取 | P1 | 待开始 | - | - | 参考 Matecho |
-| 单目标检测 | P1 | 待开始 | - | - | 参考 Matecho |
-| 增强噪声去除 | P2 | 待开始 | - | - | 参考 Matecho |
-| 噪声可视化检查 | P2 | 待开始 | - | - | 参考 Matecho |
-| TS 模型反演 | P3 | 待开始 | - | - | 参考 Matecho |
+| 回声积分模块 | P0 | ✅ 完成 | 2026-08-20 | `src/core/integration.py` | ESU pings/distance、ABC、密度单一来源（参考 pyEcholab） |
+| 增强底部检测 | P0 | ✅ 完成 | 2026-08-20 | `src/core/bottom_detection.py` | basic / enhanced / afsc 三方法 + 校验（参考 Matecho） |
+| 高级鱼群提取 | P1 | ✅ 完成 | 2026-08-20 | `src/core/shoal_extraction.py` | 逐 ping 聚类 + 跨 ping 连接（参考 Matecho EchoGroupExtraction） |
+| 单目标检测 | P1 | ✅ 完成 | 2026-08-20 | `src/core/sed.py` | 真实分裂波束 SED，329 目标验证；简化版已移除 |
+| 增强噪声去除 | P2 | ✅ 完成 | 2026-08-20 | `src/core/noise.py` | De Robertis + passive 两种估计（参考 Matecho） |
+| 噪声可视化检查 | P2 | ✅ 完成 | 2026-08-20 | `src/core/noise_plot.py` | 检查图 + 报告 |
+| TS 模型反演 | P3 | ⏳ 待开始 | - | `src/core/inversion.py`（规划） | 参考 Matecho |
 
 ### 8.2 版本规划
 
-| 版本 | 主要功能 | 预计时间 |
-|------|----------|----------|
-| v2.1 | 回声积分 + 增强底部检测 | 2 周内 |
-| v2.2 | 高级鱼群提取 + 单目标检测 | 1 月内 |
-| v2.3 | 增强噪声去除 + 可视化检查 | 2 月内 |
-| v3.0 | TS 模型反演 | 3+ 月 |
+| 版本 | 主要功能 | 状态 |
+|------|----------|------|
+| v2.1 | 回声积分 + 增强底部检测 | ✅ 已完成 |
+| v2.2 | 高级鱼群提取 + 单目标检测 | ✅ 已完成 |
+| v2.3 | 增强噪声去除 + 可视化检查 | ✅ 已完成 |
+| v3.0 | TS 模型反演 | ⏳ 规划中 |
 
 ---
 
@@ -738,20 +738,26 @@ def invert(
 ```
 src/
 ├── core/
-│   ├── acoustic.py        # 增强底部检测
-│   ├── integration.py     # 新增：回声积分
-│   ├── shoal_extraction.py # 新增：高级鱼群提取
-│   ├── single_target.py   # 新增：单目标检测
-│   ├── inversion.py       # 新增：TS 模型反演
-│   ├── density.py         # 扩展：支持反演结果
-│   ├── grid.py            # 无变更
-│   ├── school.py          # 保留：基础检测
-│   ├── region.py          # 无变更
-│   ├── quality.py         # 扩展：积分质量检查
-│   └── utils.py           # 无变更
-├── gui/                   # 无变更
-└── viz/                   # 无变更
+│   ├── acoustic.py        # 数据加载/校准 + GPS 附加（_attach_gps）
+│   ├── integration.py     # ✅ 回声积分（ESU pings/distance、ABC、密度）
+│   ├── bottom_detection.py# ✅ 增强底部检测（basic/enhanced/afsc）
+│   ├── shoal_extraction.py# ✅ 高级鱼群提取（聚类 + 跨 ping 连接）
+│   ├── sed.py             # ✅ 真实单目标检测（分裂波束 SED）
+│   ├── noise.py           # ✅ 增强噪声去除（De Robertis + passive）
+│   ├── noise_plot.py      # ✅ 噪声可视化检查
+│   ├── inversion.py       # ⏳ 规划：TS 模型反演
+│   ├── density.py         # 密度估算（ABC 单一来源）
+│   ├── school.py          # 基础鱼群检测（echopype detect_shoal）
+│   ├── region.py          # 分析区域裁剪
+│   ├── quality.py         # 质量检查
+│   ├── multifreq.py       # 多频分析
+│   ├── export.py          # 数据导出
+│   └── utils.py           # 公共工具（分辨率/ABC 等去重后）
+├── gui/                   # ✅ Echoview 风格（底部 tab/顶部 View/状态栏）
+└── viz/                   # OpenGL 渲染
 ```
+
+> 已删除：`grid.py`（合并进 integration.py）、`single_target.py`（简化版，由 sed.py 取代）
 
 ### 9.2 配置文件扩展
 
@@ -780,14 +786,17 @@ school_detection:
 
 # 新增模块配置
 integration:
-  esu_type: "pings"      # pings / seconds / nmi
+  esu_type: "pings"      # pings / distance (GPS 距离)
   esu_size: 500          # ESU 大小
   layer_width: 5         # 层宽度 (米)
 
-single_target:
-  enabled: false         # 默认关闭
-  min_ts: -50.0
-  max_ts: -20.0
+single_target_real:
+  ts_threshold_db: -50.0 # 真实 SED 阈值
+  pldl_db: 6.0           # 脉冲判定电平
+  min_norm_pulse: 0.8    # 最小归一化脉宽
+  max_norm_pulse: 1.5    # 最大归一化脉宽
+  max_angle_std_deg: 0.6 # 最大角度标准差
+  max_beam_comp_db: 3.0  # 最大波束补偿
 ```
 
 ---
