@@ -209,31 +209,73 @@ class ProcessingTab(QWidget):
 
         # ── 底部检测参数 ──
         bottom_group = QGroupBox(T("bottom_group"))
-        bottom_layout = QFormLayout()
-        bottom_layout.setSpacing(6)
-        bottom_layout.setContentsMargins(8, 12, 8, 8)
+        self.bottom_layout = QFormLayout()
+        self.bottom_layout.setSpacing(6)
+        self.bottom_layout.setContentsMargins(8, 12, 8, 8)
 
         self.combo_bottom_method = QComboBox()
         self.combo_bottom_method.addItems(["basic", "enhanced", "afsc"])
-        bottom_layout.addRow(T("bottom_method"), self.combo_bottom_method)
+        self.combo_bottom_method.currentTextChanged.connect(self._on_bottom_method_changed)
+        self.bottom_layout.addRow(T("bottom_method"), self.combo_bottom_method)
 
+        # basic 方法参数
         self.spin_bottom_thr = QDoubleSpinBox()
         self.spin_bottom_thr.setRange(-70, -20)
         self.spin_bottom_thr.setValue(-40.0)
         self.spin_bottom_thr.setSuffix(" dB")
-        bottom_layout.addRow(T("bottom_sv_threshold"), self.spin_bottom_thr)
+        self.bottom_layout.addRow(T("bottom_sv_threshold"), self.spin_bottom_thr)
 
+        # enhanced 方法参数
         self.spin_peak_thr = QDoubleSpinBox()
         self.spin_peak_thr.setRange(-80, -10)
         self.spin_peak_thr.setValue(-40.0)
         self.spin_peak_thr.setSuffix(" dB")
-        bottom_layout.addRow(T("bottom_peak_threshold"), self.spin_peak_thr)
+        self.bottom_layout.addRow(T("bottom_peak_threshold"), self.spin_peak_thr)
 
         self.spin_disc_thr = QDoubleSpinBox()
         self.spin_disc_thr.setRange(-80, -10)
         self.spin_disc_thr.setValue(-50.0)
         self.spin_disc_thr.setSuffix(" dB")
-        bottom_layout.addRow(T("bottom_disc_threshold"), self.spin_disc_thr)
+        self.bottom_layout.addRow(T("bottom_disc_threshold"), self.spin_disc_thr)
+
+        self.spin_sat_thr = QDoubleSpinBox()
+        self.spin_sat_thr.setRange(-80, -10)
+        self.spin_sat_thr.setValue(-60.0)
+        self.spin_sat_thr.setSuffix(" dB")
+        self.bottom_layout.addRow(T("bottom_sat_threshold"), self.spin_sat_thr)
+
+        self.spin_val_window = QSpinBox()
+        self.spin_val_window.setRange(1, 100)
+        self.spin_val_window.setValue(15)
+        self.bottom_layout.addRow(T("bottom_validation_window"), self.spin_val_window)
+
+        self.spin_val_thr = QDoubleSpinBox()
+        self.spin_val_thr.setRange(1.0, 20.0)
+        self.spin_val_thr.setValue(3.0)
+        self.bottom_layout.addRow(T("bottom_validation_threshold"), self.spin_val_thr)
+
+        self.spin_smooth_window = QSpinBox()
+        self.spin_smooth_window.setRange(1, 50)
+        self.spin_smooth_window.setValue(11)
+        self.bottom_layout.addRow(T("bottom_smoothing_window"), self.spin_smooth_window)
+
+        # afsc 方法参数
+        self.spin_search_min = QDoubleSpinBox()
+        self.spin_search_min.setRange(0.0, 500.0)
+        self.spin_search_min.setValue(10.0)
+        self.spin_search_min.setSuffix(" m")
+        self.bottom_layout.addRow(T("bottom_search_min"), self.spin_search_min)
+
+        self.spin_window_len = QSpinBox()
+        self.spin_window_len.setRange(1, 50)
+        self.spin_window_len.setValue(11)
+        self.bottom_layout.addRow(T("bottom_window_len"), self.spin_window_len)
+
+        self.spin_backstep = QDoubleSpinBox()
+        self.spin_backstep.setRange(0.0, 100.0)
+        self.spin_backstep.setValue(35.0)
+        self.spin_backstep.setSuffix(" dB")
+        self.bottom_layout.addRow(T("bottom_backstep"), self.spin_backstep)
 
         # 底部检测按钮
         self.btn_detect_bottom = QPushButton(T("btn_detect_bottom"))
@@ -247,14 +289,17 @@ class ProcessingTab(QWidget):
         btn_layout.addWidget(self.btn_detect_bottom)
         btn_layout.addWidget(self.btn_draw_bottom)
         btn_layout.addWidget(self.btn_update_bottom)
-        bottom_layout.addRow(btn_layout)
+        self.bottom_layout.addRow(btn_layout)
 
         self.btn_detect_bottom.clicked.connect(self.detect_bottom_clicked)
         self.btn_draw_bottom.clicked.connect(self.draw_bottom_clicked)
         self.btn_update_bottom.clicked.connect(self.update_bottom_clicked)
 
-        bottom_group.setLayout(bottom_layout)
+        bottom_group.setLayout(self.bottom_layout)
         layout.addWidget(bottom_group)
+
+        # 初始按默认方法（basic）显示对应参数
+        self._on_bottom_method_changed(self.combo_bottom_method.currentText())
 
         # ── 鱼群检测参数 ──
         school_group = QGroupBox(T("school_group"))
@@ -542,12 +587,30 @@ class ProcessingTab(QWidget):
     def get_school_config(self) -> dict:
         return {"thr": self.spin_school_thr.value()}
 
+    def _on_bottom_method_changed(self, method: str):
+        """底部检测方法切换：只显示当前方法的参数（QFormLayout 行级显隐）"""
+        # 行索引：0=方法, 1=Sv 阈值(basic), 2-7=enhanced 参数, 8-10=afsc 参数, 11=按钮
+        self.bottom_layout.setRowVisible(1, method == "basic")
+        enhanced_visible = method == "enhanced"
+        for row in range(2, 8):
+            self.bottom_layout.setRowVisible(row, enhanced_visible)
+        afsc_visible = method == "afsc"
+        for row in range(8, 11):
+            self.bottom_layout.setRowVisible(row, afsc_visible)
+
     def get_bottom_config(self) -> dict:
         return {
             "method": self.combo_bottom_method.currentText(),
             "threshold": self.spin_bottom_thr.value(),
             "peak_threshold": self.spin_peak_thr.value(),
             "discrimination_threshold": self.spin_disc_thr.value(),
+            "saturation_threshold": self.spin_sat_thr.value(),
+            "validation_window": self.spin_val_window.value(),
+            "validation_threshold": self.spin_val_thr.value(),
+            "smoothing_window": self.spin_smooth_window.value(),
+            "search_min": self.spin_search_min.value(),
+            "window_len": self.spin_window_len.value(),
+            "backstep": self.spin_backstep.value(),
         }
 
     def get_density_config(self) -> dict:
@@ -604,6 +667,20 @@ class ProcessingTab(QWidget):
             self.spin_peak_thr.setValue(bottom["peak_threshold"])
         if "discrimination_threshold" in bottom:
             self.spin_disc_thr.setValue(bottom["discrimination_threshold"])
+        if "saturation_threshold" in bottom:
+            self.spin_sat_thr.setValue(bottom["saturation_threshold"])
+        if "validation_window" in bottom:
+            self.spin_val_window.setValue(int(bottom["validation_window"]))
+        if "validation_threshold" in bottom:
+            self.spin_val_thr.setValue(bottom["validation_threshold"])
+        if "smoothing_window" in bottom:
+            self.spin_smooth_window.setValue(int(bottom["smoothing_window"]))
+        if "search_min" in bottom:
+            self.spin_search_min.setValue(bottom["search_min"])
+        if "window_len" in bottom:
+            self.spin_window_len.setValue(int(bottom["window_len"]))
+        if "backstep" in bottom:
+            self.spin_backstep.setValue(bottom["backstep"])
 
         school = config.get("school_detection", {})
         if "thr" in school:
