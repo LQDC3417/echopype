@@ -298,6 +298,14 @@ _TEXTS = {
     "region_inspect": {"zh": "检查", "en": "Inspect"},
     "region_delete": {"zh": "删除区域", "en": "Delete Region"},
     "region_export_data": {"zh": "导出区域数据", "en": "Export Region Data"},
+    "region_prev": {"zh": "◀ 上一条", "en": "◀ Prev"},
+    "region_next": {"zh": "下一条 ▶", "en": "Next ▶"},
+    "bottom_region_tab": {"zh": "区域", "en": "Regions"},
+    "bottom_messages_tab": {"zh": "消息", "en": "Messages"},
+    "messages_clear": {"zh": "清空", "en": "Clear"},
+    "view_tab": {"zh": "View {n}", "en": "View {n}"},
+    "status_time": {"zh": "时间: --", "en": "Time: --"},
+    "status_time_fmt": {"zh": "时间: {t}", "en": "Time: {t}"},
 
     # ── 统计对话框 ──
     "stats_title": {"zh": "统计结果", "en": "Statistics"},

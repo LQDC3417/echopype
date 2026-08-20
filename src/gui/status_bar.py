@@ -13,6 +13,40 @@ from PySide6.QtWidgets import QLabel, QProgressBar, QStatusBar
 from src.gui.i18n import T
 
 
+def _format_dms(value: float, is_lat: bool) -> str:
+    """将十进制度转换为度分秒格式
+
+    Args:
+        value: 十进制度数
+        is_lat: True表示纬度（N/S），False表示经度（E/W）
+
+    Returns:
+        格式化字符串，如 "38° 03.444' N"
+    """
+    # 负值处理：先取绝对值计算度分秒，方向用原始符号决定
+    is_negative = value < 0
+    abs_value = abs(value)
+
+    # 度取整数部分
+    degrees = int(abs_value)
+
+    # 分 = (小数*60)，保留3位小数
+    minutes_decimal = (abs_value - degrees) * 60
+
+    # 方向后缀
+    if is_lat:
+        direction = "S" if is_negative else "N"
+    else:
+        direction = "W" if is_negative else "E"
+
+    # 格式化输出：度° 分.秒' 方向
+    # 分钟需要格式化为3位小数，整数部分需要2位
+    minutes_int = int(minutes_decimal)
+    minutes_decimal_part = f"{minutes_decimal - minutes_int:.3f}"[1:]  # 取小数点及后面
+
+    return f"{degrees}° {minutes_int:02d}{minutes_decimal_part}' {direction}"
+
+
 class MainStatusBar(QStatusBar):
     """底部状态栏 — 参照 Echoview 风格
 
@@ -95,7 +129,7 @@ class MainStatusBar(QStatusBar):
         self.addPermanentWidget(self._separator())
 
         # ─── 时间戳 ───
-        self.lbl_time = QLabel(datetime.now().strftime("%Y/%m/%d %H:%M:%S"))
+        self.lbl_time = QLabel(T("status_time"))
         self.lbl_time.setStyleSheet("padding: 0 8px;")
         self.addPermanentWidget(self.lbl_time)
 
@@ -118,7 +152,8 @@ class MainStatusBar(QStatusBar):
 
     def _update_time(self):
         """更新时间戳"""
-        self.lbl_time.setText(datetime.now().strftime("%Y/%m/%d %H:%M:%S"))
+        # 注意：这里不再自动更新时间，时间由 set_ping_time 方法设置
+        pass
 
     def set_step(self, text: str):
         """设置流水线步骤"""
@@ -155,11 +190,28 @@ class MainStatusBar(QStatusBar):
         self.lbl_zoom.setText(T("status_zoom_fmt", val=zoom_x))
 
     def set_gps_info(self, lat: float | None = None, lon: float | None = None):
-        """设置 GPS 坐标"""
+        """设置 GPS 坐标（度分秒格式）"""
         if lat is None or lon is None:
             self.lbl_gps.setText(T("status_gps"))
         else:
-            self.lbl_gps.setText(f"GPS: {lat:.4f}° N {lon:.4f}° E")
+            self.lbl_gps.setText(f"{_format_dms(lat, True)} {_format_dms(lon, False)}")
+
+    def set_ping_time(self, dt=None):
+        """设置 ping 时间戳
+
+        Args:
+            dt: datetime 对象或 numpy datetime64，None 时显示占位文本
+        """
+        if dt is None:
+            self.lbl_time.setText(T("status_time"))
+        else:
+            # 处理 numpy datetime64 类型
+            if hasattr(dt, 'astype'):
+                # numpy datetime64 转换为 datetime
+                dt = dt.astype('datetime64[ms]').astype(datetime)
+            # 格式化时间
+            time_str = dt.strftime("%Y/%m/%d %H:%M:%S")
+            self.lbl_time.setText(T("status_time_fmt", t=time_str))
 
     def show_progress(self, text: str = ""):
         """显示进度条"""

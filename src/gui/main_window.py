@@ -18,20 +18,25 @@
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
     QSplitter,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from src.gui.fileset import Fileset
 from src.gui.fileset_tree import FilesetTreeWidget
 from src.gui.i18n import T, set_language
 from src.gui.property_panel import PropertyPanel
-from src.gui.region_panel import RegionTableWidget
+from src.gui.region_panel import RegionBrowserWidget
 from src.gui.stats_dialog import StatsDialog
 from src.gui.status_bar import MainStatusBar
 from src.gui.toolbars import EchogramToolBar, MouseMode, StandardToolBar
@@ -45,6 +50,31 @@ from src.gui.handlers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _LogBridge(QObject):
+    """信号桥：后台线程 → 主线程日志面板"""
+    log_record = Signal(str)
+
+
+class _QtLogHandler(logging.Handler):
+    """线程安全的 logging Handler：通过 Qt 信号将日志从任意线程桥接到主线程"""
+
+    def __init__(self):
+        super().__init__()
+        self._bridge = _LogBridge()
+
+    @property
+    def log_record(self):
+        return self._bridge.log_record
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self._bridge.log_record.emit(msg)
+        except Exception:
+            self.handleError(record)
+
 
 class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, InteractionMixin):
     """Echoview 风格主窗口 — 鱼类声学资源评估系统"""
@@ -218,9 +248,11 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.statusbar = MainStatusBar(self)
         self.setStatusBar(self.statusbar)
 
-        # ── 中央：仅 Echogram ──
+        # ── 中央：View Tab 容器 ──
         self.echogram = EchogramRenderer()
-        self.setCentralWidget(self.echogram)
+        self.view_tabs = QTabWidget()
+        self.view_tabs.addTab(self.echogram, T("view_tab", n=1))
+        self.setCentralWidget(self.view_tabs)
 
         # ── 左侧 Dock：Matecho风格综合面板 ──
         from src.gui.left_panel import LeftPanel
@@ -252,12 +284,18 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         )
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock_right)
 
-        # ── 底部 Dock：区域表格 ──
-        self.region_table = RegionTableWidget()
-        self.region_table.setMaximumHeight(180)
+        # ── 底部 Dock：区域浏览器 + 消息日志 tab ──
+        self.region_browser = RegionBrowserWidget()
+        self.region_table = self.region_browser.table  # 兼容现有引用
+        self._setup_message_log()
+
+        bottom_tabs = QTabWidget()
+        bottom_tabs.addTab(self.region_browser, T("bottom_region_tab"))
+        bottom_tabs.addTab(self._message_panel, T("bottom_messages_tab"))
+
         self.dock_bottom = QDockWidget(T("region_school"), self)
         self.dock_bottom.setObjectName("dockRegions")
-        self.dock_bottom.setWidget(self.region_table)
+        self.dock_bottom.setWidget(bottom_tabs)
         self.dock_bottom.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
         )
@@ -267,6 +305,34 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.resizeDocks([self.dock_left], [260], Qt.Horizontal)
         self.resizeDocks([self.dock_right], [300], Qt.Horizontal)
         self.resizeDocks([self.dock_bottom], [160], Qt.Vertical)
+
+    # ═══════════════════════════════════════════════════════
+    # 消息日志（线程安全）
+    # ═══════════════════════════════════════════════════════
+
+    def _setup_message_log(self):
+        """创建消息日志面板 + 线程安全的 logging handler"""
+        self._message_panel = QWidget()
+        msg_layout = QVBoxLayout(self._message_panel)
+        msg_layout.setContentsMargins(0, 0, 0, 0)
+        msg_layout.setSpacing(2)
+
+        btn_clear = QPushButton(T("messages_clear"))
+        btn_clear.clicked.connect(lambda: self._message_text.clear())
+        msg_layout.addWidget(btn_clear)
+
+        self._message_text = QPlainTextEdit()
+        self._message_text.setReadOnly(True)
+        msg_layout.addWidget(self._message_text, 1)
+
+        # 线程安全：通过 Qt 信号桥接后台线程的日志
+        handler = _QtLogHandler()
+        handler.log_record.connect(self._message_text.appendPlainText)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+        fish_logger = logging.getLogger("fish_acoustics")
+        fish_logger.setLevel(logging.INFO)
+        fish_logger.addHandler(handler)
 
     # ═══════════════════════════════════════════════════════
     # 信号连接
@@ -336,8 +402,8 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         # 变量列表
         self.variable_list.variable_selected.connect(self._on_variable_selected)
 
-        # 区域面板
-        self.region_table.region_deleted.connect(self._on_region_deleted)
+        # 区域面板（信号通过 RegionBrowserWidget 转发）
+        self.region_browser.region_deleted.connect(self._on_region_deleted)
 
     # ═══════════════════════════════════════════════════════
     # 配置

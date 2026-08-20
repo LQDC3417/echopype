@@ -359,8 +359,6 @@ class ProcessingTab(QWidget):
         integration_group.setLayout(integration_layout)
         layout.addWidget(integration_group)
 
-        self.btn_stats.clicked.connect(self.stats_clicked)
-
         # ── 质量检查 ──
         self.btn_quality = QPushButton(T("btn_quality_check"))
         self.btn_quality.clicked.connect(self.quality_check_clicked)

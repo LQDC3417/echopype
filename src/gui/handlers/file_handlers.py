@@ -216,6 +216,9 @@ class FileMixin:
             self.statusbar.set_status(
                 T("msg_file_switched", cur=1, total=len(self._raw_file_queue), name=path.name)
             )
+            # 更新 View tab 标题
+            if hasattr(self, 'view_tabs'):
+                self.view_tabs.setTabText(0, T("view_tab", n=1) + f": {path.name}")
 
         # 加载下一个
         self._raw_queue_index += 1
@@ -315,6 +318,10 @@ class FileMixin:
             T("msg_file_switched", cur=new_idx + 1, total=n_queue, name=path.name)
         )
         self.statusbar.set_file_info(f"[{new_idx + 1}/{n_queue}] {path.name}")
+
+        # 更新 View tab 标题
+        if hasattr(self, 'view_tabs'):
+            self.view_tabs.setTabText(0, T("view_tab", n=1) + f": {path.name}")
 
     def _on_channel_selected(self, channel: str):
         self._current_channel = channel

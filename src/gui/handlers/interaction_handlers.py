@@ -22,9 +22,19 @@ class InteractionMixin:
         self.statusbar.set_status(T("msg_mode", mode=mode.name))
 
     def _update_depth_at_cursor(self, ping: float, sample: float):
-        """将 sample index 转为实际深度(m)并更新状态栏"""
+        """将 sample index 转为实际深度(m)并更新状态栏（含 ping 时间戳）"""
         if self._ds_Sv is None:
             return
+        # 时间戳：ping index → ping_time（参照 Echoview 状态栏）
+        try:
+            pt = self._ds_Sv["ping_time"].values
+            pidx = round(ping)
+            if 0 <= pidx < len(pt):
+                self.statusbar.set_ping_time(pt[pidx])
+            else:
+                self.statusbar.set_ping_time(None)
+        except Exception:
+            self.statusbar.set_ping_time(None)
         if "echo_range" in self._ds_Sv:
             er = self._ds_Sv["echo_range"]
             if "channel" in er.dims:

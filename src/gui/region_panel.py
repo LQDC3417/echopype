@@ -6,9 +6,13 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QMenu,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from src.gui.i18n import T
@@ -81,3 +85,58 @@ class RegionTableWidget(QTableWidget):
         act_exp.triggered.connect(lambda: self.region_export.emit(rid))
         menu.addAction(act_exp)
         menu.exec_(self.mapToGlobal(pos))
+
+
+class RegionBrowserWidget(QWidget):
+    """Region Browser 容器：导航按钮行 + 区域表格（参照 Echoview 底部面板）
+
+    信号：
+    - region_selected(int)：双击区域
+    - region_deleted(int)：右键删除
+    - region_export(int)：右键导出
+    """
+    region_selected = Signal(int)
+    region_deleted = Signal(int)
+    region_export = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        # 导航按钮行（参照 Echoview Region Browser 的 Prev/Next）
+        nav = QHBoxLayout()
+        nav.setSpacing(4)
+        self.btn_prev = QPushButton(T("region_prev"))
+        self.btn_prev.setToolTip(T("region_prev"))
+        self.btn_prev.clicked.connect(self._select_prev)
+        self.btn_next = QPushButton(T("region_next"))
+        self.btn_next.setToolTip(T("region_next"))
+        self.btn_next.clicked.connect(self._select_next)
+        nav.addWidget(self.btn_prev)
+        nav.addWidget(self.btn_next)
+        nav.addStretch()
+        layout.addLayout(nav)
+
+        self.table = RegionTableWidget()
+        self.table.region_selected.connect(self.region_selected)
+        self.table.region_deleted.connect(self.region_deleted)
+        self.table.region_export.connect(self.region_export)
+        layout.addWidget(self.table, 1)
+
+    def _select_prev(self):
+        """选中上一个区域行"""
+        row = self.table.currentRow()
+        if row > 0:
+            self.table.selectRow(row - 1)
+            self.table.setCurrentCell(row - 1, 0)
+            self.table.scrollTo(self.table.model().index(row - 1, 0))
+
+    def _select_next(self):
+        """选中下一个区域行"""
+        row = self.table.currentRow()
+        if row < self.table.rowCount() - 1:
+            self.table.selectRow(row + 1)
+            self.table.setCurrentCell(row + 1, 0)
+            self.table.scrollTo(self.table.model().index(row + 1, 0))
