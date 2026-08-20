@@ -41,7 +41,7 @@ class InteractionMixin:
                 er = er.isel(channel=0)
             er_vals = er.values
             if er_vals.ndim == 2:
-                er_vals = er_vals[:, 0]
+                er_vals = er_vals[0, :]  # 取第一 ping 的深度剖面
             idx = round(sample)
             if 0 <= idx < len(er_vals):
                 self.statusbar.set_depth_info(float(er_vals[idx]))
