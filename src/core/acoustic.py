@@ -219,6 +219,11 @@ def process_single_file(echodata, config: dict) -> xr.Dataset:
     # 2. 噪声去除（Sv 原始数据保留，去噪结果存入 Sv_corrected）
     noise_cfg = proc_cfg.get("noise_removal", {})
     logger.info("去除背景噪声...")
+    # echopype 0.11.1: remove_background_noise 装饰器 @add_processing_level("L*B")
+    # 要求输入 ds 带 input_processing_level 属性（由 compute_Sv 传播），
+    # 缺失时直接抛 RuntimeError，这里补上（从 L2A 起算）
+    if "input_processing_level" not in ds_Sv.attrs:
+        ds_Sv.attrs["input_processing_level"] = "L2A"
     ds_Sv = remove_background_noise(
         ds_Sv,
         ping_num=noise_cfg.get("ping_num", 5),

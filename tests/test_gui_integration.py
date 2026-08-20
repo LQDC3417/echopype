@@ -89,6 +89,9 @@ def int_ds_clean(int_ds_sv, int_config):
     """噪声去除 → ds_Sv with Sv_corrected"""
     from echopype.clean import remove_background_noise
     noise_cfg = int_config["processing"]["noise_removal"]
+    # echopype 0.11.1: remove_background_noise 要求输入带 input_processing_level
+    if "input_processing_level" not in int_ds_sv.attrs:
+        int_ds_sv.attrs["input_processing_level"] = "L2A"
     ds = remove_background_noise(
         int_ds_sv,
         ping_num=noise_cfg["ping_num"],
