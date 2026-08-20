@@ -194,7 +194,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         # ── 分析 ──
         am = mb.addMenu(T("menu_analysis"))
         am.addAction(self._act(T("menu_integration"), self._run_integration))
-        am.addAction(self._act(T("menu_single_target"), self._run_single_target_detection))
         am.addAction(self._act(T("btn_real_sed"), self._run_real_sed))
         am.addSeparator()
         am.addAction(self._act(T("export_density_report"), self._export))
@@ -389,7 +388,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.property_panel.noise_params_changed.connect(self._on_noise_params_changed)
         self.property_panel.quality_check_clicked.connect(self._run_quality_check)
         self.property_panel.multifreq_clicked.connect(self._run_multifreq_analysis)
-        self.property_panel.single_target_clicked.connect(self._run_single_target_detection)
         self.property_panel.sv_stats_clicked.connect(self._run_sv_stats)
         self.property_panel.transect_split_clicked.connect(self._run_transect_split)
         self.property_panel.integration_clicked.connect(self._run_integration)
@@ -431,15 +429,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
                 "esu_type": "pings", "esu_size": 500,
                 "layer_width": 5.0, "min_threshold": -70.0,
                 "max_threshold": 0.0, "ts_default": -30.0,
-            },
-            "single_target": {
-                "sv_threshold_db": -50.0, "min_area": 3, "max_area": 500,
-            },
-            "single_target_real": {
-                "ts_threshold_db": -50.0, "pldl_db": 6.0,
-                "min_norm_pulse": 0.8, "max_norm_pulse": 1.5,
-                "max_angle_std_deg": 0.6, "max_beam_comp_db": 3.0,
-                "min_depth_m": 0.0, "max_depth_m": 200.0,
             },
         }
 

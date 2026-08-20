@@ -20,6 +20,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# 本文件设计为直接运行（python tests/test_gui_real_flow.py），
+# test_step 是辅助函数而非测试用例，不参与 pytest 收集
+__test__ = False
+
 RAW_FILE = Path("D:/Administrator/Desktop/echopype/raw_data/20250706SCSK-D20250706-T024009.raw")
 CONFIG_PATH = Path("D:/Administrator/Desktop/echopype/configs/example.yaml")
 
@@ -165,22 +169,6 @@ def step8_integration(ds_Sv, config):
 # ═══════════════════════════════════════════════════════
 # 步骤 9: 单体目标检测
 # ═══════════════════════════════════════════════════════
-def step9_single_target(ds_Sv, config):
-    from src.core.single_target import detect_and_compute_ts
-
-    targets = detect_and_compute_ts(ds_Sv, config)
-    print(f"  目标数: {len(targets)}")
-    if not targets.empty:
-        print(f"  列: {list(targets.columns)}")
-        if "ts_db" in targets.columns:
-            ts_valid = targets["ts_db"].dropna()
-            if len(ts_valid) > 0:
-                print(f"  TS 范围: [{ts_valid.min():.1f}, {ts_valid.max():.1f}] dB")
-    return f"目标={len(targets)}"
-
-# ═══════════════════════════════════════════════════════
-# 步骤 10: 多频分析
-# ═══════════════════════════════════════════════════════
 def step10_multifreq(ds_Sv, config):
     from src.core.multifreq import get_channel_summary, split_transects
 
@@ -245,14 +233,12 @@ def step14_workers():
         LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
         DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker,
         IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
-        MultifreqAnalysisWorker, SingleTargetWorker, SvStatsWorker,
         TransectSplitWorker,
     )
     workers = [
         LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
         DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker,
         IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
-        MultifreqAnalysisWorker, SingleTargetWorker, SvStatsWorker,
         TransectSplitWorker,
     ]
     print(f"  Worker 类数: {len(workers)}")

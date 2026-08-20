@@ -9,7 +9,6 @@ from src.gui.workers import (
     MultifreqAnalysisWorker,
     QualityCheckWorker,
     RealSedWorker,
-    SingleTargetWorker,
     SvStatsWorker,
     TransectSplitWorker,
 )
@@ -112,44 +111,6 @@ class AnalysisMixin:
     # 单体目标检测
     # ═══════════════════════════════════════════════════════
 
-    def _run_single_target_detection(self):
-        """运行单体目标检测"""
-        if self._ds_Sv is None or self._config is None:
-            QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
-            return
-
-        # 从 UI 同步单体目标检测配置到 config
-        st_cfg = self.property_panel.processing.get_single_target_config()
-        self._config.setdefault("single_target", {}).update(st_cfg)
-
-        # 统一使用 _get_analysis_ds() 获取裁剪后的数据（表线→底线区域）
-        ds_for_st = self._get_analysis_ds()
-        if ds_for_st is None:
-            QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
-            return
-
-        self.statusbar.show_progress(T("msg_single_target"))
-        self._ds_for_single_target = ds_for_st
-        self._current_worker = SingleTargetWorker(ds_for_st, self._config)
-        self._current_worker.finished.connect(self._on_single_target_done)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
-
-    def _on_single_target_done(self, targets_df):
-        """单体目标检测完成 → 展示结果表格"""
-        self.statusbar.hide_progress()
-        n = len(targets_df) if targets_df is not None and not targets_df.empty else 0
-        if n == 0:
-            self.echogram.clear_single_targets()
-            QMessageBox.information(self, T("msg_single_target_result"), T("msg_no_single_target"))
-            return
-        self._single_target_df = targets_df
-        self.stats_dialog.update_single_target(targets_df)
-        self.echogram.set_single_targets(targets_df)
-        self.statusbar.set_status(T("msg_single_target_done", n=n))
-        self._show_stats()
-
     def _run_real_sed(self):
         """运行真实单体目标检测（分裂波束 SED）"""
         if self._echodata is None:
@@ -249,4 +210,3 @@ class AnalysisMixin:
     # ═══════════════════════════════════════════════════════
     # 交互
     # ═══════════════════════════════════════════════════════
-

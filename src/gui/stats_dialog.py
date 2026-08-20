@@ -250,26 +250,6 @@ class StatsDialog(QDialog):
 
         layout.addWidget(self.single_target_table, 1)
 
-    def _on_single_target_context_menu(self, position):
-        """单体目标表格右键菜单"""
-        menu = QMenu(self)
-
-        copy_action = QAction(T("stats_copy_selected"), self)
-        copy_action.triggered.connect(lambda: self._copy_selected_rows(self.single_target_table))
-        menu.addAction(copy_action)
-
-        copy_all_action = QAction(T("stats_copy_all"), self)
-        copy_all_action.triggered.connect(lambda: self._copy_all_rows(self.single_target_table))
-        menu.addAction(copy_all_action)
-
-        menu.addSeparator()
-
-        export_action = QAction(T("stats_export_selected"), self)
-        export_action.triggered.connect(lambda: self._export_selected_rows(self.single_target_table))
-        menu.addAction(export_action)
-
-        menu.exec_(self.single_target_table.viewport().mapToGlobal(position))
-
     def _setup_real_sed_tab(self):
         """设置真实 SED 标签页"""
         layout = QVBoxLayout(self.real_sed_tab)
@@ -521,95 +501,6 @@ class StatsDialog(QDialog):
         item = QTableWidgetItem("--")
         item.setTextAlignment(Qt.AlignCenter)
         return item
-
-    def update_single_target(self, df):
-        """更新单体目标检测结果"""
-        if df is None or df.empty:
-            self.lbl_single_target_info.setText(T("single_target_info"))
-            self.lbl_single_target_stats.setText("--")
-            self.single_target_table.setRowCount(0)
-            return
-
-        self._single_target_df = df
-        self.lbl_single_target_info.setText(T("single_target_info_fmt", n=len(df)))
-
-        parts = []
-        if "ts_db" in df.columns:
-            ts = df["ts_db"].dropna()
-            ts_valid = ts[ts > -900]
-            if len(ts_valid):
-                parts.append(f"TS: {ts_valid.mean():.1f} dB (n={len(ts_valid)})")
-        if "sv_max" in df.columns:
-            sv = df["sv_max"].dropna()
-            if len(sv):
-                parts.append(f"Sv max: {sv.mean():.1f} dB")
-        self.lbl_single_target_stats.setText(" | ".join(parts) if parts else "--")
-
-        self._populate_single_target_table(df)
-        self.tabs.setCurrentIndex(2)
-
-    def _populate_single_target_table(self, df):
-        """填充单体目标表格"""
-        self.single_target_table.setSortingEnabled(False)
-        self.single_target_table.setRowCount(len(df))
-
-        for i, (_, row) in enumerate(df.iterrows()):
-            # ID
-            item_id = QTableWidgetItem(str(row.get("target_id", "")))
-            item_id.setTextAlignment(Qt.AlignCenter)
-            self.single_target_table.setItem(i, 0, item_id)
-
-            # Ping（时间）
-            pc = row.get("ping_center", "")
-            ping_str = str(pc)[:19] if pc is not None else "--"
-            item_ping = QTableWidgetItem(ping_str)
-            item_ping.setTextAlignment(Qt.AlignCenter)
-            self.single_target_table.setItem(i, 1, item_ping)
-
-            # 深度
-            dc = row.get("depth_center", 0)
-            item_depth = QTableWidgetItem(f"{dc:.1f} m")
-            item_depth.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.single_target_table.setItem(i, 2, item_depth)
-
-            # Sv 峰值
-            sv_max = row.get("sv_max")
-            if sv_max is not None and not _isnan(sv_max):
-                item = QTableWidgetItem(f"{sv_max:.1f}")
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                if sv_max > -40:
-                    item.setBackground(QBrush(QColor("#e6fffa")))
-                elif sv_max < -60:
-                    item.setBackground(QBrush(QColor("#fed7d7")))
-                self.single_target_table.setItem(i, 3, item)
-            else:
-                self.single_target_table.setItem(i, 3, self._dash_item())
-
-            # Sv 均值
-            sv_mean = row.get("sv_mean")
-            if sv_mean is not None and not _isnan(sv_mean):
-                item = QTableWidgetItem(f"{sv_mean:.1f}")
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.single_target_table.setItem(i, 4, item)
-            else:
-                self.single_target_table.setItem(i, 4, self._dash_item())
-
-            # 面积
-            area = row.get("area", 0)
-            item_area = QTableWidgetItem(str(int(area)))
-            item_area.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.single_target_table.setItem(i, 5, item_area)
-
-            # TS
-            ts = row.get("ts_db")
-            if ts is not None and not _isnan(ts) and ts > -900:
-                item_ts = QTableWidgetItem(f"{ts:.1f}")
-                item_ts.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.single_target_table.setItem(i, 6, item_ts)
-            else:
-                self.single_target_table.setItem(i, 6, self._dash_item())
-
-        self.single_target_table.setSortingEnabled(True)
 
     def update_real_sed(self, df):
         """更新真实 SED 检测结果"""
@@ -891,11 +782,9 @@ class StatsDialog(QDialog):
             else:
                 QMessageBox.warning(self, T("dialog_warning"), T("stats_no_integration_data"))
         elif current_tab == 2:
+            # 导出单体目标数据（已删除）
+            pass
             # 导出单体目标数据
-            if self._single_target_df is not None and not self._single_target_df.empty:
-                self._export_dataframe(self._single_target_df, T("stats_tab_single_target"))
-            else:
-                QMessageBox.warning(self, T("dialog_warning"), T("stats_no_single_target_data"))
         elif current_tab == 3:
             # 导出真实 SED 数据
             if self._real_sed_df is not None and not self._real_sed_df.empty:
@@ -955,7 +844,8 @@ class StatsDialog(QDialog):
         elif current_tab == 1:
             self._copy_all_rows(self.integration_table)
         elif current_tab == 2:
-            self._copy_all_rows(self.single_target_table)
+            # 复制单体目标数据（已删除）
+            pass
         elif current_tab == 3:
             self._copy_all_rows(self.real_sed_table)
     def _export_dataframe(self, df, default_name):

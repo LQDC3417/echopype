@@ -71,11 +71,6 @@ school_detection:
   min_shoal_height: 0.5             # 最小鱼群高度 (米)
 
 # 单体目标检测配置（新增）
-single_target:
-  enabled: false                    # 默认关闭
-  sv_threshold_db: -50.0            # Sv 阈值 (dB)
-  min_area: 3                       # 最小面积（像素）
-  max_area: 500                     # 最大面积（像素）
 
 density:
   ts_default: -30.0

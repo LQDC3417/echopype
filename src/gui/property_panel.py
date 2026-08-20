@@ -601,14 +601,6 @@ class ProcessingTab(QWidget):
             "ts_default": self.spin_integration_ts_default.value(),
         }
 
-    def get_single_target_config(self) -> dict:
-        """获取单体目标检测配置"""
-        return {
-            "sv_threshold_db": self.spin_st_threshold.value(),
-            "min_area": self.spin_st_min_area.value(),
-            "max_area": self.spin_st_max_area.value(),
-        }
-
     def get_real_sed_config(self) -> dict:
         """获取真实 SED 配置"""
         return {

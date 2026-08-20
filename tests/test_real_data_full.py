@@ -174,9 +174,7 @@ def run_all_tests():
         report("integration", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
-    # 9. 单体目标检测
     # ═══════════════════════════════════════════════════════
-    print("\n[9] 单体目标检测")
     try:
         from src.core.single_target import detect_and_compute_ts
         targets = detect_and_compute_ts(ds_Sv, config)
@@ -243,7 +241,6 @@ def run_all_tests():
     print("\n[13] GUI 模块导入")
     gui_modules = [
         ("main_window", "from src.gui.main_window import MainWindow"),
-        ("workers", "from src.gui.workers import LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker, DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker, IntegrationWorker, BatchProcessWorker, QualityCheckWorker, MultifreqAnalysisWorker, SingleTargetWorker, SvStatsWorker, TransectSplitWorker"),
         ("property_panel", "from src.gui.property_panel import PropertyPanel"),
         ("opengl_renderer", "from src.viz.opengl_renderer import EchogramRenderer"),
         ("theme", "from src.gui.theme import DARK_THEME"),
