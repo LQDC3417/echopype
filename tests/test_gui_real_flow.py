@@ -13,7 +13,6 @@
 10. 数据导出
 """
 
-import sys
 import traceback
 from pathlib import Path
 
@@ -104,7 +103,7 @@ def step4_analysis_region(ds_Sv):
     ds_cropped = crop_sv_by_region(ds_Sv, surface_depth_m=2.0, bottom_depth_m=bottom)
     print(f"  裁剪前: {dict(ds_Sv.sizes)}")
     print(f"  裁剪后: {dict(ds_cropped.sizes)}")
-    return f"裁剪完成"
+    return "裁剪完成"
 
 # ═══════════════════════════════════════════════════════
 # 步骤 5: 质量检查
@@ -223,7 +222,7 @@ def step13_renderer(sv):
     print(f"  set_noise_mask: {hasattr(renderer, 'set_noise_mask')}")
     print(f"  set_bottom_line: {hasattr(renderer, 'set_bottom_line')}")
     print(f"  set_school_mask: {hasattr(renderer, 'set_school_mask')}")
-    return f"渲染器就绪"
+    return "渲染器就绪"
 
 # ═══════════════════════════════════════════════════════
 # 步骤 14: GUI Worker 导入
@@ -242,7 +241,7 @@ def step14_workers():
         TransectSplitWorker,
     ]
     print(f"  Worker 类数: {len(workers)}")
-    return f"全部 Worker 导入成功"
+    return "全部 Worker 导入成功"
 
 # ═══════════════════════════════════════════════════════
 # 主流程
@@ -267,12 +266,11 @@ def main():
     test_step("6. 鱼群检测", lambda: step6_school_detection(ds_Sv, config))
     test_step("7. 密度估算", lambda: step7_density(ds_Sv, config))
     test_step("8. 回声积分", lambda: step8_integration(ds_Sv, config))
-    test_step("9. 单体目标检测", lambda: step9_single_target(ds_Sv, config))
-    test_step("10. 多频分析", lambda: step10_multifreq(ds_Sv, config))
-    test_step("11. Sv 统计", lambda: step11_sv_stats(ds_Sv))
-    test_step("12. 数据导出", lambda: step12_export(ds_Sv))
-    test_step("13. 渲染器", lambda: step13_renderer(sv))
-    test_step("14. Worker 导入", step14_workers)
+    test_step("9. 多频分析", lambda: step10_multifreq(ds_Sv, config))
+    test_step("10. Sv 统计", lambda: step11_sv_stats(ds_Sv))
+    test_step("11. 数据导出", lambda: step12_export(ds_Sv))
+    test_step("12. 渲染器", lambda: step13_renderer(sv))
+    test_step("13. Worker 导入", step14_workers)
 
     # ═══════════════════════════════════════════════════════
     # 汇总

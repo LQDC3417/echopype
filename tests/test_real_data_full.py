@@ -174,19 +174,6 @@ def run_all_tests():
         report("integration", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
-    # ═══════════════════════════════════════════════════════
-    try:
-        from src.core.single_target import detect_and_compute_ts
-        targets = detect_and_compute_ts(ds_Sv, config)
-        if not targets.empty:
-            report("single_target", "OK",
-                   f"目标数: {len(targets)}, 列: {list(targets.columns)[:8]}")
-        else:
-            report("single_target", "WARN", "未检测到目标")
-    except Exception:
-        report("single_target", "FAIL", traceback.format_exc())
-
-    # ═══════════════════════════════════════════════════════
     # 10. 多频分析
     # ═══════════════════════════════════════════════════════
     print("\n[10] 多频分析")

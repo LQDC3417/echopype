@@ -146,16 +146,8 @@ _TEXTS = {
     "status_gps": {"zh": "GPS: --", "en": "GPS: --"},
 
     # ── 左侧面板 ──
-    "panel_frequency": {"zh": "频率选择", "en": "Frequency"},
-    "panel_display_type": {"zh": "显示类型", "en": "Display Type"},
     "display_sv_raw": {"zh": "Sv (原始)", "en": "Sv (Raw)"},
     "display_sv_corrected": {"zh": "Sv (去噪)", "en": "Sv (Corrected)"},
-    "display_noise": {"zh": "噪声", "en": "Noise"},
-    "display_snr": {"zh": "SNR", "en": "SNR"},
-    "panel_filters": {"zh": "滤波器", "en": "Filters"},
-    "filter_noise": {"zh": "噪声去除", "en": "Noise Removal"},
-    "filter_bottom": {"zh": "底部检测", "en": "Bottom Detection"},
-    "filter_schools": {"zh": "鱼群显示", "en": "School Display"},
     "panel_variables": {"zh": "变量列表", "en": "Variables"},
 
     # ── 右侧属性面板 ──
@@ -220,7 +212,6 @@ _TEXTS = {
     # 其他功能按钮
     "btn_quality_check": {"zh": "数据质量检查", "en": "Quality Check"},
     "btn_multifreq": {"zh": "多频分析", "en": "Multi-Freq Analysis"},
-    "btn_single_target": {"zh": "单体目标检测", "en": "Single Target Detection"},
     "btn_sv_stats": {"zh": "Sv 统计摘要", "en": "Sv Statistics"},
     "btn_transect_split": {"zh": "Transect 分段", "en": "Transect Split"},
     "btn_apply_all": {"zh": "应用全部参数", "en": "Apply All Parameters"},
@@ -251,21 +242,6 @@ _TEXTS = {
     "stats_no_integration_data": {"zh": "没有回声积分数据可导出", "en": "No integration data to export"},
 
     # ── 单体目标检测 ──
-    "menu_single_target": {"zh": "单体目标检测", "en": "Single Target Detection"},
-    "single_target_group": {"zh": "单体目标检测", "en": "Single Target Detection"},
-    "single_target_sv_threshold": {"zh": "Sv 阈值:", "en": "Sv Threshold:"},
-    "single_target_min_area": {"zh": "最小面积:", "en": "Min Area:"},
-    "single_target_max_area": {"zh": "最大面积:", "en": "Max Area:"},
-    "single_target_area_px": {"zh": " 像素", "en": " px"},
-    "stats_tab_single_target": {"zh": "单体目标", "en": "Single Targets"},
-    "single_target_info": {"zh": "单体目标: --", "en": "Single Targets: --"},
-    "single_target_info_fmt": {"zh": "单体目标: {n} 个", "en": "Single Targets: {n}"},
-    "single_target_headers": {
-        "zh": ["ID", "Ping", "深度", "Sv 峰值", "Sv 均值", "面积", "TS"],
-        "en": ["ID", "Ping", "Depth", "Peak Sv", "Mean Sv", "Area", "TS"],
-    },
-    "stats_no_single_target_data": {"zh": "没有单体目标数据可导出", "en": "No single target data to export"},
-    "msg_single_target_done": {"zh": "单体目标检测完成: {n} 个目标", "en": "Single target detection done: {n} targets"},
     "single_target_real_group": {"zh": "真实 SED（分裂波束）", "en": "Real SED (Split-beam)"},
     "st_real_ts_threshold": {"zh": "TS 阈值:", "en": "TS Threshold:"},
     "st_real_pldl": {"zh": "脉冲判定电平:", "en": "Pulse Length Level:"},
@@ -483,11 +459,8 @@ _TEXTS = {
     "msg_computing_density": {"zh": "计算密度...", "en": "Computing density..."},
     "msg_quality_checking": {"zh": "正在检查数据质量...", "en": "Checking data quality..."},
     "msg_multifreq_analyzing": {"zh": "正在分析多频率通道...", "en": "Analyzing multi-frequency channels..."},
-    "msg_single_target": {"zh": "正在检测单体目标...", "en": "Detecting single targets..."},
     "msg_sv_stats": {"zh": "计算 Sv 统计...", "en": "Computing Sv statistics..."},
     "msg_transect_split": {"zh": "分段中...", "en": "Splitting transects..."},
-    "msg_no_single_target": {"zh": "未检测到单体目标\n尝试降低 sv_threshold_db 参数", "en": "No single targets detected\nTry lowering sv_threshold_db"},
-    "msg_single_target_result": {"zh": "单体目标检测结果", "en": "Single Target Detection Results"},
     "msg_no_sv_stats": {"zh": "无统计结果", "en": "No statistics available"},
     "msg_sv_stats_title": {"zh": "Sv 统计摘要", "en": "Sv Statistics Summary"},
     "msg_transect_split_done": {"zh": "分段完成：共 {n} 个 transect", "en": "Split done: {n} transects"},

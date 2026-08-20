@@ -52,7 +52,6 @@ class StatsDialog(QDialog):
         self._density_df = None
         self._schools_df = None
         self._integration_df = None
-        self._single_target_df = None
         self._real_sed_df = None
 
         layout = QVBoxLayout(self)
@@ -73,12 +72,7 @@ class StatsDialog(QDialog):
         self._setup_integration_tab()
         self.tabs.addTab(self.integration_tab, T("stats_tab_integration"))
 
-        # 标签页 4: 单体目标
-        self.single_target_tab = QWidget()
-        self._setup_single_target_tab()
-        self.tabs.addTab(self.single_target_tab, T("stats_tab_single_target"))
-
-        # 标签页 5: 真实 SED
+        # 标签页 3: 真实 SED
         self.real_sed_tab = QWidget()
         self._setup_real_sed_tab()
         self.tabs.addTab(self.real_sed_tab, T("stats_tab_real_sed"))
@@ -211,44 +205,6 @@ class StatsDialog(QDialog):
         header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
 
         layout.addWidget(self.integration_table, 1)
-
-    def _setup_single_target_tab(self):
-        """设置单体目标标签页"""
-        layout = QVBoxLayout(self.single_target_tab)
-        layout.setSpacing(8)
-        layout.setContentsMargins(0, 8, 0, 0)
-
-        summary_layout = QHBoxLayout()
-        self.lbl_single_target_info = QLabel(T("single_target_info"))
-        self.lbl_single_target_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #4a5568;")
-        self.lbl_single_target_stats = QLabel("--")
-        self.lbl_single_target_stats.setStyleSheet("font-size: 12px; color: #718096;")
-        summary_layout.addWidget(self.lbl_single_target_info)
-        summary_layout.addStretch()
-        summary_layout.addWidget(self.lbl_single_target_stats)
-        layout.addLayout(summary_layout)
-
-        self.single_target_table = QTableWidget()
-        self.single_target_table.setColumnCount(7)
-        self.single_target_table.setHorizontalHeaderLabels(T("single_target_headers"))
-        self.single_target_table.horizontalHeader().setStretchLastSection(True)
-        self.single_target_table.setAlternatingRowColors(True)
-        self.single_target_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.single_target_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.single_target_table.verticalHeader().setVisible(False)
-        self.single_target_table.setSortingEnabled(True)
-        self.single_target_table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.single_target_table.customContextMenuRequested.connect(self._on_single_target_context_menu)
-
-        header = self.single_target_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        for col in range(3, 6):
-            header.setSectionResizeMode(col, QHeaderView.Stretch)
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
-
-        layout.addWidget(self.single_target_table, 1)
 
     def _setup_real_sed_tab(self):
         """设置真实 SED 标签页"""
@@ -811,8 +767,6 @@ class StatsDialog(QDialog):
                         self._schools_df.to_excel(writer, sheet_name=T("stats_school_list"), index=False)
                     if self._integration_df is not None and not self._integration_df.empty:
                         self._integration_df.to_excel(writer, sheet_name=T("stats_tab_integration"), index=False)
-                    if self._single_target_df is not None and not self._single_target_df.empty:
-                        self._single_target_df.to_excel(writer, sheet_name=T("stats_tab_single_target"), index=False)
                     if self._real_sed_df is not None and not self._real_sed_df.empty:
                         self._real_sed_df.to_excel(writer, sheet_name=T("stats_tab_real_sed"), index=False)
             elif file_path.endswith('.json'):
@@ -823,8 +777,6 @@ class StatsDialog(QDialog):
                     all_data["schools"] = self._schools_df.to_dict(orient='records')
                 if self._integration_df is not None and not self._integration_df.empty:
                     all_data["integration"] = self._integration_df.to_dict(orient='records')
-                if self._single_target_df is not None and not self._single_target_df.empty:
-                    all_data["single_target"] = self._single_target_df.to_dict(orient='records')
                 if self._real_sed_df is not None and not self._real_sed_df.empty:
                     all_data["real_sed"] = self._real_sed_df.to_dict(orient='records')
 
@@ -844,10 +796,8 @@ class StatsDialog(QDialog):
         elif current_tab == 1:
             self._copy_all_rows(self.integration_table)
         elif current_tab == 2:
-            # 复制单体目标数据（已删除）
-            pass
-        elif current_tab == 3:
             self._copy_all_rows(self.real_sed_table)
+
     def _export_dataframe(self, df, default_name):
         """导出 DataFrame 到文件"""
         file_path, _selected_filter = QFileDialog.getSaveFileName(

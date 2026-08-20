@@ -116,7 +116,6 @@ class ProcessingTab(QWidget):
     stats_clicked = Signal()
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
-    single_target_clicked = Signal()
     sv_stats_clicked = Signal()
     transect_split_clicked = Signal()
     integration_clicked = Signal()
@@ -371,38 +370,6 @@ class ProcessingTab(QWidget):
         btn_layout2.addWidget(self.btn_quality)
         btn_layout2.addWidget(self.btn_multifreq)
         layout.addLayout(btn_layout2)
-
-        # ── 单体目标检测 ──
-        single_target_group = QGroupBox(T("single_target_group"))
-        single_target_layout = QFormLayout()
-        single_target_layout.setSpacing(6)
-        single_target_layout.setContentsMargins(8, 12, 8, 8)
-
-        self.spin_st_threshold = QDoubleSpinBox()
-        self.spin_st_threshold.setRange(-150.0, 0.0)
-        self.spin_st_threshold.setValue(-50.0)
-        self.spin_st_threshold.setDecimals(1)
-        self.spin_st_threshold.setSingleStep(1.0)
-        self.spin_st_threshold.setSuffix(" dB")
-        single_target_layout.addRow(T("single_target_sv_threshold"), self.spin_st_threshold)
-
-        self.spin_st_min_area = QSpinBox()
-        self.spin_st_min_area.setRange(1, 100000)
-        self.spin_st_min_area.setValue(3)
-        single_target_layout.addRow(T("single_target_min_area"), self.spin_st_min_area)
-
-        self.spin_st_max_area = QSpinBox()
-        self.spin_st_max_area.setRange(1, 1000000)
-        self.spin_st_max_area.setValue(500)
-        single_target_layout.addRow(T("single_target_max_area"), self.spin_st_max_area)
-
-        self.btn_single_target = QPushButton(T("btn_single_target"))
-        self.btn_single_target.setProperty("cssClass", "primary")
-        self.btn_single_target.clicked.connect(self.single_target_clicked)
-        single_target_layout.addRow(self.btn_single_target)
-
-        single_target_group.setLayout(single_target_layout)
-        layout.addWidget(single_target_group)
 
         # ── 真实 SED（分裂波束）──
         real_sed_group = QGroupBox(T("single_target_real_group"))
@@ -666,14 +633,6 @@ class ProcessingTab(QWidget):
         if "ts_default" in integ:
             self.spin_integration_ts_default.setValue(float(integ["ts_default"]))
 
-        st = config.get("single_target", {})
-        if "sv_threshold_db" in st:
-            self.spin_st_threshold.setValue(float(st["sv_threshold_db"]))
-        if "min_area" in st:
-            self.spin_st_min_area.setValue(int(st["min_area"]))
-        if "max_area" in st:
-            self.spin_st_max_area.setValue(int(st["max_area"]))
-
         rs = config.get("single_target_real", {})
         if "ts_threshold_db" in rs:
             self.spin_rs_threshold.setValue(float(rs["ts_threshold_db"]))
@@ -702,7 +661,6 @@ class ProcessingTab(QWidget):
             "school_detection": self.get_school_config(),
             "density": self.get_density_config(),
             "integration": self.get_integration_config(),
-            "single_target": self.get_single_target_config(),
             "single_target_real": self.get_real_sed_config(),
             "surface_line": {"depth_m": self.spin_surface.value()},
         }
@@ -789,7 +747,6 @@ class PropertyPanel(QTabWidget):
     stats_clicked = Signal()
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
-    single_target_clicked = Signal()
     sv_stats_clicked = Signal()
     transect_split_clicked = Signal()
     integration_clicked = Signal()
@@ -821,7 +778,6 @@ class PropertyPanel(QTabWidget):
         self.processing.update_bottom_clicked.connect(self.update_bottom_clicked)
         self.processing.quality_check_clicked.connect(self.quality_check_clicked)
         self.processing.multifreq_clicked.connect(self.multifreq_clicked)
-        self.processing.single_target_clicked.connect(self.single_target_clicked)
         self.processing.sv_stats_clicked.connect(self.sv_stats_clicked)
         self.processing.transect_split_clicked.connect(self.transect_split_clicked)
         self.processing.integration_clicked.connect(self.integration_clicked)
