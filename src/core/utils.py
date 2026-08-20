@@ -61,10 +61,14 @@ def get_vertical_coords(ds_Sv: xr.Dataset) -> np.ndarray:
             depth_data = depth_data.isel(channel=0)
         coords = depth_data.isel(ping_time=0).values
     elif "echo_range" in ds_Sv:
-        echo_data = ds_Sv["echo_range"]
-        if "channel" in echo_data.dims:
-            echo_data = echo_data.isel(channel=0)
-        coords = echo_data.isel(ping_time=0).values
+        # 取数逻辑复用 region.get_echo_range_1d（channel 压缩 + 取第一 ping）
+        from src.core.region import get_echo_range_1d
+        er = get_echo_range_1d(ds_Sv)
+        if er is None:
+            logger.warning("echo_range 数据为空，使用 range_sample 作为 fallback")
+            coords = range_sample.astype(float)
+        else:
+            coords = er
     else:
         logger.warning("数据集中无 depth/echo_range，使用 range_sample 作为 fallback（单位为 sample index，非米）")
         coords = range_sample.astype(float)

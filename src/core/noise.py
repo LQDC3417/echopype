@@ -288,3 +288,33 @@ def noise_statistics(ds_Sv: xr.Dataset) -> dict:
             })
 
     return stats
+
+
+def print_noise_report(ds_Sv: xr.Dataset) -> None:
+    """打印噪声去除报告到日志
+
+    Parameters
+    ----------
+    ds_Sv : xr.Dataset
+        包含噪声信息的数据集
+    """
+    stats = noise_statistics(ds_Sv)
+
+    logger.info("=" * 60)
+    logger.info("噪声去除报告")
+    logger.info("=" * 60)
+
+    if stats.get("status") != "ok":
+        logger.info("  无噪声数据")
+        return
+
+    logger.info(f"  处理 ping 数: {stats['n_pings']}")
+    logger.info(f"  噪声均值: {stats['noise_mean']:.1f} dB")
+    logger.info(f"  噪声标准差: {stats['noise_std']:.1f} dB")
+    logger.info(f"  噪声范围: [{stats['noise_min']:.1f}, {stats['noise_max']:.1f}] dB")
+    logger.info(f"  噪声中位数: {stats['noise_median']:.1f} dB")
+
+    if "snr_mean" in stats:
+        logger.info(f"  SNR 均值: {stats['snr_mean']:.1f} dB")
+        logger.info(f"  SNR 标准差: {stats['snr_std']:.1f} dB")
+        logger.info(f"  SNR < 3 dB 样本数: {stats['snr_below_threshold']}")
