@@ -84,6 +84,32 @@ def get_vertical_coords(ds_Sv: xr.Dataset) -> np.ndarray:
     return coords
 
 
+def depth_resolution(depth: np.ndarray) -> float:
+    """计算深度分辨率（相邻非零差值的单位：米/sample）。
+
+    过滤零差值——EK80 数据存在大量重复深度值（填充），
+    直接取 median(|diff|) 会被 0 拉低导致面积计算失效（P0 bug）。
+    """
+    if len(depth) > 1:
+        depth_diffs = np.abs(np.diff(depth))
+        non_zero_diffs = depth_diffs[depth_diffs > 0]
+        if len(non_zero_diffs) > 0:
+            return float(np.median(non_zero_diffs))
+    return 0.1
+
+
+def ping_resolution(ping_time: np.ndarray) -> float:
+    """计算 ping 时间分辨率（相邻 ping 间隔，单位：秒）。
+
+    ping_time 可能是 datetime64 或数值（float/秒）。
+    """
+    if len(ping_time) > 1:
+        if np.issubdtype(np.asarray(ping_time).dtype, np.datetime64):
+            return float(np.diff(ping_time[:2]) / np.timedelta64(1, 's'))
+        return float(np.diff(ping_time[:2])[0])
+    return 1.0
+
+
 def load_config(config_path: str) -> dict:
     """加载 YAML 配置文件"""
     path = Path(config_path)

@@ -18,6 +18,26 @@ DEFAULT_N_DEPTH_LAYERS = 5
 
 # ── 辅助函数 ──────────────────────────────────────────────
 
+def abc_integral(sv_linear: np.ndarray, dr: np.ndarray, axis=None):
+    """ABC 积分单一来源：ABC = 4π × ∫ Sv_linear × dr。
+
+    Parameters
+    ----------
+    sv_linear : np.ndarray
+        线性 Sv（10^(Sv/10)），NaN 视为 0 贡献
+    dr : np.ndarray
+        深度分辨率（米/sample），与 sv_linear 可广播
+    axis : int, optional
+        沿哪个轴积分；None 时整体求和返回标量
+
+    Returns
+    -------
+    float 或 np.ndarray
+        ABC 值（m²/m²）
+    """
+    return FOUR_PI * np.nansum(sv_linear * dr, axis=axis)
+
+
 def _get_depth_resolution(ds_Sv: xr.Dataset) -> np.ndarray:
     """获取深度分辨率 dr，shape 与 Sv 一致 (n_pings, n_samples) 或 (n_samples,)。"""
     er = get_echo_range_1d(ds_Sv)
@@ -82,9 +102,9 @@ def calculate_abc(
     Sv = get_sv_array(ds_Sv)
     dr = _get_depth_resolution(ds_Sv)
 
-    # 积分: ABC = 4π × ∫ Sv_linear × dr
-    integrated = np.nansum(sv_to_linear(Sv) * dr, axis=1)
-    abc = FOUR_PI * integrated
+    # 积分: ABC = 4π × ∫ Sv_linear × dr（单一来源 abc_integral）
+    integrated = abc_integral(sv_to_linear(Sv), dr, axis=1)
+    abc = integrated
 
     ping_time = ds_Sv["ping_time"].values
 
@@ -192,8 +212,8 @@ def estimate_density_by_depth(
         d_max = float(np.nanmax(depth))
         depth_bins = np.linspace(d_min, d_max, DEFAULT_N_DEPTH_LAYERS + 1).tolist()
 
-    # 向量化：预乘 Sv × dr
-    sv_dr = sv_to_linear(Sv) * dr  # (n_pings, n_samples)
+    # 线性化 Sv 一次，各层复用（ABC 积分走单一来源 abc_integral）
+    sv_linear = sv_to_linear(Sv)  # (n_pings, n_samples)
 
     records = []
     for i in range(len(depth_bins) - 1):
@@ -202,9 +222,9 @@ def estimate_density_by_depth(
         if not np.any(mask_d):
             continue
 
-        # 向量化积分：对每 ping 求和该深度范围
-        layer_abc_per_ping = np.nansum(sv_dr[:, mask_d], axis=1)  # (n_pings,)
-        layer_abc = FOUR_PI * layer_abc_per_ping
+        # 向量化积分：对每 ping 求和该深度范围（abc_integral 已含 4π）
+        dr_layer = dr[:, mask_d] if dr.ndim == 2 else dr[mask_d]
+        layer_abc = abc_integral(sv_linear[:, mask_d], dr_layer, axis=1)  # (n_pings,)
         mean_abc = float(np.nanmean(layer_abc))
 
         row = _abc_to_density(mean_abc, sigma_bs, avg_weight_kg)

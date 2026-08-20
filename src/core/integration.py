@@ -21,8 +21,6 @@ from src.core.utils import get_sv_array, get_vertical_coords, sv_to_linear
 
 logger = logging.getLogger("fish_acoustics")
 
-FOUR_PI = 4 * np.pi
-
 
 class ESUType(Enum):
     """EDSU 类型枚举"""
@@ -296,10 +294,10 @@ def _compute_abc_density(
     -------
     (abc, density_ind_ha) : (float, float)
     """
-    sv_linear = sv_to_linear(sv_layer)
-    abc = FOUR_PI * float(np.nansum(sv_linear * dr_layer))
-    # 密度换算复用 density.py 的单一来源（ρ = ABC/(4π·σ_bs)·10000）
-    from src.core.density import density_from_abc
+    # ABC 积分与密度换算均复用 density.py 的单一来源
+    from src.core.density import abc_integral, density_from_abc
+
+    abc = float(abc_integral(sv_to_linear(sv_layer), dr_layer))
     density_ha = density_from_abc(abc, ts_default_db)
     return abc, density_ha
 
