@@ -16,7 +16,6 @@
 """
 
 import logging
-from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
@@ -26,14 +25,11 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QSplitter,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from src.gui.fileset import Fileset
-from src.gui.fileset_tree import FilesetTreeWidget
 from src.gui.i18n import T, set_language
 from src.gui.property_panel import PropertyPanel
 from src.gui.region_panel import RegionBrowserWidget
@@ -101,16 +97,11 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._schools_mask = None
         self._schools_df = None
         self._current_worker = None
-        self._batch_worker = None            # 批量处理工作线程
-        self._batch_results: dict[str, object] = {}  # {path_str: ds_Sv}
-        self._current_fileset: Fileset = None
         self._current_channel = ""
         self._undo_stack = []
         self._redo_stack = []
         self._current_mode = MouseMode.NAVIGATE
         self._run_all_chain = False
-        self._raw_file_queue: list[Path] = []
-        self._raw_queue_index = 0
         self._file_cache: dict[str, dict] = {}  # {path_str: {"sv": array, "ds": Dataset, "bottom": array}}
 
         # 变量缓存
@@ -250,21 +241,14 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.view_tabs.addTab(self.echogram, T("view_tab", n=1))
         self.setCentralWidget(self.view_tabs)
 
-        # ── 左侧 Dock：Matecho风格综合面板 ──
+        # ── 左侧 Dock：变量列表面板 ──
         from src.gui.left_panel import LeftPanel
         self.left_panel = LeftPanel()
-        self.fileset_tree = FilesetTreeWidget()
         self.variable_list = self.left_panel.variable_list
 
-        # 文件树 + 左侧面板垂直分割
-        left_split = QSplitter(Qt.Vertical)
-        left_split.addWidget(self.fileset_tree)
-        left_split.addWidget(self.left_panel)
-        left_split.setSizes([200, 400])
-
         self.dock_left = QDockWidget(T("fileset_ctrl_title"), self)
-        self.dock_left.setObjectName("dockFileset")
-        self.dock_left.setWidget(left_split)
+        self.dock_left.setObjectName("dockVariables")
+        self.dock_left.setWidget(self.left_panel)
         self.dock_left.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
         )
@@ -335,11 +319,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
     # ═══════════════════════════════════════════════════════
 
     def _connect_signals(self):
-        # 文件集面板
-        self.fileset_tree.fileset_selected.connect(self._on_fileset_selected)
-        self.fileset_tree.file_selected.connect(self._load_file)
-        self.fileset_tree.channel_selected.connect(self._on_channel_selected)
-
         # 标准工具栏
         self.std_toolbar.open_clicked.connect(self._import_raw)
         self.std_toolbar.open_config_clicked.connect(self._open_config)
@@ -355,10 +334,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.echo_toolbar.colormap_changed.connect(self.echogram.set_colormap)
         self.echo_toolbar.reset_view_clicked.connect(self._reset_view)
         self.echo_toolbar.fit_view_clicked.connect(self._fit_view)
-
-        # 工具栏翻页按钮
-        self.echo_toolbar.prev_file_clicked.connect(lambda: self._switch_file(-1))
-        self.echo_toolbar.next_file_clicked.connect(lambda: self._switch_file(1))
 
         # Echogram 交互
         self.echogram.mouse_moved.connect(self.statusbar.set_coords)

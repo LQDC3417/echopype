@@ -1,13 +1,4 @@
-"""左侧面板 — 变量列表（参照 Echoview / Matecho 风格）
-
-2026-08-20 重构：移除 QuickControlsWidget（频率选择/回波类型/滤波器开关）。
-三者均为未接线的死控件（信号无接收者，set_frequencies 从未被调用）：
-- 频率选择实际由 FilesetTreeWidget 的 ch_combo 负责
-- 显示类型切换实际由变量列表（Sv / Sv_corrected）负责
-- 滤波器开关无对应实现
-
-保留：变量列表（variable_selected → echogram.set_data 真实接线）。
-"""
+"""左侧面板 — 变量列表"""
 
 import logging
 
