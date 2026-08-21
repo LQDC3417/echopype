@@ -425,6 +425,10 @@ _TEXTS = {
     # ── 主窗口消息 ──
     "msg_load_file_first": {"zh": "请先加载文件", "en": "Please load a file first"},
     "msg_load_data_first": {"zh": "请先加载数据", "en": "Please load data first"},
+    "msg_loading_files": {"zh": "加载 {n} 个文件...", "en": "Loading {n} files..."},
+    "msg_loading_file": {"zh": "[{cur}/{total}] 加载 {name}...", "en": "[{cur}/{total}] Loading {name}..."},
+    "msg_merging_files": {"zh": "合并 {n} 个文件...", "en": "Merging {n} files..."},
+    "msg_files_merged": {"zh": "文件合并完成: {n} pings", "en": "Files merged: {n} pings"},
     "msg_import_first": {"zh": "请先导入文件", "en": "Please import files first"},
     "msg_detect_schools_first": {"zh": "请先检测鱼群", "en": "Please detect schools first"},
     "msg_bottom_manually_edited": {"zh": "底线已手动编辑，跳过自动检测", "en": "Bottom manually edited, skipping auto-detect"},

@@ -10,11 +10,11 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from src.core.utils import load_config, squeeze_sv
 from src.gui.fileset import Fileset
-from src.gui.fileset_tree import BatchImportDialog
 from src.gui.workers import (
     BatchProcessWorker,
     ComputeSvWorker,
     LoadFileWorker,
+    MergeFilesWorker,
 )
 
 logger = logging.getLogger(__name__)
@@ -24,10 +24,48 @@ class FileMixin:
     """文件操作：导入、批量处理、文件缓存、切换、变量列表"""
 
     def _import_raw(self):
-        """打开批量导入对话框"""
-        dlg = BatchImportDialog(self)
-        dlg.fileset_created.connect(self.fileset_tree.add_fileset)
-        dlg.exec()
+        """直接选择 .raw 文件导入（跳过 Fileset 对话框）"""
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, T("import_raw_files"), "",
+            "Raw Files (*.raw);;All Files (*)"
+        )
+        if not paths:
+            return
+
+        # 按文件名排序
+        raw_files = sorted([Path(p) for p in paths])
+
+        if self._config is None:
+            self._apply_default_config()
+        assert self._config is not None
+
+        # 启动合并加载
+        self.statusbar.show_progress(T("msg_loading_files", n=len(raw_files)))
+        self._current_worker = MergeFilesWorker(raw_files, self._config)
+        self._current_worker.finished.connect(self._on_merge_finished)
+        self._current_worker.error.connect(self._on_worker_error)
+        self._current_worker.progress.connect(self.statusbar.set_status)
+        self._current_worker.start()
+
+    def _on_merge_finished(self, ds_Sv):
+        """合并加载完成 → 缓存 + 显示"""
+        self.statusbar.hide_progress()
+
+        # 缓存
+        sv = squeeze_sv(ds_Sv["Sv"].values)
+        self._file_cache["merged"] = {
+            "sv": sv.astype(np.float32),
+            "ds": ds_Sv,
+            "bottom": None,
+            "noise_mask": None,
+            "school_mask": None,
+            "surface_depth_m": self._surface_depth_m,
+        }
+
+        # 显示
+        self._apply_sv_to_display(ds_Sv, sv)
+        n_pings = ds_Sv.sizes["ping_time"]
+        self.statusbar.set_status(T("msg_files_merged", n=n_pings))
 
     def _open_config(self):
         path, _ = QFileDialog.getOpenFileName(

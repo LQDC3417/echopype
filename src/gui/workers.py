@@ -1,6 +1,7 @@
 """后台处理工作线程（增强版）
 
 功能增强：
+- MergeFilesWorker: 多文件合并加载（按时间顺序拼接 echogram）
 - IntegrationWorker 支持 pings/distance EDSU 与 ABC 积分
 - 改进错误处理，提供更友好的错误信息
 - 添加进度百分比信号
@@ -14,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
+import xarray as xr
 from PySide6.QtCore import QThread, Signal
 
 
@@ -77,6 +79,54 @@ class ComputeSvWorker(QThread):
             self.progress.emit(T("msg_computing_sv"))
             ds_Sv = compute_sv(self.echodata, self.config)
             self.finished.emit(ds_Sv)
+        except Exception:
+            self.error.emit(traceback.format_exc())
+
+
+class MergeFilesWorker(QThread):
+    """多文件合并加载 — 按时间顺序拼接成一个 echogram
+
+    流程：逐个 .raw → open_single_file → compute_sv → 沿 ping_time 拼接
+    """
+    finished = Signal(object)  # xr.Dataset（合并后）
+    error = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, raw_files: list[Path], config: dict):
+        super().__init__()
+        self.raw_files = raw_files
+        self.config = config
+
+    def run(self):
+        try:
+            from src.core.acoustic import compute_sv, open_single_file
+
+            ds_list = []
+            total = len(self.raw_files)
+            for i, path in enumerate(self.raw_files):
+                self.progress.emit(T("msg_loading_file", cur=i+1, total=total, name=path.name))
+
+                # 加载
+                echodata = open_single_file(path, self.config)
+
+                # 计算 Sv + depth + GPS
+                ds = compute_sv(echodata, self.config)
+
+                # 只保留第一个 channel
+                if "channel" in ds.dims:
+                    ds = ds.isel(channel=0)
+
+                ds_list.append(ds)
+
+            # 沿 ping_time 拼接
+            if len(ds_list) == 1:
+                merged = ds_list[0]
+            else:
+                self.progress.emit(T("msg_merging_files", n=len(ds_list)))
+                merged = xr.concat(ds_list, dim="ping_time")
+
+            self.finished.emit(merged)
+
         except Exception:
             self.error.emit(traceback.format_exc())
 
