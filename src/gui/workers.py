@@ -118,6 +118,15 @@ class MergeFilesWorker(QThread):
 
                 ds_list.append(ds)
 
+            # 检查 range_sample 数量是否一致
+            if len(ds_list) > 1:
+                n_samples = [ds.sizes.get("range_sample", 0) for ds in ds_list]
+                if len(set(n_samples)) > 1:
+                    # 不一致时裁剪到最小长度
+                    min_samples = min(n_samples)
+                    logger.warning(f"range_sample 数量不一致: {n_samples}，裁剪到 {min_samples}")
+                    ds_list = [ds.isel(range_sample=slice(0, min_samples)) for ds in ds_list]
+
             # 沿 ping_time 拼接
             if len(ds_list) == 1:
                 merged = ds_list[0]
