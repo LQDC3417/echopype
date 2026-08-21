@@ -179,7 +179,6 @@ class InteractionMixin:
             return
 
         from src.core.export import (
-            export_density_to_csv,
             export_schools_to_csv,
         )
         from src.core.utils import get_output_dir
@@ -209,19 +208,15 @@ class InteractionMixin:
             if "csv" in formats:
                 exported.append(export_schools_to_csv(self._schools_df, output_dir / "schools.csv"))
 
-        if content.get("density") and self._density_df is not None and not self._density_df.empty:
-            if "csv" in formats:
-                exported.append(export_density_to_csv(self._density_df, output_dir / "density.csv"))
-
         if content.get("grid") and hasattr(self, '_grid_df') and self._grid_df is not None:
             if "csv" in formats:
+                from src.core.export import export_density_to_csv
                 exported.append(export_density_to_csv(self._grid_df, output_dir / "grid_stats.csv"))
 
         if "excel" in formats:
             schools = self._schools_df if content.get("schools") else None
-            density = self._density_df if content.get("density") else None
             from src.core.export import export_to_excel
-            exported.append(export_to_excel(schools, density, output_dir / "results.xlsx"))
+            exported.append(export_to_excel(schools, None, output_dir / "results.xlsx"))
 
         self.statusbar.set_status(T("msg_export_done", n=len(exported), dir=output_dir))
 

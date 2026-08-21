@@ -21,7 +21,6 @@ CONFIG = {
         "bottom_detection": {"method": "basic", "threshold": -50.0, "offset_m": 0.5, "bin_skip_from_surface": 200},
     },
     "school_detection": {"method": "echoview", "thr": -55.0, "mincan": [3, 10], "maxlink": [3, 15], "minsho": [3, 15]},
-    "density": {"ts_default": -30.0},
 }
 
 

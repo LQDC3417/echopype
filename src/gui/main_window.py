@@ -100,7 +100,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._analysis_region_enabled = False  # 分析区域限定（仅控制 UI 渲染，不影响分析裁剪）
         self._schools_mask = None
         self._schools_df = None
-        self._density_df = None
         self._current_worker = None
         self._batch_worker = None            # 批量处理工作线程
         self._batch_results: dict[str, object] = {}  # {path_str: ds_Sv}
@@ -189,14 +188,12 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         pm.addAction(self._act(T("noise_removal"), self._apply_noise_params, "Ctrl+2"))
         pm.addAction(self._act(T("detect_bottom"), self._detect_bottom, "Ctrl+3"))
         pm.addAction(self._act(T("detect_schools"), self._detect_schools, "Ctrl+4"))
-        pm.addAction(self._act(T("compute_density"), self._compute_density, "Ctrl+5"))
 
         # ── 分析 ──
         am = mb.addMenu(T("menu_analysis"))
         am.addAction(self._act(T("menu_integration"), self._run_integration))
         am.addAction(self._act(T("btn_real_sed"), self._run_real_sed))
         am.addSeparator()
-        am.addAction(self._act(T("export_density_report"), self._export))
         am.addAction(self._act(T("menu_export_schools"), self._export_schools))
 
         # ── 帮助 ──
@@ -383,7 +380,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         # 属性面板（处理参数）
         self.property_panel.surface_line_changed.connect(self._on_surface_line_changed)
         self.property_panel.detect_schools_clicked.connect(self._detect_schools)
-        self.property_panel.compute_density_clicked.connect(self._compute_density)
         self.property_panel.stats_clicked.connect(self._show_stats)
         self.property_panel.noise_params_changed.connect(self._on_noise_params_changed)
         self.property_panel.quality_check_clicked.connect(self._run_quality_check)
@@ -429,7 +425,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
                 "method": "advanced", "thr": -55.0,
                 "mincan": [3, 10], "maxlink": [3, 15], "minsho": [3, 15],
             },
-            "density": {"ts_default": -30.0},
             "integration": {
                 "esu_type": "pings", "esu_size": 500,
                 "layer_width": 5.0, "min_threshold": -70.0,
@@ -461,6 +456,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
 
     # -- Mixin methods split into handlers/ modules --
     # FileMixin:       file import, batch, cache, switch, variable list
-    # ProcessingMixin:  Sv, noise, bottom, schools, density, integration
+    # ProcessingMixin:  Sv, noise, bottom, schools, integration
     # AnalysisMixin:    quality, multifreq, single target, Sv stats, transect
     # InteractionMixin: mouse, region, undo/redo, view, export

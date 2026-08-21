@@ -59,7 +59,6 @@ _TEXTS = {
             "<li>EK80 multi-frequency raw data batch import</li>"
             "<li>Sv calibration + noise removal + bottom detection</li>"
             "<li>Automatic school detection (Echoview algorithm)</li>"
-            "<li>Density / biomass estimation</li>"
             "<li>High-performance OpenGL echogram rendering</li>"
             "</ul>"
         ),
@@ -100,10 +99,8 @@ _TEXTS = {
     "noise_removal": {"zh": "噪声去除", "en": "Noise Removal"},
     "detect_bottom": {"zh": "检测底部", "en": "Detect Bottom"},
     "detect_schools": {"zh": "检测鱼群", "en": "Detect Schools"},
-    "compute_density": {"zh": "计算密度", "en": "Compute Density"},
 
     # 分析菜单
-    "export_density_report": {"zh": "导出密度报告", "en": "Export Density Report"},
     "menu_export_schools": {"zh": "导出鱼群清单", "en": "Export School List"},
 
     # 帮助菜单
@@ -204,16 +201,7 @@ _TEXTS = {
     "school_sv_threshold": {"zh": "Sv 阈值:", "en": "Sv Threshold:"},
     "btn_detect_schools": {"zh": "检测鱼群", "en": "Detect Schools"},
 
-    # 密度估算
-    "density_group": {"zh": "密度估算", "en": "Density Estimation"},
-    "density_ts_default": {"zh": "TS 默认值:", "en": "TS Default:"},
-    "density_avg_weight": {"zh": "平均体重:", "en": "Avg Weight:"},
-    "btn_compute_density": {"zh": "计算密度", "en": "Compute Density"},
-
     # 网格分析
-    "grid_stat_abc": {"zh": "ABC (面积背散射系数)", "en": "ABC (Area Backscattering Coeff.)"},
-    "grid_stat_density": {"zh": "密度 (ind/ha)", "en": "Density (ind/ha)"},
-    "grid_stat_biomass": {"zh": "生物量 (kg/ha)", "en": "Biomass (kg/ha)"},
     "btn_statistics": {"zh": "统计结果", "en": "Statistics"},
 
     # 其他功能按钮
@@ -292,8 +280,7 @@ _TEXTS = {
 
     # ── 统计对话框 ──
     "stats_title": {"zh": "统计结果", "en": "Statistics"},
-    "stats_tab_summary": {"zh": "鱼群 / 密度", "en": "Schools / Density"},
-    "stats_density_summary": {"zh": "密度摘要", "en": "Density Summary"},
+    "stats_tab_summary": {"zh": "鱼群", "en": "Schools"},
     "stats_school_list": {"zh": "鱼群列表", "en": "School List"},
     "stats_filter": {"zh": "过滤:", "en": "Filter:"},
     "stats_filter_placeholder": {"zh": "输入过滤文本...", "en": "Enter filter text..."},
@@ -330,7 +317,6 @@ _TEXTS = {
     "export_content_group": {"zh": "导出内容", "en": "Export Content"},
     "export_sv_data": {"zh": "Sv 数据", "en": "Sv Data"},
     "export_school_list": {"zh": "鱼群清单", "en": "School List"},
-    "export_density_est": {"zh": "密度估算", "en": "Density Estimation"},
     "export_grid_stats": {"zh": "网格统计", "en": "Grid Statistics"},
     "export_cancel": {"zh": "取消", "en": "Cancel"},
     "export_confirm": {"zh": "导出", "en": "Export"},
@@ -439,7 +425,6 @@ _TEXTS = {
     "msg_noise_removed": {"zh": "噪声去除完成（显示去噪数据，原始 Sv 已保留）", "en": "Noise removed (showing corrected, original Sv preserved)"},
     "msg_bottom_detected": {"zh": "底部检测完成 — 分析区域已启用，已进入绘制底线模式", "en": "Bottom detected — analysis region enabled, entered draw-bottom mode"},
     "msg_schools_detected": {"zh": "鱼群检测完成: {n} 个鱼群像素", "en": "School detection done: {n} pixels"},
-    "msg_density_computed": {"zh": "密度计算完成", "en": "Density computed"},
     "msg_export_done": {"zh": "导出完成: {n} 个文件 → {dir}", "en": "Export done: {n} files → {dir}"},
     "msg_batch_processing": {"zh": "批量处理 {n} 个文件...", "en": "Batch processing {n} files..."},
     "msg_batch_done": {"zh": "批量处理完成: 成功 {ok}, 失败 {fail}", "en": "Batch done: {ok} success, {fail} failed"},
@@ -463,7 +448,6 @@ _TEXTS = {
     "msg_detecting_bottom": {"zh": "检测底部...", "en": "Detecting bottom..."},
     "msg_bottom_detection": {"zh": "检测底部 (方法: {method})...", "en": "Detecting bottom (method: {method})..."},
     "msg_detecting_schools": {"zh": "检测鱼群...", "en": "Detecting schools..."},
-    "msg_computing_density": {"zh": "计算密度...", "en": "Computing density..."},
     "msg_quality_checking": {"zh": "正在检查数据质量...", "en": "Checking data quality..."},
     "msg_multifreq_analyzing": {"zh": "正在分析多频率通道...", "en": "Analyzing multi-frequency channels..."},
     "msg_sv_stats": {"zh": "计算 Sv 统计...", "en": "Computing Sv statistics..."},
@@ -489,12 +473,6 @@ _TEXTS = {
     "pipeline_noise": {"zh": "噪声去除", "en": "Noise Removal"},
     "pipeline_bottom": {"zh": "底部检测", "en": "Bottom Detection"},
     "pipeline_schools": {"zh": "鱼群检测", "en": "School Detection"},
-    "pipeline_density": {"zh": "密度估算", "en": "Density Estimation"},
-
-    # ── 密度/统计标签 ──
-    "density_abc_fmt": {"zh": "ABC: {val:.6f} m²/m²", "en": "ABC: {val:.6f} m²/m²"},
-    "density_val_fmt": {"zh": "密度: {val:.2f} ind/ha", "en": "Density: {val:.2f} ind/ha"},
-    "density_biomass_fmt": {"zh": "生物量: {val:.2f} kg/ha", "en": "Biomass: {val:.2f} kg/ha"},
 
     # ── 右键菜单消息 ──
     "msg_no_loaded_files": {"zh": "没有已加载的文件，请先导入", "en": "No loaded files, please import first"},

@@ -1,9 +1,8 @@
-"""Mixin: 处理流水线：Sv计算、噪声去除、底部检测、鱼群检测、密度估算、网格分析"""
+"""Mixin: 处理流水线：Sv计算、噪声去除、底部检测、鱼群检测、网格分析"""
 
 import logging
 
 import numpy as np
-import pandas as pd
 from src.gui.i18n import T
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QInputDialog, QMessageBox
@@ -13,7 +12,6 @@ from src.gui.workers import (
     ComputeSvWorker,
     DetectSchoolsWorker,
     DetectSeafloorWorker,
-    ComputeDensityWorker as DensityWorker,
     IntegrationWorker,
     NoiseRemovalWorker,
 )
@@ -22,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProcessingMixin:
-    """处理流水线：Sv计算、噪声去除、底部检测、鱼群检测、密度估算、网格分析"""
+    """处理流水线：Sv计算、噪声去除、底部检测、鱼群检测、网格分析"""
 
     def _compute_sv(self):
         if self._echodata is None or self._config is None:
@@ -309,31 +307,9 @@ class ProcessingMixin:
             )
 
         if getattr(self, "_run_all_chain", False):
-            QTimer.singleShot(200, self._compute_density)
-    def _compute_density(self):
-        if self._ds_Sv is None or self._config is None:
-            QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
-            return
-        # 同步 UI 参数到 config
-        density_ui = self.property_panel.processing.get_density_config()
-        self._config.setdefault("density", {}).update(density_ui)
-        self.pipeline_step.emit(T("pipeline_density"))
-        schools_df = self._schools_df if self._schools_df is not None else pd.DataFrame()
-        self.statusbar.show_progress(T("msg_computing_density"))
-        ds_for_density = self._get_analysis_ds()
-        self._current_worker = DensityWorker(schools_df, ds_for_density, self._config)
-        self._current_worker.finished.connect(self._on_density_computed)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.start()
-
-    def _on_density_computed(self, df):
-        self._density_df = df
-        self.stats_dialog.update_density(df)
-        self.property_panel.stats.update_density(df)
-        self.statusbar.hide_progress()
-        self.statusbar.set_status(T("msg_density_computed"))
-        self._run_all_chain = False
-        self.pipeline_done.emit()
+            # 链式流程到此结束（密度估算已移除）
+            self._run_all_chain = False
+            self.pipeline_done.emit()
 
     def _run_all(self):
         if self._echodata is None or self._run_all_chain:

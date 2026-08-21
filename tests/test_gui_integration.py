@@ -1,7 +1,7 @@
 """用真实 .raw 文件测试 GUI 集成流程
 
 测试链：config → open_raw → compute_sv → noise_removal → bottom_detection
-         → school_detection → density → opengl_renderer
+         → school_detection → opengl_renderer
 
 依赖：需要真实 .raw 文件，无文件时自动跳过。
 """
@@ -57,7 +57,6 @@ def int_config(_raw_available):
             "maxlink": [3, 15],
             "minsho": [3, 15],
         },
-        "density": {"ts_default": -30.0},
     }
 
 
@@ -137,13 +136,6 @@ def int_schools_df(int_schools_mask, int_ds_sv):
     return schools_to_dataframe(int_schools_mask, int_ds_sv)
 
 
-@pytest.fixture(scope="module")
-def int_density_df(int_schools_df, int_ds_sv, int_config):
-    """密度估算 → DataFrame"""
-    from src.core.density import estimate_density
-    return estimate_density(int_schools_df, int_ds_sv, int_config)
-
-
 # ──────────────────────────────────────────────
 # 测试函数 — 每个验证一个步骤
 # ──────────────────────────────────────────────
@@ -153,7 +145,6 @@ def test_config(int_config):
     """验证配置完整性"""
     assert "processing" in int_config
     assert "school_detection" in int_config
-    assert "density" in int_config
     print(f"[OK] 配置加载 — {len(int_config)} 个顶层 section")
 
 
@@ -200,18 +191,6 @@ def test_school_detection(int_schools_mask, int_schools_df):
     print(f"[OK] 鱼群检测: {n_pixels} 像素, {n_schools} 个鱼群")
 
 
-def test_density(int_density_df):
-    """验证密度估算"""
-    assert not int_density_df.empty, "密度估算结果为空"
-    row = int_density_df.iloc[0]
-    abc = row.get("abc", 0)
-    density = row.get("density_ind_ha", 0)
-    biomass = row.get("total_biomass_kg_ha", 0)
-    print(f"[OK] 密度估算: ABC={abc:.6f} m²/m², "
-          f"密度={density:.2f} ind/ha, "
-          f"生物量={biomass:.2f} kg/ha")
-
-
 def test_opengl_renderer(int_sv):
     """验证 OpenGL 渲染器创建 + 数据绑定"""
     from PySide6.QtWidgets import QApplication
@@ -248,11 +227,9 @@ def main():
     bottom = int_bottom(sv)
     mask = int_schools_mask(ds_sv, config)
     schools_df = int_schools_df(mask, ds_sv)
-    density_df = int_density_df(schools_df, ds_sv, config)
 
     print(f"[OK] 底部检测: {int(np.sum(~np.isnan(bottom)))}/{sv.shape[0]} ping 有底线")
     print(f"[OK] 鱼群检测: {int(mask.sum().values)} 像素, {len(schools_df)} 个鱼群")
-    print(f"[OK] 密度估算: {len(density_df)} 条记录")
 
     print("=" * 60)
     print("所有管道步骤通过!")

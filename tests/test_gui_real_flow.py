@@ -6,18 +6,16 @@
 3. 质量检查
 4. 噪声去除
 5. 鱼群检测
-6. 密度估算
-7. 网格分析
-8. 单体目标检测
-9. 多频分析
-10. 数据导出
+6. 回声积分（网格分析）
+7. 单体目标检测
+8. 多频分析
+9. 数据导出
 """
 
 import traceback
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 # 本文件设计为直接运行（python tests/test_gui_real_flow.py），
 # test_step 是辅助函数而非测试用例，不参与 pytest 收集
@@ -135,23 +133,9 @@ def step6_school_detection(ds_Sv, config):
     return f"返回类型: {type(school_mask).__name__}"
 
 # ═══════════════════════════════════════════════════════
-# 步骤 7: 密度估算
+# 步骤 7: 回声积分（ABC + 密度，替代网格分析）
 # ═══════════════════════════════════════════════════════
-def step7_density(ds_Sv, config):
-    from src.core.density import estimate_density
-
-    density_df = estimate_density(pd.DataFrame(), ds_Sv, config.get("density", {}))
-    print(f"  密度结果: {len(density_df)} 行")
-    print(f"  列: {list(density_df.columns)}")
-    if not density_df.empty:
-        print(f"  ABC: {density_df['abc'].values[0]:.4f}")
-        print(f"  密度: {density_df['density_ind_m2'].values[0]:.6f} ind/m²")
-    return f"密度={len(density_df)} 行"
-
-# ═══════════════════════════════════════════════════════
-# 步骤 8: 回声积分（ABC + 密度，替代网格分析）
-# ═══════════════════════════════════════════════════════
-def step8_integration(ds_Sv, config):
+def step7_integration(ds_Sv, config):
     from src.core.integration import create_integration_grid, integrate, ESUType
 
     grid = create_integration_grid(ds_Sv, esu_type=ESUType.PINGS, esu_size=100, layer_width=2.0, surface_depth_m=2.0)
@@ -166,9 +150,9 @@ def step8_integration(ds_Sv, config):
     return f"积分={len(df)} 单元"
 
 # ═══════════════════════════════════════════════════════
-# 步骤 9: 单体目标检测
+# 步骤 8: 多频分析
 # ═══════════════════════════════════════════════════════
-def step10_multifreq(ds_Sv, config):
+def step8_multifreq(ds_Sv, config):
     from src.core.multifreq import get_channel_summary, split_transects
 
     summary = get_channel_summary(ds_Sv)
@@ -183,9 +167,9 @@ def step10_multifreq(ds_Sv, config):
     return f"通道={len(channels)}, transect={n_transects}"
 
 # ═══════════════════════════════════════════════════════
-# 步骤 11: Sv 统计
+# 步骤 9: Sv 统计
 # ═══════════════════════════════════════════════════════
-def step11_sv_stats(ds_Sv):
+def step9_sv_stats(ds_Sv):
     from src.core.density import sv_statistics_summary
 
     stats = sv_statistics_summary(ds_Sv)
@@ -195,9 +179,9 @@ def step11_sv_stats(ds_Sv):
     return f"统计={len(stats)} 行"
 
 # ═══════════════════════════════════════════════════════
-# 步骤 12: 数据导出
+# 步骤 10: 数据导出
 # ═══════════════════════════════════════════════════════
-def step12_export(ds_Sv):
+def step10_export(ds_Sv):
     import tempfile
     from src.core.export import export_all
 
@@ -210,9 +194,9 @@ def step12_export(ds_Sv):
     return f"导出={len(paths)} 文件"
 
 # ═══════════════════════════════════════════════════════
-# 步骤 13: 渲染器
+# 步骤 11: 渲染器
 # ═══════════════════════════════════════════════════════
-def step13_renderer(sv):
+def step11_renderer(sv):
     from src.viz.opengl_renderer import EchogramRenderer
 
     renderer = EchogramRenderer()
@@ -225,18 +209,18 @@ def step13_renderer(sv):
     return "渲染器就绪"
 
 # ═══════════════════════════════════════════════════════
-# 步骤 14: GUI Worker 导入
+# 步骤 12: GUI Worker 导入
 # ═══════════════════════════════════════════════════════
-def step14_workers():
+def step12_workers():
     from src.gui.workers import (
         LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
-        DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker,
+        DetectSeafloorWorker, DetectSchoolsWorker,
         IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
         TransectSplitWorker,
     )
     workers = [
         LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
-        DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker,
+        DetectSeafloorWorker, DetectSchoolsWorker,
         IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
         TransectSplitWorker,
     ]
@@ -264,13 +248,12 @@ def main():
     test_step("4. 分析区域裁剪", lambda: step4_analysis_region(ds_Sv))
     test_step("5. 质量检查", lambda: step5_quality_check(ds_Sv))
     test_step("6. 鱼群检测", lambda: step6_school_detection(ds_Sv, config))
-    test_step("7. 密度估算", lambda: step7_density(ds_Sv, config))
-    test_step("8. 回声积分", lambda: step8_integration(ds_Sv, config))
-    test_step("9. 多频分析", lambda: step10_multifreq(ds_Sv, config))
-    test_step("10. Sv 统计", lambda: step11_sv_stats(ds_Sv))
-    test_step("11. 数据导出", lambda: step12_export(ds_Sv))
-    test_step("12. 渲染器", lambda: step13_renderer(sv))
-    test_step("13. Worker 导入", step14_workers)
+    test_step("7. 回声积分", lambda: step7_integration(ds_Sv, config))
+    test_step("8. 多频分析", lambda: step8_multifreq(ds_Sv, config))
+    test_step("9. Sv 统计", lambda: step9_sv_stats(ds_Sv))
+    test_step("10. 数据导出", lambda: step10_export(ds_Sv))
+    test_step("11. 渲染器", lambda: step11_renderer(sv))
+    test_step("12. Worker 导入", step12_workers)
 
     # ═══════════════════════════════════════════════════════
     # 汇总

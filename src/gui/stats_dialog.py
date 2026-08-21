@@ -49,7 +49,6 @@ class StatsDialog(QDialog):
         self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
 
         # 存储原始数据
-        self._density_df = None
         self._schools_df = None
         self._integration_df = None
         self._real_sed_df = None
@@ -61,7 +60,7 @@ class StatsDialog(QDialog):
         # ── 标签页 ──
         self.tabs = QTabWidget()
 
-        # 标签页 1: 鱼群 + 密度
+        # 标签页 1: 鱼群
         self.summary_tab = QWidget()
         self._setup_summary_tab()
         self.tabs.addTab(self.summary_tab, T("stats_tab_summary"))
@@ -108,29 +107,6 @@ class StatsDialog(QDialog):
         layout = QVBoxLayout(self.summary_tab)
         layout.setSpacing(8)
         layout.setContentsMargins(0, 8, 0, 0)
-
-        # 密度摘要
-        summary_group = QGroupBox(T("stats_density_summary"))
-        summary_layout = QVBoxLayout()
-        summary_layout.setContentsMargins(8, 12, 8, 8)
-
-        self.lbl_abc = QLabel("ABC: --")
-        self.lbl_abc.setStyleSheet("font-size: 13px; font-weight: bold; color: #2f855a;")
-        self.lbl_abc.setToolTip(T("grid_stat_abc"))
-
-        self.lbl_density = QLabel(T("density_group") + ": --")
-        self.lbl_density.setStyleSheet("font-size: 13px; font-weight: bold; color: #1a73e8;")
-        self.lbl_density.setToolTip(T("grid_stat_density"))
-
-        self.lbl_biomass = QLabel(T("density_avg_weight").rstrip(":") + ": --")
-        self.lbl_biomass.setStyleSheet("font-size: 13px; font-weight: bold; color: #c05621;")
-        self.lbl_biomass.setToolTip(T("grid_stat_biomass"))
-
-        summary_layout.addWidget(self.lbl_abc)
-        summary_layout.addWidget(self.lbl_density)
-        summary_layout.addWidget(self.lbl_biomass)
-        summary_group.setLayout(summary_layout)
-        layout.addWidget(summary_group)
 
         # 鱼群列表
         schools_group = QGroupBox(T("stats_school_list"))
@@ -283,27 +259,6 @@ class StatsDialog(QDialog):
         menu.exec_(self.integration_table.viewport().mapToGlobal(position))
 
     # ── 更新方法 ──
-
-    def update_density(self, density_df):
-        """更新密度统计"""
-        if density_df is None or density_df.empty:
-            return
-
-        self._density_df = density_df
-        row = density_df.iloc[0]
-
-        abc_val = row.get('abc', 0)
-        density_val = row.get('density_ind_ha', 0)
-        biomass_val = row.get('total_biomass_kg_ha', 0)
-
-        self.lbl_abc.setText(f"ABC: {abc_val:.6f} m²/m²")
-        self.lbl_abc.setToolTip(T("density_abc_fmt", val=abc_val))
-
-        self.lbl_density.setText(T("density_val_fmt", val=density_val))
-        self.lbl_density.setToolTip(T("density_val_fmt", val=density_val))
-
-        self.lbl_biomass.setText(T("density_biomass_fmt", val=biomass_val))
-        self.lbl_biomass.setToolTip(T("density_biomass_fmt", val=biomass_val))
 
     def update_schools(self, schools_df):
         """更新鱼群列表"""
@@ -735,8 +690,6 @@ class StatsDialog(QDialog):
         try:
             if file_path.endswith('.xlsx'):
                 with pd.ExcelWriter(file_path) as writer:
-                    if self._density_df is not None and not self._density_df.empty:
-                        self._density_df.to_excel(writer, sheet_name=T("stats_density_summary"), index=False)
                     if self._schools_df is not None and not self._schools_df.empty:
                         self._schools_df.to_excel(writer, sheet_name=T("stats_school_list"), index=False)
                     if self._integration_df is not None and not self._integration_df.empty:
@@ -745,8 +698,6 @@ class StatsDialog(QDialog):
                         self._real_sed_df.to_excel(writer, sheet_name=T("stats_tab_real_sed"), index=False)
             elif file_path.endswith('.json'):
                 all_data = {}
-                if self._density_df is not None and not self._density_df.empty:
-                    all_data["density"] = self._density_df.to_dict(orient='records')
                 if self._schools_df is not None and not self._schools_df.empty:
                     all_data["schools"] = self._schools_df.to_dict(orient='records')
                 if self._integration_df is not None and not self._integration_df.empty:

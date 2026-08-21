@@ -112,7 +112,6 @@ class ProcessingTab(QWidget):
     noise_params_changed = Signal(dict)
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
-    compute_density_clicked = Signal()
     stats_clicked = Signal()
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
@@ -322,34 +321,6 @@ class ProcessingTab(QWidget):
 
         self.btn_detect_schools.clicked.connect(self.detect_schools_clicked)
 
-        # ── 密度估算 ──
-        density_group = QGroupBox(T("density_group"))
-        density_layout = QFormLayout()
-        density_layout.setSpacing(6)
-        density_layout.setContentsMargins(8, 12, 8, 8)
-
-        self.spin_ts = QDoubleSpinBox()
-        self.spin_ts.setRange(-70, -20)
-        self.spin_ts.setValue(-30.0)
-        self.spin_ts.setSuffix(" dB")
-
-        self.spin_avg_weight = QDoubleSpinBox()
-        self.spin_avg_weight.setRange(0.001, 100.0)
-        self.spin_avg_weight.setValue(0.5)
-        self.spin_avg_weight.setSuffix(" kg")
-
-        self.btn_compute_density = QPushButton(T("btn_compute_density"))
-        self.btn_compute_density.setProperty("cssClass", "primary")
-
-        density_layout.addRow(T("density_ts_default"), self.spin_ts)
-        density_layout.addRow(T("density_avg_weight"), self.spin_avg_weight)
-        density_layout.addRow(self.btn_compute_density)
-        density_group.setLayout(density_layout)
-        layout.addWidget(density_group)
-
-        self.btn_compute_density.clicked.connect(self.compute_density_clicked)
-
-
         # ── 回声积分 ──
         integration_group = QGroupBox(T("integration_group"))
         integration_layout = QFormLayout()
@@ -527,7 +498,6 @@ class ProcessingTab(QWidget):
             config = {
                 "processing": preset.get("processing", {}),
                 "school_detection": preset.get("school_detection", {}),
-                "density": preset.get("density", {}),
             }
             self.load_from_config(config)
             QMessageBox.information(self, T("preset_loaded"),
@@ -613,12 +583,6 @@ class ProcessingTab(QWidget):
             "backstep": self.spin_backstep.value(),
         }
 
-    def get_density_config(self) -> dict:
-        return {
-            "ts_default": self.spin_ts.value(),
-            "avg_weight_kg": self.spin_avg_weight.value(),
-        }
-
     def get_integration_config(self) -> dict:
         """获取回声积分配置"""
         esu_map = {0: "pings", 1: "distance"}
@@ -686,14 +650,9 @@ class ProcessingTab(QWidget):
         if "thr" in school:
             self.spin_school_thr.setValue(school["thr"])
 
-        density = config.get("density", {})
         surface = config.get("surface_line", {})
         if "depth_m" in surface:
             self.spin_surface.setValue(surface["depth_m"])
-        if "ts_default" in density:
-            self.spin_ts.setValue(density["ts_default"])
-        if "avg_weight_kg" in density:
-            self.spin_avg_weight.setValue(density["avg_weight_kg"])
 
         integ = config.get("integration", {})
         if "esu_type" in integ:
@@ -736,7 +695,6 @@ class ProcessingTab(QWidget):
                 "bottom_detection": self.get_bottom_config(),
             },
             "school_detection": self.get_school_config(),
-            "density": self.get_density_config(),
             "integration": self.get_integration_config(),
             "single_target_real": self.get_real_sed_config(),
             "surface_line": {"depth_m": self.spin_surface.value()},
@@ -751,24 +709,6 @@ class StatsTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
         layout.setContentsMargins(8, 8, 8, 8)
-
-        # ── 密度摘要（突出显示）──
-        summary_group = QGroupBox(T("stats_density_summary"))
-        summary_layout = QVBoxLayout()
-        summary_layout.setContentsMargins(8, 12, 8, 8)
-
-        self.lbl_abc = QLabel("ABC: --")
-        self.lbl_abc.setStyleSheet("font-size: 13px; font-weight: bold; color: #2f855a;")
-        self.lbl_density = QLabel(f"{T('density_group')}: --")
-        self.lbl_density.setStyleSheet("font-size: 13px; font-weight: bold; color: #1a73e8;")
-        self.lbl_biomass = QLabel(f"{T('density_avg_weight').rstrip(':')}: --")
-        self.lbl_biomass.setStyleSheet("font-size: 13px; font-weight: bold; color: #c05621;")
-
-        summary_layout.addWidget(self.lbl_abc)
-        summary_layout.addWidget(self.lbl_density)
-        summary_layout.addWidget(self.lbl_biomass)
-        summary_group.setLayout(summary_layout)
-        layout.addWidget(summary_group)
 
         # ── 鱼群列表 ──
         schools_group = QGroupBox(T("stats_school_list"))
@@ -787,15 +727,6 @@ class StatsTab(QWidget):
         schools_layout.addWidget(self.table)
         schools_group.setLayout(schools_layout)
         layout.addWidget(schools_group, 1)
-
-    def update_density(self, density_df):
-        """更新密度统计"""
-        if density_df is None or density_df.empty:
-            return
-        row = density_df.iloc[0]
-        self.lbl_abc.setText(T("density_abc_fmt", val=row.get('abc', 0)))
-        self.lbl_density.setText(T("density_val_fmt", val=row.get('density_ind_ha', 0)))
-        self.lbl_biomass.setText(T("density_biomass_fmt", val=row.get('total_biomass_kg_ha', 0)))
 
     def update_schools(self, schools_df):
         """更新鱼群列表"""
@@ -820,7 +751,6 @@ class PropertyPanel(QTabWidget):
     noise_params_changed = Signal(dict)
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
-    compute_density_clicked = Signal()
     stats_clicked = Signal()
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
@@ -848,7 +778,6 @@ class PropertyPanel(QTabWidget):
         self.processing.noise_params_changed.connect(self.noise_params_changed)
         self.processing.surface_line_changed.connect(self.surface_line_changed)
         self.processing.detect_schools_clicked.connect(self.detect_schools_clicked)
-        self.processing.compute_density_clicked.connect(self.compute_density_clicked)
         self.processing.stats_clicked.connect(self.stats_clicked)
         self.processing.detect_bottom_clicked.connect(self.detect_bottom_clicked)
         self.processing.draw_bottom_clicked.connect(self.draw_bottom_clicked)

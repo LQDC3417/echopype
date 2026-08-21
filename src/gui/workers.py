@@ -192,28 +192,6 @@ class DetectSchoolsWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
-class ComputeDensityWorker(QThread):
-    """密度估算（裁剪）"""
-    finished = Signal(object)  # DataFrame
-    error = Signal(str)
-    progress = Signal(str)
-
-    def __init__(self, schools_df, ds_Sv, config: dict):
-        super().__init__()
-        self.schools_df = schools_df
-        self.ds_Sv = ds_Sv
-        self.config = config
-
-    def run(self):
-        try:
-            from src.core.density import estimate_density
-            self.progress.emit(T("msg_computing_density"))
-            df = estimate_density(self.schools_df, self.ds_Sv, self.config)
-            self.finished.emit(df)
-        except Exception:
-            self.error.emit(traceback.format_exc())
-
-
 class BatchProcessWorker(QThread):
     """批量处理多个 raw 文件（并行处理）
 
