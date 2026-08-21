@@ -263,11 +263,11 @@ _TEXTS = {
     "msg_real_sed_done": {"zh": "真实 SED 完成: {n} 个目标", "en": "Real SED done: {n} targets"},
     "msg_real_sed_none": {"zh": "未检测到单体目标\n尝试降低 TS 阈值", "en": "No single targets detected\nTry lowering TS threshold"},
     "stats_tab_real_sed": {"zh": "真实 SED", "en": "Real SED"},
-    "real_sed_info": {"zh": "真实 SED: --", "en": "Real SED: --"},
-    "real_sed_info_fmt": {"zh": "真实 SED: {n} 个目标", "en": "Real SED: {n} targets"},
+    "real_sed_info": {"zh": "SED 网格聚合: --", "en": "SED Grid Aggregation: --"},
+    "real_sed_info_fmt": {"zh": "SED 网格聚合: {n} 个网格含目标", "en": "SED Grid: {n} cells with targets"},
     "real_sed_headers": {
-        "zh": ["ID", "Ping", "深度", "TS", "TS(未补偿)", "沿船角", "横向角", "脉宽", "补偿"],
-        "en": ["ID", "Ping", "Depth", "TS", "TS(raw)", "Alongship", "Athwartship", "Pulse", "Comp"],
+        "zh": ["ESU", "Ping 范围", "深度范围", "目标数", "TS 均值", "TS 标准差", "TS 最小", "TS 最大", "经度", "纬度"],
+        "en": ["ESU", "Ping Range", "Depth Range", "Targets", "TS Mean", "TS Std", "TS Min", "TS Max", "Lon", "Lat"],
     },
     "stats_no_real_sed_data": {"zh": "没有真实 SED 数据可导出", "en": "No real SED data to export"},
 

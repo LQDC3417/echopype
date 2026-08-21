@@ -14,6 +14,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 logger = logging.getLogger("fish_acoustics")
 
@@ -319,3 +320,115 @@ def detect_single_targets_real(
         "ts_uncompensated_db", "alongship_deg", "athwartship_deg",
         "pulse_len", "norm_pulse", "beam_comp_db", "angle_std_deg",
     ])
+
+
+def aggregate_targets_to_grid(
+    targets_df: pd.DataFrame,
+    ds_Sv: xr.Dataset,
+    config: dict,
+) -> pd.DataFrame:
+    """将 SED 检测目标按回声积分网格聚合，输出每网格的 TS 统计。
+
+    复用回声积分的网格定义（ESU 类型/大小 + 层宽），保证与积分结果
+    一一对应可对齐合并。每个网格单元输出：
+    - n_targets: 检测目标数
+    - ts_mean: 目标 TS 均值（线性域能量平均后转 dB）
+    - ts_std / ts_min / ts_max: TS 离散度与范围（dB）
+    - interval / layer: 与积分表对齐的网格索引
+    - ping_start / ping_end / depth_start / depth_end: 网格范围
+    - center_lat / center_lon: 网格中心经纬度（distance 模式有 GPS 时）
+
+    Parameters
+    ----------
+    targets_df : pd.DataFrame
+        detect_single_targets_real 的输出（含 ping_idx, range_m, ts_db）
+    ds_Sv : xr.Dataset
+        Sv 数据集（含 echo_range / GPS）
+    config : dict
+        配置字典（integration 子项定义网格）
+
+    Returns
+    -------
+    pd.DataFrame
+        每行一个网格单元（含无目标单元，TS 统计为 NaN）
+    """
+    from src.core.integration import ESUType, _extract_gps, create_integration_grid
+
+    integ_cfg = config.get("integration", {})
+    esu_type = ESUType(integ_cfg.get("esu_type", "pings"))
+    esu_size = float(integ_cfg.get("esu_size", 500))
+    layer_width = float(integ_cfg.get("layer_width", 5.0))
+
+    grid = create_integration_grid(
+        ds_Sv,
+        esu_type=esu_type,
+        esu_size=esu_size,
+        layer_width=layer_width,
+    )
+
+    # 目标 → 网格单元映射
+    interval_idx = np.searchsorted(grid.ping_end, targets_df["ping_idx"].values, side="right")
+    layer_idx = np.searchsorted(grid.depth_end, targets_df["range_m"].values, side="right")
+
+    # 越界目标剔除（ping 超出最后 interval、深度超出最后 layer）
+    valid = (
+        (interval_idx < grid.n_intervals)
+        & (layer_idx < grid.n_layers)
+        & (targets_df["range_m"].values >= grid.depth_start[0])
+    )
+    interval_idx = interval_idx[valid]
+    layer_idx = layer_idx[valid]
+    ts_valid = targets_df["ts_db"].values[valid]
+
+    # GPS 中心（每 interval 取 ping 范围中点的经纬度）
+    lat_arr, lon_arr = _extract_gps(ds_Sv)
+    center_lat, center_lon = {}, {}
+    if lat_arr is not None and lon_arr is not None:
+        for i in range(grid.n_intervals):
+            p0 = grid.ping_start[i]
+            p1 = min(grid.ping_end[i], len(lat_arr)) - 1
+            lat_slice = lat_arr[p0:p1 + 1]
+            lon_slice = lon_arr[p0:p1 + 1]
+            lat_valid = lat_slice[np.isfinite(lat_slice)]
+            lon_valid = lon_slice[np.isfinite(lon_slice)]
+            if len(lat_valid) > 0 and len(lon_valid) > 0:
+                center_lat[i] = float(np.mean(lat_valid))
+                center_lon[i] = float(np.mean(lon_valid))
+
+    records = []
+    for i in range(grid.n_intervals):
+        for j in range(grid.n_layers):
+            cell_mask = (interval_idx == i) & (layer_idx == j)
+            ts_cell = ts_valid[cell_mask]
+
+            row = {
+                "interval": i,
+                "layer": j,
+                "ping_start": int(grid.ping_start[i]),
+                "ping_end": int(grid.ping_end[i]),
+                "depth_start": float(grid.depth_start[j]),
+                "depth_end": float(grid.depth_end[j]),
+                "n_targets": int(len(ts_cell)),
+                "ts_mean": float("nan"),
+                "ts_std": float("nan"),
+                "ts_min": float("nan"),
+                "ts_max": float("nan"),
+                "center_lat": center_lat.get(i, float("nan")),
+                "center_lon": center_lon.get(i, float("nan")),
+            }
+            if len(ts_cell) > 0:
+                ts_finite = ts_cell[np.isfinite(ts_cell)]
+                if len(ts_finite) > 0:
+                    # 线性域能量平均再转回 dB
+                    row["ts_mean"] = float(10.0 * np.log10(np.mean(10.0 ** (ts_finite / 10.0))))
+                    row["ts_std"] = float(np.std(ts_finite))
+                    row["ts_min"] = float(np.min(ts_finite))
+                    row["ts_max"] = float(np.max(ts_finite))
+            records.append(row)
+
+    df = pd.DataFrame(records)
+    logger.info(
+        f"SED 网格聚合完成: {grid.n_intervals}×{grid.n_layers} 单元，"
+        f"共 {len(ts_valid)} 个目标归入网格"
+    )
+    return df

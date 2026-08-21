@@ -120,22 +120,23 @@ class AnalysisMixin:
         rs_cfg = self.property_panel.processing.get_real_sed_config()
         self._config.setdefault("single_target_real", {}).update(rs_cfg)
         self.statusbar.show_progress(T("msg_real_sed_running"))
-        self._current_worker = RealSedWorker(self._echodata, self._config)
+        self._current_worker = RealSedWorker(self._echodata, self._ds_Sv, self._config)
         self._current_worker.finished.connect(self._on_real_sed_done)
         self._current_worker.error.connect(self._on_worker_error)
         self._current_worker.progress.connect(self.statusbar.set_status)
         self._current_worker.start()
 
-    def _on_real_sed_done(self, targets_df):
-        """真实 SED 完成 → 展示结果表格 + echogram 叠加"""
+    def _on_real_sed_done(self, result):
+        """真实 SED 完成 → 展示网格聚合表 + echogram 叠加（逐目标）"""
         self.statusbar.hide_progress()
+        targets_df, grid_df = result
         n = len(targets_df) if targets_df is not None and not targets_df.empty else 0
         if n == 0:
             self.echogram.clear_single_targets()
             QMessageBox.information(self, T("msg_real_sed_done"), T("msg_real_sed_none"))
             return
         self._real_sed_df = targets_df
-        self.stats_dialog.update_real_sed(targets_df)
+        self.stats_dialog.update_real_sed(grid_df)
         self.echogram.set_single_targets(targets_df)
         self.statusbar.set_status(T("msg_real_sed_done", n=n))
         self._show_stats()

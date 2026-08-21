@@ -380,27 +380,36 @@ class RealSedWorker(QThread):
     """真实单体目标检测（分裂波束 SED）工作线程
 
     流程：compute_TS → detect_single_targets_real（阈值+脉冲长度+测角+补偿）
+          → aggregate_targets_to_grid（按积分网格聚合 TS 统计）
+
+    finished 信号发送 tuple(targets_df, grid_df)：
+    - targets_df: 逐目标结果（用于 echogram 叠加）
+    - grid_df: 网格聚合结果（用于 StatsDialog 表格展示）
     """
     finished = Signal(object)
     error = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, echodata, config):
+    def __init__(self, echodata, ds_Sv, config):
         super().__init__()
         self.echodata = echodata
+        self.ds_Sv = ds_Sv
         self.config = config
 
     def run(self):
         try:
             from src.core.acoustic import _detect_waveform_mode
             from echopype.calibrate import compute_TS
-            from src.core.sed import detect_single_targets_real
+            from src.core.sed import aggregate_targets_to_grid, detect_single_targets_real
 
             self.progress.emit(T("msg_real_sed_running"))
             wm, em = _detect_waveform_mode(self.echodata)
             ds_TS = compute_TS(self.echodata, waveform_mode=wm, encode_mode=em)
             targets_df = detect_single_targets_real(self.echodata, ds_TS, self.config)
-            self.finished.emit(targets_df)
+
+            # 按积分网格聚合（即使 targets_df 为空也输出全 NaN 网格）
+            grid_df = aggregate_targets_to_grid(targets_df, self.ds_Sv, self.config)
+            self.finished.emit((targets_df, grid_df))
 
         except Exception:
             self.error.emit(traceback.format_exc())
