@@ -98,6 +98,10 @@ class NoiseRemovalWorker(QThread):
             from echopype.clean import remove_background_noise
             noise_cfg = self.config.get("processing", {}).get("noise_removal", {})
             self.progress.emit(T("msg_removing_noise"))
+            # echopype 0.11.1: remove_background_noise 装饰器 @add_processing_level("L*B")
+            # 要求输入带 input_processing_level 属性，缺失时抛 RuntimeError
+            if "input_processing_level" not in self.ds_Sv.attrs:
+                self.ds_Sv.attrs["input_processing_level"] = "L2A"
             ds = remove_background_noise(
                 self.ds_Sv,
                 ping_num=noise_cfg.get("ping_num", 5),
