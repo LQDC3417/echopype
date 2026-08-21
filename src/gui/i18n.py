@@ -198,7 +198,23 @@ _TEXTS = {
 
     # 鱼群检测
     "school_group": {"zh": "鱼群检测", "en": "School Detection"},
+    "school_method": {"zh": "检测方法:", "en": "Method:"},
     "school_sv_threshold": {"zh": "Sv 阈值:", "en": "Sv Threshold:"},
+    "school_mincan": {"zh": "最小候选(深度/ping):", "en": "Min Candidate (Depth/Ping):"},
+    "school_mincan_depth": {"zh": "最小候选 深度:", "en": "Min Candidate Depth:"},
+    "school_mincan_ping": {"zh": "最小候选 Ping:", "en": "Min Candidate Ping:"},
+    "school_maxlink": {"zh": "最大连接(深度/ping):", "en": "Max Link (Depth/Ping):"},
+    "school_maxlink_depth": {"zh": "最大连接 深度:", "en": "Max Link Depth:"},
+    "school_maxlink_ping": {"zh": "最大连接 Ping:", "en": "Max Link Ping:"},
+    "school_minsho": {"zh": "最小鱼群(深度/ping):", "en": "Min School (Depth/Ping):"},
+    "school_minsho_depth": {"zh": "最小鱼群 深度:", "en": "Min School Depth:"},
+    "school_minsho_ping": {"zh": "最小鱼群 Ping:", "en": "Min School Ping:"},
+    "school_min_threshold": {"zh": "最小阈值:", "en": "Min Threshold:"},
+    "school_max_depth_dist": {"zh": "最大深度间隔:", "en": "Max Depth Distance:"},
+    "school_max_ping_dist": {"zh": "最大水平间隔:", "en": "Max Ping Distance:"},
+    "school_max_time_gap": {"zh": "最大时间间隔:", "en": "Max Time Gap:"},
+    "school_min_shoal_pings": {"zh": "最小鱼群 Ping 数:", "en": "Min Shoal Pings:"},
+    "school_min_shoal_height": {"zh": "最小鱼群高度:", "en": "Min Shoal Height:"},
     "btn_detect_schools": {"zh": "检测鱼群", "en": "Detect Schools"},
 
     # 网格分析

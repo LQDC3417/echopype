@@ -302,24 +302,104 @@ class ProcessingTab(QWidget):
 
         # ── 鱼群检测参数 ──
         school_group = QGroupBox(T("school_group"))
-        school_layout = QFormLayout()
-        school_layout.setSpacing(6)
-        school_layout.setContentsMargins(8, 12, 8, 8)
+        self.school_layout = QFormLayout()
+        self.school_layout.setSpacing(6)
+        self.school_layout.setContentsMargins(8, 12, 8, 8)
 
+        def _pair_row(defaults, depth_key, ping_key):
+            """创建 [depth, ping] 双 spin 行，返回 (行控件, depth spin, ping spin)"""
+            row = QWidget()
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(4)
+            s_depth = QDoubleSpinBox()
+            s_depth.setRange(0.1, 100)
+            s_depth.setValue(defaults[0])
+            s_depth.setDecimals(1)
+            s_depth.setSuffix(" m")
+            s_depth.setToolTip(T(depth_key))
+            s_ping = QDoubleSpinBox()
+            s_ping.setRange(0.1, 100)
+            s_ping.setValue(defaults[1])
+            s_ping.setDecimals(1)
+            s_ping.setToolTip(T(ping_key))
+            h.addWidget(s_depth, 1)
+            h.addWidget(s_ping, 1)
+            return row, s_depth, s_ping
+
+        # 检测方法选择
+        self.combo_school_method = QComboBox()
+        self.combo_school_method.addItems(["echoview", "advanced"])
+        self.combo_school_method.currentTextChanged.connect(self._on_school_method_changed)
+        self.school_layout.addRow(T("school_method"), self.combo_school_method)
+
+        # echoview 方法参数
         self.spin_school_thr = QDoubleSpinBox()
         self.spin_school_thr.setRange(-100, 0)
         self.spin_school_thr.setValue(-55.0)
         self.spin_school_thr.setSuffix(" dB")
+        self.school_layout.addRow(T("school_sv_threshold"), self.spin_school_thr)
 
+        pair_row, self.spin_mincan_depth, self.spin_mincan_ping = _pair_row(
+            (3.0, 10.0), "school_mincan_depth", "school_mincan_ping")
+        self.school_layout.addRow(T("school_mincan"), pair_row)
+
+        pair_row, self.spin_maxlink_depth, self.spin_maxlink_ping = _pair_row(
+            (3.0, 15.0), "school_maxlink_depth", "school_maxlink_ping")
+        self.school_layout.addRow(T("school_maxlink"), pair_row)
+
+        pair_row, self.spin_minsho_depth, self.spin_minsho_ping = _pair_row(
+            (3.0, 15.0), "school_minsho_depth", "school_minsho_ping")
+        self.school_layout.addRow(T("school_minsho"), pair_row)
+
+        # advanced 方法参数
+        self.spin_min_threshold = QDoubleSpinBox()
+        self.spin_min_threshold.setRange(-100, 0)
+        self.spin_min_threshold.setValue(-60.0)
+        self.spin_min_threshold.setSuffix(" dB")
+        self.school_layout.addRow(T("school_min_threshold"), self.spin_min_threshold)
+
+        self.spin_max_depth_dist = QDoubleSpinBox()
+        self.spin_max_depth_dist.setRange(0.01, 10)
+        self.spin_max_depth_dist.setValue(0.1)
+        self.spin_max_depth_dist.setDecimals(2)
+        self.spin_max_depth_dist.setSuffix(" m")
+        self.school_layout.addRow(T("school_max_depth_dist"), self.spin_max_depth_dist)
+
+        self.spin_max_ping_dist = QSpinBox()
+        self.spin_max_ping_dist.setRange(1, 100)
+        self.spin_max_ping_dist.setValue(1)
+        self.school_layout.addRow(T("school_max_ping_dist"), self.spin_max_ping_dist)
+
+        self.spin_max_time_gap = QSpinBox()
+        self.spin_max_time_gap.setRange(1, 200)
+        self.spin_max_time_gap.setValue(20)
+        self.school_layout.addRow(T("school_max_time_gap"), self.spin_max_time_gap)
+
+        self.spin_min_shoal_pings = QSpinBox()
+        self.spin_min_shoal_pings.setRange(1, 100)
+        self.spin_min_shoal_pings.setValue(3)
+        self.school_layout.addRow(T("school_min_shoal_pings"), self.spin_min_shoal_pings)
+
+        self.spin_min_shoal_height = QDoubleSpinBox()
+        self.spin_min_shoal_height.setRange(0.01, 10)
+        self.spin_min_shoal_height.setValue(0.5)
+        self.spin_min_shoal_height.setDecimals(2)
+        self.spin_min_shoal_height.setSuffix(" m")
+        self.school_layout.addRow(T("school_min_shoal_height"), self.spin_min_shoal_height)
+
+        # 检测按钮（始终可见）
         self.btn_detect_schools = QPushButton(T("btn_detect_schools"))
         self.btn_detect_schools.setProperty("cssClass", "primary")
+        self.school_layout.addRow(self.btn_detect_schools)
 
-        school_layout.addRow(T("school_sv_threshold"), self.spin_school_thr)
-        school_layout.addRow(self.btn_detect_schools)
-        school_group.setLayout(school_layout)
+        school_group.setLayout(self.school_layout)
         layout.addWidget(school_group)
 
         self.btn_detect_schools.clicked.connect(self.detect_schools_clicked)
+
+        # 初始按默认方法（echoview）显示对应参数
+        self._on_school_method_changed(self.combo_school_method.currentText())
 
         # ── 回声积分 ──
         integration_group = QGroupBox(T("integration_group"))
@@ -555,7 +635,29 @@ class ProcessingTab(QWidget):
         }
 
     def get_school_config(self) -> dict:
-        return {"thr": self.spin_school_thr.value()}
+        return {
+            "method": self.combo_school_method.currentText(),
+            "thr": self.spin_school_thr.value(),
+            "mincan": [self.spin_mincan_depth.value(), self.spin_mincan_ping.value()],
+            "maxlink": [self.spin_maxlink_depth.value(), self.spin_maxlink_ping.value()],
+            "minsho": [self.spin_minsho_depth.value(), self.spin_minsho_ping.value()],
+            "min_threshold": self.spin_min_threshold.value(),
+            "max_depth_distance": self.spin_max_depth_dist.value(),
+            "max_ping_distance": self.spin_max_ping_dist.value(),
+            "max_time_gap": self.spin_max_time_gap.value(),
+            "min_shoal_pings": self.spin_min_shoal_pings.value(),
+            "min_shoal_height": self.spin_min_shoal_height.value(),
+        }
+
+    def _on_school_method_changed(self, method: str):
+        """鱼群检测方法切换：只显示当前方法的参数（QFormLayout 行级显隐）"""
+        # 行索引：0=方法, 1-4=echoview 参数, 5-10=advanced 参数, 11=按钮
+        echoview_visible = method == "echoview"
+        for row in range(1, 5):
+            self.school_layout.setRowVisible(row, echoview_visible)
+        advanced_visible = method == "advanced"
+        for row in range(5, 11):
+            self.school_layout.setRowVisible(row, advanced_visible)
 
     def _on_bottom_method_changed(self, method: str):
         """底部检测方法切换：只显示当前方法的参数（QFormLayout 行级显隐）"""
@@ -647,8 +749,33 @@ class ProcessingTab(QWidget):
             self.spin_backstep.setValue(bottom["backstep"])
 
         school = config.get("school_detection", {})
+        if "method" in school:
+            idx = self.combo_school_method.findText(school["method"])
+            if idx >= 0:
+                self.combo_school_method.setCurrentIndex(idx)
         if "thr" in school:
             self.spin_school_thr.setValue(school["thr"])
+        for key, spins in (
+            ("mincan", (self.spin_mincan_depth, self.spin_mincan_ping)),
+            ("maxlink", (self.spin_maxlink_depth, self.spin_maxlink_ping)),
+            ("minsho", (self.spin_minsho_depth, self.spin_minsho_ping)),
+        ):
+            if key in school:
+                pair = school[key]
+                spins[0].setValue(float(pair[0]))
+                spins[1].setValue(float(pair[1]))
+        if "min_threshold" in school:
+            self.spin_min_threshold.setValue(school["min_threshold"])
+        if "max_depth_distance" in school:
+            self.spin_max_depth_dist.setValue(school["max_depth_distance"])
+        if "max_ping_distance" in school:
+            self.spin_max_ping_dist.setValue(int(school["max_ping_distance"]))
+        if "max_time_gap" in school:
+            self.spin_max_time_gap.setValue(int(school["max_time_gap"]))
+        if "min_shoal_pings" in school:
+            self.spin_min_shoal_pings.setValue(int(school["min_shoal_pings"]))
+        if "min_shoal_height" in school:
+            self.spin_min_shoal_height.setValue(school["min_shoal_height"])
 
         surface = config.get("surface_line", {})
         if "depth_m" in surface:

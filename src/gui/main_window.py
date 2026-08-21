@@ -424,6 +424,9 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
             "school_detection": {
                 "method": "advanced", "thr": -55.0,
                 "mincan": [3, 10], "maxlink": [3, 15], "minsho": [3, 15],
+                "min_threshold": -60.0, "max_depth_distance": 0.1,
+                "max_ping_distance": 1, "max_time_gap": 20,
+                "min_shoal_pings": 3, "min_shoal_height": 0.5,
             },
             "integration": {
                 "esu_type": "pings", "esu_size": 500,
