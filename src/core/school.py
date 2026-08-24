@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from src.core.utils import get_sv_array, get_vertical_coords
+from src.core.utils import depth_resolution, get_sv_array, get_vertical_coords, ping_resolution
 
 logger = logging.getLogger("fish_acoustics")
 
@@ -160,13 +160,8 @@ def schools_to_dataframe(
         depth_end = depth[depth_idx_max] if depth_idx_max < len(depth) else float(depth_idx_max)
 
         n_pixels = int(region.sum())
-        if np.issubdtype(ping_time.dtype, np.datetime64):
-            ping_res_s = float(np.diff(ping_time[:2]) / np.timedelta64(1, 's')) if len(ping_time) > 1 else 1.0
-        else:
-            ping_res_s = float(np.diff(ping_time[:2])[0]) if len(ping_time) > 1 else 1.0
-        depth_diffs = np.abs(np.diff(depth))
-        non_zero_diffs = depth_diffs[depth_diffs > 0]
-        depth_res = float(np.median(non_zero_diffs)) if len(non_zero_diffs) > 0 else 0.1
+        ping_res_s = ping_resolution(ping_time)
+        depth_res = depth_resolution(depth)
         area = n_pixels * abs(ping_res_s) * depth_res
 
         sv_values = Sv[region]
