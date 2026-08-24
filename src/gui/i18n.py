@@ -59,7 +59,6 @@ _TEXTS = {
             "<li>EK80 multi-frequency raw data batch import</li>"
             "<li>Sv calibration + noise removal + bottom detection</li>"
             "<li>Automatic school detection (Echoview algorithm)</li>"
-            "<li>Density / biomass estimation</li>"
             "<li>High-performance OpenGL echogram rendering</li>"
             "</ul>"
         ),
@@ -74,6 +73,11 @@ _TEXTS = {
     "menu_help": {"zh": "帮助(&H)", "en": "&Help"},
 
     # 文件菜单
+    "new_project": {"zh": "新建项目...", "en": "New Project..."},
+    "open_project": {"zh": "打开项目...", "en": "Open Project..."},
+    "save_project": {"zh": "保存项目", "en": "Save Project"},
+    "recent_projects": {"zh": "最近打开的项目", "en": "Recent Projects"},
+    "recent_empty": {"zh": "（无最近项目）", "en": "(No recent projects)"},
     "import_raw_files": {"zh": "导入 Raw 文件...", "en": "Import Raw Files..."},
     "open_config": {"zh": "打开配置文件...", "en": "Open Config..."},
     "save_config": {"zh": "保存配置...", "en": "Save Config..."},
@@ -100,10 +104,8 @@ _TEXTS = {
     "noise_removal": {"zh": "噪声去除", "en": "Noise Removal"},
     "detect_bottom": {"zh": "检测底部", "en": "Detect Bottom"},
     "detect_schools": {"zh": "检测鱼群", "en": "Detect Schools"},
-    "compute_density": {"zh": "计算密度", "en": "Compute Density"},
 
     # 分析菜单
-    "export_density_report": {"zh": "导出密度报告", "en": "Export Density Report"},
     "menu_export_schools": {"zh": "导出鱼群清单", "en": "Export School List"},
 
     # 帮助菜单
@@ -146,16 +148,8 @@ _TEXTS = {
     "status_gps": {"zh": "GPS: --", "en": "GPS: --"},
 
     # ── 左侧面板 ──
-    "panel_frequency": {"zh": "频率选择", "en": "Frequency"},
-    "panel_display_type": {"zh": "显示类型", "en": "Display Type"},
     "display_sv_raw": {"zh": "Sv (原始)", "en": "Sv (Raw)"},
     "display_sv_corrected": {"zh": "Sv (去噪)", "en": "Sv (Corrected)"},
-    "display_noise": {"zh": "噪声", "en": "Noise"},
-    "display_snr": {"zh": "SNR", "en": "SNR"},
-    "panel_filters": {"zh": "滤波器", "en": "Filters"},
-    "filter_noise": {"zh": "噪声去除", "en": "Noise Removal"},
-    "filter_bottom": {"zh": "底部检测", "en": "Bottom Detection"},
-    "filter_schools": {"zh": "鱼群显示", "en": "School Display"},
     "panel_variables": {"zh": "变量列表", "en": "Variables"},
 
     # ── 右侧属性面板 ──
@@ -196,31 +190,44 @@ _TEXTS = {
     "bottom_sv_threshold": {"zh": "Sv 阈值:", "en": "Sv Threshold:"},
     "bottom_peak_threshold": {"zh": "峰值阈值:", "en": "Peak Threshold:"},
     "bottom_disc_threshold": {"zh": "判别阈值:", "en": "Discrimination Threshold:"},
+    "bottom_sat_threshold": {"zh": "饱和阈值:", "en": "Saturation Threshold:"},
+    "bottom_validation_window": {"zh": "验证窗口:", "en": "Validation Window:"},
+    "bottom_validation_threshold": {"zh": "验证倍数:", "en": "Validation Factor:"},
+    "bottom_smoothing_window": {"zh": "平滑窗口:", "en": "Smoothing Window:"},
+    "bottom_search_min": {"zh": "最小深度:", "en": "Min Search Depth:"},
+    "bottom_window_len": {"zh": "平滑长度:", "en": "Window Length:"},
+    "bottom_backstep": {"zh": "回步值:", "en": "Backstep:"},
     "btn_detect_bottom": {"zh": "检测底部", "en": "Detect Bottom"},
     "btn_draw_bottom": {"zh": "绘制底线", "en": "Draw Bottom"},
     "btn_update_bottom": {"zh": "更新底线", "en": "Update Bottom"},
 
     # 鱼群检测
     "school_group": {"zh": "鱼群检测", "en": "School Detection"},
+    "school_method": {"zh": "检测方法:", "en": "Method:"},
     "school_sv_threshold": {"zh": "Sv 阈值:", "en": "Sv Threshold:"},
+    "school_mincan": {"zh": "最小候选(深度/ping):", "en": "Min Candidate (Depth/Ping):"},
+    "school_mincan_depth": {"zh": "最小候选 深度:", "en": "Min Candidate Depth:"},
+    "school_mincan_ping": {"zh": "最小候选 Ping:", "en": "Min Candidate Ping:"},
+    "school_maxlink": {"zh": "最大连接(深度/ping):", "en": "Max Link (Depth/Ping):"},
+    "school_maxlink_depth": {"zh": "最大连接 深度:", "en": "Max Link Depth:"},
+    "school_maxlink_ping": {"zh": "最大连接 Ping:", "en": "Max Link Ping:"},
+    "school_minsho": {"zh": "最小鱼群(深度/ping):", "en": "Min School (Depth/Ping):"},
+    "school_minsho_depth": {"zh": "最小鱼群 深度:", "en": "Min School Depth:"},
+    "school_minsho_ping": {"zh": "最小鱼群 Ping:", "en": "Min School Ping:"},
+    "school_min_threshold": {"zh": "最小阈值:", "en": "Min Threshold:"},
+    "school_max_depth_dist": {"zh": "最大深度间隔:", "en": "Max Depth Distance:"},
+    "school_max_ping_dist": {"zh": "最大水平间隔:", "en": "Max Ping Distance:"},
+    "school_max_time_gap": {"zh": "最大时间间隔:", "en": "Max Time Gap:"},
+    "school_min_shoal_pings": {"zh": "最小鱼群 Ping 数:", "en": "Min Shoal Pings:"},
+    "school_min_shoal_height": {"zh": "最小鱼群高度:", "en": "Min Shoal Height:"},
     "btn_detect_schools": {"zh": "检测鱼群", "en": "Detect Schools"},
 
-    # 密度估算
-    "density_group": {"zh": "密度估算", "en": "Density Estimation"},
-    "density_ts_default": {"zh": "TS 默认值:", "en": "TS Default:"},
-    "density_avg_weight": {"zh": "平均体重:", "en": "Avg Weight:"},
-    "btn_compute_density": {"zh": "计算密度", "en": "Compute Density"},
-
     # 网格分析
-    "grid_stat_abc": {"zh": "ABC (面积背散射系数)", "en": "ABC (Area Backscattering Coeff.)"},
-    "grid_stat_density": {"zh": "密度 (ind/ha)", "en": "Density (ind/ha)"},
-    "grid_stat_biomass": {"zh": "生物量 (kg/ha)", "en": "Biomass (kg/ha)"},
     "btn_statistics": {"zh": "统计结果", "en": "Statistics"},
 
     # 其他功能按钮
     "btn_quality_check": {"zh": "数据质量检查", "en": "Quality Check"},
     "btn_multifreq": {"zh": "多频分析", "en": "Multi-Freq Analysis"},
-    "btn_single_target": {"zh": "单体目标检测", "en": "Single Target Detection"},
     "btn_sv_stats": {"zh": "Sv 统计摘要", "en": "Sv Statistics"},
     "btn_transect_split": {"zh": "Transect 分段", "en": "Transect Split"},
     "btn_apply_all": {"zh": "应用全部参数", "en": "Apply All Parameters"},
@@ -251,21 +258,6 @@ _TEXTS = {
     "stats_no_integration_data": {"zh": "没有回声积分数据可导出", "en": "No integration data to export"},
 
     # ── 单体目标检测 ──
-    "menu_single_target": {"zh": "单体目标检测", "en": "Single Target Detection"},
-    "single_target_group": {"zh": "单体目标检测", "en": "Single Target Detection"},
-    "single_target_sv_threshold": {"zh": "Sv 阈值:", "en": "Sv Threshold:"},
-    "single_target_min_area": {"zh": "最小面积:", "en": "Min Area:"},
-    "single_target_max_area": {"zh": "最大面积:", "en": "Max Area:"},
-    "single_target_area_px": {"zh": " 像素", "en": " px"},
-    "stats_tab_single_target": {"zh": "单体目标", "en": "Single Targets"},
-    "single_target_info": {"zh": "单体目标: --", "en": "Single Targets: --"},
-    "single_target_info_fmt": {"zh": "单体目标: {n} 个", "en": "Single Targets: {n}"},
-    "single_target_headers": {
-        "zh": ["ID", "Ping", "深度", "Sv 峰值", "Sv 均值", "面积", "TS"],
-        "en": ["ID", "Ping", "Depth", "Peak Sv", "Mean Sv", "Area", "TS"],
-    },
-    "stats_no_single_target_data": {"zh": "没有单体目标数据可导出", "en": "No single target data to export"},
-    "msg_single_target_done": {"zh": "单体目标检测完成: {n} 个目标", "en": "Single target detection done: {n} targets"},
     "single_target_real_group": {"zh": "真实 SED（分裂波束）", "en": "Real SED (Split-beam)"},
     "st_real_ts_threshold": {"zh": "TS 阈值:", "en": "TS Threshold:"},
     "st_real_pldl": {"zh": "脉冲判定电平:", "en": "Pulse Length Level:"},
@@ -280,11 +272,11 @@ _TEXTS = {
     "msg_real_sed_done": {"zh": "真实 SED 完成: {n} 个目标", "en": "Real SED done: {n} targets"},
     "msg_real_sed_none": {"zh": "未检测到单体目标\n尝试降低 TS 阈值", "en": "No single targets detected\nTry lowering TS threshold"},
     "stats_tab_real_sed": {"zh": "真实 SED", "en": "Real SED"},
-    "real_sed_info": {"zh": "真实 SED: --", "en": "Real SED: --"},
-    "real_sed_info_fmt": {"zh": "真实 SED: {n} 个目标", "en": "Real SED: {n} targets"},
+    "real_sed_info": {"zh": "SED 网格聚合: --", "en": "SED Grid Aggregation: --"},
+    "real_sed_info_fmt": {"zh": "SED 网格聚合: {n} 个网格含目标", "en": "SED Grid: {n} cells with targets"},
     "real_sed_headers": {
-        "zh": ["ID", "Ping", "深度", "TS", "TS(未补偿)", "沿船角", "横向角", "脉宽", "补偿"],
-        "en": ["ID", "Ping", "Depth", "TS", "TS(raw)", "Alongship", "Athwartship", "Pulse", "Comp"],
+        "zh": ["ESU", "Ping 范围", "深度范围", "目标数", "TS 均值", "TS 标准差", "TS 最小", "TS 最大", "经度", "纬度"],
+        "en": ["ESU", "Ping Range", "Depth Range", "Targets", "TS Mean", "TS Std", "TS Min", "TS Max", "Lon", "Lat"],
     },
     "stats_no_real_sed_data": {"zh": "没有真实 SED 数据可导出", "en": "No real SED data to export"},
 
@@ -309,8 +301,7 @@ _TEXTS = {
 
     # ── 统计对话框 ──
     "stats_title": {"zh": "统计结果", "en": "Statistics"},
-    "stats_tab_summary": {"zh": "鱼群 / 密度", "en": "Schools / Density"},
-    "stats_density_summary": {"zh": "密度摘要", "en": "Density Summary"},
+    "stats_tab_summary": {"zh": "鱼群", "en": "Schools"},
     "stats_school_list": {"zh": "鱼群列表", "en": "School List"},
     "stats_filter": {"zh": "过滤:", "en": "Filter:"},
     "stats_filter_placeholder": {"zh": "输入过滤文本...", "en": "Enter filter text..."},
@@ -347,7 +338,6 @@ _TEXTS = {
     "export_content_group": {"zh": "导出内容", "en": "Export Content"},
     "export_sv_data": {"zh": "Sv 数据", "en": "Sv Data"},
     "export_school_list": {"zh": "鱼群清单", "en": "School List"},
-    "export_density_est": {"zh": "密度估算", "en": "Density Estimation"},
     "export_grid_stats": {"zh": "网格统计", "en": "Grid Statistics"},
     "export_cancel": {"zh": "取消", "en": "Cancel"},
     "export_confirm": {"zh": "导出", "en": "Export"},
@@ -387,48 +377,6 @@ _TEXTS = {
     "multifreq_btn_all": {"zh": "导出全部", "en": "Export All"},
     "multifreq_btn_copy": {"zh": "复制到剪贴板", "en": "Copy to Clipboard"},
 
-    # ── 文件集管理 ──
-    "fileset_import_title": {"zh": "批量导入 Raw 文件", "en": "Batch Import Raw Files"},
-    "fileset_source_group": {"zh": "文件来源", "en": "File Source"},
-    "fileset_select_folder": {"zh": "选择文件夹...", "en": "Select Folder..."},
-    "fileset_select_files": {"zh": "选择文件...", "en": "Select Files..."},
-    "fileset_name_label": {"zh": "文件集名称:", "en": "Fileset Name:"},
-    "fileset_default_name": {"zh": "新建文件集", "en": "New Fileset"},
-    "fileset_probe": {"zh": "探测文件信息", "en": "Probe Files"},
-    "fileset_create": {"zh": "创建文件集", "en": "Create Fileset"},
-    "fileset_cancel": {"zh": "取消", "en": "Cancel"},
-    "fileset_headers": {
-        "zh": ["文件名", "大小", "通道", "Ping 数", "时间范围", "状态"],
-        "en": ["Filename", "Size", "Channels", "Pings", "Time Range", "Status"],
-    },
-    "fileset_status_valid": {"zh": "✓ 有效", "en": "✓ Valid"},
-    "fileset_status_invalid": {"zh": "✕ 无效", "en": "✕ Invalid"},
-    "fileset_status_probing": {"zh": "探测中...", "en": "Probing..."},
-    "fileset_ctrl_title": {"zh": "文件集 & 控制", "en": "Filesets & Controls"},
-    "fileset_probe_start": {"zh": "开始探测 {n} 个文件...", "en": "Probing {n} files..."},
-    "fileset_probe_done": {"zh": "探测完成: {valid}/{total} 个有效", "en": "Done: {valid}/{total} valid"},
-    "fileset_probe_error": {"zh": "探测出错: {err}", "en": "Probe error: {err}"},
-    "fileset_import": {"zh": "导入文件集", "en": "Import Fileset"},
-    "fileset_import_tooltip": {"zh": "打开批量导入对话框，创建新的文件集", "en": "Open batch import dialog to create a new fileset"},
-    "fileset_add_tooltip": {"zh": "向当前文件集添加更多文件", "en": "Add more files to the current fileset"},
-    "fileset_delete_tooltip": {"zh": "删除当前选中的文件集", "en": "Delete the selected fileset"},
-    "fileset_tree_header": {"zh": "文件集", "en": "Filesets"},
-    "fileset_frequency_label": {"zh": "频率:", "en": "Freq:"},
-    "fileset_all_channels": {"zh": "全部通道", "en": "All Channels"},
-    "fileset_no_files": {"zh": "请先选择文件", "en": "Please select files first"},
-    "fileset_select_first": {"zh": "请先选择一个文件集", "en": "Please select a fileset first"},
-    "fileset_add_files_title": {"zh": "添加文件到文件集", "en": "Add Files to Fileset"},
-    "fileset_delete_title": {"zh": "删除文件集", "en": "Delete Fileset"},
-    "fileset_delete_confirm": {"zh": "确定删除文件集 \"{name}\" 吗？", "en": "Delete fileset \"{name}\"?"},
-    "fileset_remove_selected": {"zh": "移除选中", "en": "Remove Selected"},
-    "fileset_rename_title": {"zh": "重命名文件集", "en": "Rename Fileset"},
-    "fileset_rename_label": {"zh": "新名称:", "en": "New Name:"},
-    "fileset_ctx_rename": {"zh": "重命名", "en": "Rename"},
-    "fileset_ctx_refresh": {"zh": "刷新", "en": "Refresh"},
-    "fileset_ctx_remove": {"zh": "从列表移除", "en": "Remove from List"},
-    "fileset_ctx_open_folder": {"zh": "打开所在文件夹", "en": "Open Containing Folder"},
-    "fileset_stats": {"zh": "文件: {files} | 有效: {valid} | Ping: {pings}", "en": "Files: {files} | Valid: {valid} | Pings: {pings}"},
-
     # ── 对话框通用 ──
     "dialog_warning": {"zh": "警告", "en": "Warning"},
     "dialog_error": {"zh": "错误", "en": "Error"},
@@ -440,6 +388,14 @@ _TEXTS = {
     # ── 主窗口消息 ──
     "msg_load_file_first": {"zh": "请先加载文件", "en": "Please load a file first"},
     "msg_load_data_first": {"zh": "请先加载数据", "en": "Please load data first"},
+    "msg_loading_files": {"zh": "加载 {n} 个文件...", "en": "Loading {n} files..."},
+    "msg_loading_file": {"zh": "[{cur}/{total}] 加载 {name}...", "en": "[{cur}/{total}] Loading {name}..."},
+    "msg_merging_files": {"zh": "合并 {n} 个文件...", "en": "Merging {n} files..."},
+    "msg_files_merged": {"zh": "文件合并完成: {n} pings", "en": "Files merged: {n} pings"},
+    "msg_no_project": {"zh": "当前没有项目可保存（请先新建项目）", "en": "No project to save (create a new project first)"},
+    "msg_project_saved": {"zh": "项目已保存: {path}", "en": "Project saved: {path}"},
+    "msg_project_opened": {"zh": "项目已打开: {name}", "en": "Project opened: {name}"},
+    "msg_project_raw_missing": {"zh": "无法打开项目：以下原始文件不存在或已移动：\n{files}\n\n请恢复文件位置后重试。", "en": "Cannot open project: following raw files missing or moved:\n{files}\n\nRestore file locations and retry."},
     "msg_import_first": {"zh": "请先导入文件", "en": "Please import files first"},
     "msg_detect_schools_first": {"zh": "请先检测鱼群", "en": "Please detect schools first"},
     "msg_bottom_manually_edited": {"zh": "底线已手动编辑，跳过自动检测", "en": "Bottom manually edited, skipping auto-detect"},
@@ -456,7 +412,6 @@ _TEXTS = {
     "msg_noise_removed": {"zh": "噪声去除完成（显示去噪数据，原始 Sv 已保留）", "en": "Noise removed (showing corrected, original Sv preserved)"},
     "msg_bottom_detected": {"zh": "底部检测完成 — 分析区域已启用，已进入绘制底线模式", "en": "Bottom detected — analysis region enabled, entered draw-bottom mode"},
     "msg_schools_detected": {"zh": "鱼群检测完成: {n} 个鱼群像素", "en": "School detection done: {n} pixels"},
-    "msg_density_computed": {"zh": "密度计算完成", "en": "Density computed"},
     "msg_export_done": {"zh": "导出完成: {n} 个文件 → {dir}", "en": "Export done: {n} files → {dir}"},
     "msg_batch_processing": {"zh": "批量处理 {n} 个文件...", "en": "Batch processing {n} files..."},
     "msg_batch_done": {"zh": "批量处理完成: 成功 {ok}, 失败 {fail}", "en": "Batch done: {ok} success, {fail} failed"},
@@ -480,14 +435,10 @@ _TEXTS = {
     "msg_detecting_bottom": {"zh": "检测底部...", "en": "Detecting bottom..."},
     "msg_bottom_detection": {"zh": "检测底部 (方法: {method})...", "en": "Detecting bottom (method: {method})..."},
     "msg_detecting_schools": {"zh": "检测鱼群...", "en": "Detecting schools..."},
-    "msg_computing_density": {"zh": "计算密度...", "en": "Computing density..."},
     "msg_quality_checking": {"zh": "正在检查数据质量...", "en": "Checking data quality..."},
     "msg_multifreq_analyzing": {"zh": "正在分析多频率通道...", "en": "Analyzing multi-frequency channels..."},
-    "msg_single_target": {"zh": "正在检测单体目标...", "en": "Detecting single targets..."},
     "msg_sv_stats": {"zh": "计算 Sv 统计...", "en": "Computing Sv statistics..."},
     "msg_transect_split": {"zh": "分段中...", "en": "Splitting transects..."},
-    "msg_no_single_target": {"zh": "未检测到单体目标\n尝试降低 sv_threshold_db 参数", "en": "No single targets detected\nTry lowering sv_threshold_db"},
-    "msg_single_target_result": {"zh": "单体目标检测结果", "en": "Single Target Detection Results"},
     "msg_no_sv_stats": {"zh": "无统计结果", "en": "No statistics available"},
     "msg_sv_stats_title": {"zh": "Sv 统计摘要", "en": "Sv Statistics Summary"},
     "msg_transect_split_done": {"zh": "分段完成：共 {n} 个 transect", "en": "Split done: {n} transects"},
@@ -509,21 +460,10 @@ _TEXTS = {
     "pipeline_noise": {"zh": "噪声去除", "en": "Noise Removal"},
     "pipeline_bottom": {"zh": "底部检测", "en": "Bottom Detection"},
     "pipeline_schools": {"zh": "鱼群检测", "en": "School Detection"},
-    "pipeline_density": {"zh": "密度估算", "en": "Density Estimation"},
-
-    # ── 密度/统计标签 ──
-    "density_abc_fmt": {"zh": "ABC: {val:.6f} m²/m²", "en": "ABC: {val:.6f} m²/m²"},
-    "density_val_fmt": {"zh": "密度: {val:.2f} ind/ha", "en": "Density: {val:.2f} ind/ha"},
-    "density_biomass_fmt": {"zh": "生物量: {val:.2f} kg/ha", "en": "Biomass: {val:.2f} kg/ha"},
 
     # ── 右键菜单消息 ──
     "msg_no_loaded_files": {"zh": "没有已加载的文件，请先导入", "en": "No loaded files, please import first"},
     "msg_boundary_reached": {"zh": "已到达边界 (文件 {cur}/{total})", "en": "At boundary (file {cur}/{total})"},
-    "msg_file_not_cached": {"zh": "{name} 尚未加载 (缓存: {cached}/{total})，请等待", "en": "{name} not loaded (cache: {cached}/{total}), please wait"},
-    "msg_file_switched": {"zh": "文件 {cur}/{total}: {name}", "en": "File {cur}/{total}: {name}"},
-    "msg_fileset_selected": {"zh": "文件集: {name} ({count} 个文件) — 自动加载中..", "en": "Fileset: {name} ({count} files) — Loading..."},
-    "msg_fileset_empty": {"zh": "文件集: {name} (空)", "en": "Fileset: {name} (empty)"},
-    "msg_all_cached": {"zh": "全部 {total} 个文件已缓存 — 右键 Echogram 翻页切换", "en": "All {total} files cached — right-click echogram to page through"},
     "msg_batch_in_progress": {"zh": "批量处理正在进行中", "en": "Batch processing in progress"},
     "msg_frequency": {"zh": "频率: {ch}", "en": "Frequency: {ch}"},
     "msg_region_sv_avg": {"zh": "区域 Sv 平均值: {val:.1f} dB", "en": "Region mean Sv: {val:.1f} dB"},

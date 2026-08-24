@@ -1,12 +1,11 @@
-"""密度估算模块测试"""
+"""密度模块测试（保留：ABC 积分、Sv 统计摘要）"""
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 
 from src.core.density import (
-    calculate_abc, estimate_density,
-    estimate_density_by_depth, sv_statistics_summary,
+    calculate_abc, sv_statistics_summary,
 )
 
 
@@ -43,44 +42,6 @@ def test_calculate_abc_positive():
     ds = _make_ds_sv()
     df = calculate_abc(ds, {})
     assert (df["abc"] >= 0).all()
-
-
-# ── estimate_density ──────────────────────────────────────
-
-def test_estimate_density_no_schools():
-    """无鱼群时计算全断面密度"""
-    ds = _make_ds_sv()
-    config = {"density": {"ts_default": -30.0, "avg_weight_kg": 0.5}}
-    schools_df = pd.DataFrame(columns=["school_id", "ping_start", "ping_end", "depth_start", "depth_end"])
-
-    df = estimate_density(schools_df, ds, config)
-    assert len(df) == 1
-    assert "density_ind_m2" in df.columns
-    assert "density_ind_ha" in df.columns
-
-
-# ── estimate_density_by_depth ─────────────────────────────
-
-def test_estimate_density_by_depth_default_bins():
-    """默认分层"""
-    ds = _make_ds_sv()
-    config = {"density": {"ts_default": -30.0, "avg_weight_kg": 0.5}}
-    df = estimate_density_by_depth(ds, config)
-
-    assert isinstance(df, pd.DataFrame)
-    assert len(df) > 0
-    assert "depth_layer" in df.columns
-    assert "density_ind_m2" in df.columns
-
-
-def test_estimate_density_by_depth_custom_bins():
-    """自定义分层"""
-    ds = _make_ds_sv()
-    config = {"density": {"ts_default": -30.0, "avg_weight_kg": 0.5}}
-    df = estimate_density_by_depth(ds, config, depth_bins=[0, 10, 20, 30])
-
-    assert len(df) == 3
-    assert df.iloc[0]["depth_layer"] == "0-10m"
 
 
 # ── sv_statistics_summary ─────────────────────────────────

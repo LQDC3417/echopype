@@ -214,11 +214,28 @@ class MainStatusBar(QStatusBar):
             self.lbl_time.setText(T("status_time_fmt", t=time_str))
 
     def show_progress(self, text: str = ""):
-        """显示进度条"""
+        """显示进度条（不确定模式，转圈）"""
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)  # 不确定进度模式
         if text:
             self.lbl_status.setText(text)
+
+    def set_progress_value(self, current: int, total: int):
+        """显示确定模式进度条（百分比）
+
+        Parameters
+        ----------
+        current : int
+            已完成数
+        total : int
+            总数
+        """
+        self.progress.setVisible(True)
+        if total > 0:
+            self.progress.setRange(0, total)
+            self.progress.setValue(current)
+        else:
+            self.progress.setRange(0, 0)
 
     def hide_progress(self):
         """隐藏进度条"""

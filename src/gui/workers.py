@@ -1,6 +1,7 @@
 """后台处理工作线程（增强版）
 
 功能增强：
+- MergeFilesWorker: 多文件合并加载（按时间顺序拼接 echogram）
 - IntegrationWorker 支持 pings/distance EDSU 与 ABC 积分
 - 改进错误处理，提供更友好的错误信息
 - 添加进度百分比信号
@@ -81,6 +82,63 @@ class ComputeSvWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
+class MergeFilesWorker(QThread):
+    """多文件合并加载 — 对齐拼接成一个 echogram
+
+    流程：逐个 .raw → open_single_file → compute_sv
+          → 重采样到公共深度网格 → 按真实时间戳排序 → 去重 → 拼接
+    边加载边显示：每完成一个文件发 file_ready 信号（临时视图）
+    """
+    finished = Signal(object)  # xr.Dataset（对齐合并后）
+    error = Signal(str)
+    progress = Signal(str)  # 文本状态
+    progress_num = Signal(int, int)  # (当前文件数, 总数) 驱动进度条
+    file_ready = Signal(object, int, int)  # (ds_Sv, 当前索引, 总数) 增量显示
+
+    def __init__(self, raw_files: list[Path], config: dict):
+        super().__init__()
+        self.raw_files = raw_files
+        self.config = config
+
+    def run(self):
+        try:
+            from src.core.acoustic import compute_sv, open_single_file
+            from src.core.merge import merge_aligned
+
+            ds_list = []
+            total = len(self.raw_files)
+            for i, path in enumerate(self.raw_files):
+                self.progress.emit(T("msg_loading_file", cur=i+1, total=total, name=path.name))
+                self.progress_num.emit(i, total)  # 开始前：已完成 i 个
+
+                # 加载
+                echodata = open_single_file(path, self.config)
+
+                # 计算 Sv + depth + GPS
+                ds = compute_sv(echodata, self.config)
+
+                # 只保留第一个 channel
+                if "channel" in ds.dims:
+                    ds = ds.isel(channel=0)
+
+                ds_list.append(ds)
+                self.progress_num.emit(i + 1, total)  # 完成：已处理 i+1 个
+                # 边加载边显示：每个文件就绪即通知 UI（临时视图）
+                self.file_ready.emit(ds, i + 1, total)
+
+            # 对齐合并（时间排序 + 深度重采样 + 去重）
+            if len(ds_list) == 1:
+                merged = ds_list[0]
+            else:
+                self.progress.emit(T("msg_merging_files", n=len(ds_list)))
+                merged = merge_aligned(ds_list, dedup=True)
+
+            self.finished.emit(merged)
+
+        except Exception:
+            self.error.emit(traceback.format_exc())
+
+
 class NoiseRemovalWorker(QThread):
     """噪声去除"""
     finished = Signal(object)  # xr.Dataset
@@ -98,6 +156,10 @@ class NoiseRemovalWorker(QThread):
             from echopype.clean import remove_background_noise
             noise_cfg = self.config.get("processing", {}).get("noise_removal", {})
             self.progress.emit(T("msg_removing_noise"))
+            # echopype 0.11.1: remove_background_noise 装饰器 @add_processing_level("L*B")
+            # 要求输入带 input_processing_level 属性，缺失时抛 RuntimeError
+            if "input_processing_level" not in self.ds_Sv.attrs:
+                self.ds_Sv.attrs["input_processing_level"] = "L2A"
             ds = remove_background_noise(
                 self.ds_Sv,
                 ping_num=noise_cfg.get("ping_num", 5),
@@ -183,28 +245,6 @@ class DetectSchoolsWorker(QThread):
             from src.core.school import detect_schools
             self.progress.emit(T("msg_detecting_schools"))
             df = detect_schools(self.ds_Sv, self.config)
-            self.finished.emit(df)
-        except Exception:
-            self.error.emit(traceback.format_exc())
-
-
-class ComputeDensityWorker(QThread):
-    """密度估算（裁剪）"""
-    finished = Signal(object)  # DataFrame
-    error = Signal(str)
-    progress = Signal(str)
-
-    def __init__(self, schools_df, ds_Sv, config: dict):
-        super().__init__()
-        self.schools_df = schools_df
-        self.ds_Sv = ds_Sv
-        self.config = config
-
-    def run(self):
-        try:
-            from src.core.density import estimate_density
-            self.progress.emit(T("msg_computing_density"))
-            df = estimate_density(self.schools_df, self.ds_Sv, self.config)
             self.finished.emit(df)
         except Exception:
             self.error.emit(traceback.format_exc())
@@ -376,60 +416,40 @@ class MultifreqAnalysisWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
-class SingleTargetWorker(QThread):
-    """单体目标检测工作线程
-
-    信号：
-    - finished(object): 检测结果 DataFrame
-    - error(str): 错误信息
-    - progress(str): 进度信息
-    """
-    finished = Signal(object)
-    error = Signal(str)
-    progress = Signal(str)
-
-    def __init__(self, ds_Sv, config):
-        super().__init__()
-        self.ds_Sv = ds_Sv
-        self.config = config
-
-    def run(self):
-        try:
-            from src.core.single_target import detect_and_compute_ts
-
-            self.progress.emit(T("msg_single_target"))
-            targets_df = detect_and_compute_ts(self.ds_Sv, self.config)
-            self.finished.emit(targets_df)
-
-        except Exception:
-            self.error.emit(traceback.format_exc())
-
-
 class RealSedWorker(QThread):
     """真实单体目标检测（分裂波束 SED）工作线程
 
     流程：compute_TS → detect_single_targets_real（阈值+脉冲长度+测角+补偿）
+          → aggregate_targets_to_grid（按积分网格聚合 TS 统计）
+
+    finished 信号发送 tuple(targets_df, grid_df)：
+    - targets_df: 逐目标结果（用于 echogram 叠加）
+    - grid_df: 网格聚合结果（用于 StatsDialog 表格展示）
     """
     finished = Signal(object)
     error = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, echodata, config):
+    def __init__(self, echodata, ds_Sv, config):
         super().__init__()
         self.echodata = echodata
+        self.ds_Sv = ds_Sv
         self.config = config
 
     def run(self):
         try:
             from src.core.acoustic import _detect_waveform_mode
             from echopype.calibrate import compute_TS
-            from src.core.sed import detect_single_targets_real
+            from src.core.sed import aggregate_targets_to_grid, detect_single_targets_real
 
             self.progress.emit(T("msg_real_sed_running"))
             wm, em = _detect_waveform_mode(self.echodata)
             ds_TS = compute_TS(self.echodata, waveform_mode=wm, encode_mode=em)
             targets_df = detect_single_targets_real(self.echodata, ds_TS, self.config)
-            self.finished.emit(targets_df)
+
+            # 按积分网格聚合（即使 targets_df 为空也输出全 NaN 网格）
+            grid_df = aggregate_targets_to_grid(targets_df, self.ds_Sv, self.config)
+            self.finished.emit((targets_df, grid_df))
 
         except Exception:
             self.error.emit(traceback.format_exc())

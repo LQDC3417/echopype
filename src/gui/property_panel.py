@@ -112,11 +112,9 @@ class ProcessingTab(QWidget):
     noise_params_changed = Signal(dict)
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
-    compute_density_clicked = Signal()
     stats_clicked = Signal()
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
-    single_target_clicked = Signal()
     sv_stats_clicked = Signal()
     transect_split_clicked = Signal()
     integration_clicked = Signal()
@@ -210,31 +208,73 @@ class ProcessingTab(QWidget):
 
         # ── 底部检测参数 ──
         bottom_group = QGroupBox(T("bottom_group"))
-        bottom_layout = QFormLayout()
-        bottom_layout.setSpacing(6)
-        bottom_layout.setContentsMargins(8, 12, 8, 8)
+        self.bottom_layout = QFormLayout()
+        self.bottom_layout.setSpacing(6)
+        self.bottom_layout.setContentsMargins(8, 12, 8, 8)
 
         self.combo_bottom_method = QComboBox()
         self.combo_bottom_method.addItems(["basic", "enhanced", "afsc"])
-        bottom_layout.addRow(T("bottom_method"), self.combo_bottom_method)
+        self.combo_bottom_method.currentTextChanged.connect(self._on_bottom_method_changed)
+        self.bottom_layout.addRow(T("bottom_method"), self.combo_bottom_method)
 
+        # basic 方法参数
         self.spin_bottom_thr = QDoubleSpinBox()
         self.spin_bottom_thr.setRange(-70, -20)
         self.spin_bottom_thr.setValue(-40.0)
         self.spin_bottom_thr.setSuffix(" dB")
-        bottom_layout.addRow(T("bottom_sv_threshold"), self.spin_bottom_thr)
+        self.bottom_layout.addRow(T("bottom_sv_threshold"), self.spin_bottom_thr)
 
+        # enhanced 方法参数
         self.spin_peak_thr = QDoubleSpinBox()
         self.spin_peak_thr.setRange(-80, -10)
         self.spin_peak_thr.setValue(-40.0)
         self.spin_peak_thr.setSuffix(" dB")
-        bottom_layout.addRow(T("bottom_peak_threshold"), self.spin_peak_thr)
+        self.bottom_layout.addRow(T("bottom_peak_threshold"), self.spin_peak_thr)
 
         self.spin_disc_thr = QDoubleSpinBox()
         self.spin_disc_thr.setRange(-80, -10)
         self.spin_disc_thr.setValue(-50.0)
         self.spin_disc_thr.setSuffix(" dB")
-        bottom_layout.addRow(T("bottom_disc_threshold"), self.spin_disc_thr)
+        self.bottom_layout.addRow(T("bottom_disc_threshold"), self.spin_disc_thr)
+
+        self.spin_sat_thr = QDoubleSpinBox()
+        self.spin_sat_thr.setRange(-80, -10)
+        self.spin_sat_thr.setValue(-60.0)
+        self.spin_sat_thr.setSuffix(" dB")
+        self.bottom_layout.addRow(T("bottom_sat_threshold"), self.spin_sat_thr)
+
+        self.spin_val_window = QSpinBox()
+        self.spin_val_window.setRange(1, 100)
+        self.spin_val_window.setValue(15)
+        self.bottom_layout.addRow(T("bottom_validation_window"), self.spin_val_window)
+
+        self.spin_val_thr = QDoubleSpinBox()
+        self.spin_val_thr.setRange(1.0, 20.0)
+        self.spin_val_thr.setValue(3.0)
+        self.bottom_layout.addRow(T("bottom_validation_threshold"), self.spin_val_thr)
+
+        self.spin_smooth_window = QSpinBox()
+        self.spin_smooth_window.setRange(1, 50)
+        self.spin_smooth_window.setValue(11)
+        self.bottom_layout.addRow(T("bottom_smoothing_window"), self.spin_smooth_window)
+
+        # afsc 方法参数
+        self.spin_search_min = QDoubleSpinBox()
+        self.spin_search_min.setRange(0.0, 500.0)
+        self.spin_search_min.setValue(10.0)
+        self.spin_search_min.setSuffix(" m")
+        self.bottom_layout.addRow(T("bottom_search_min"), self.spin_search_min)
+
+        self.spin_window_len = QSpinBox()
+        self.spin_window_len.setRange(1, 50)
+        self.spin_window_len.setValue(11)
+        self.bottom_layout.addRow(T("bottom_window_len"), self.spin_window_len)
+
+        self.spin_backstep = QDoubleSpinBox()
+        self.spin_backstep.setRange(0.0, 100.0)
+        self.spin_backstep.setValue(35.0)
+        self.spin_backstep.setSuffix(" dB")
+        self.bottom_layout.addRow(T("bottom_backstep"), self.spin_backstep)
 
         # 底部检测按钮
         self.btn_detect_bottom = QPushButton(T("btn_detect_bottom"))
@@ -248,63 +288,118 @@ class ProcessingTab(QWidget):
         btn_layout.addWidget(self.btn_detect_bottom)
         btn_layout.addWidget(self.btn_draw_bottom)
         btn_layout.addWidget(self.btn_update_bottom)
-        bottom_layout.addRow(btn_layout)
+        self.bottom_layout.addRow(btn_layout)
 
         self.btn_detect_bottom.clicked.connect(self.detect_bottom_clicked)
         self.btn_draw_bottom.clicked.connect(self.draw_bottom_clicked)
         self.btn_update_bottom.clicked.connect(self.update_bottom_clicked)
 
-        bottom_group.setLayout(bottom_layout)
+        bottom_group.setLayout(self.bottom_layout)
         layout.addWidget(bottom_group)
+
+        # 初始按默认方法（basic）显示对应参数
+        self._on_bottom_method_changed(self.combo_bottom_method.currentText())
 
         # ── 鱼群检测参数 ──
         school_group = QGroupBox(T("school_group"))
-        school_layout = QFormLayout()
-        school_layout.setSpacing(6)
-        school_layout.setContentsMargins(8, 12, 8, 8)
+        self.school_layout = QFormLayout()
+        self.school_layout.setSpacing(6)
+        self.school_layout.setContentsMargins(8, 12, 8, 8)
 
+        def _pair_row(defaults, depth_key, ping_key):
+            """创建 [depth, ping] 双 spin 行，返回 (行控件, depth spin, ping spin)"""
+            row = QWidget()
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(4)
+            s_depth = QDoubleSpinBox()
+            s_depth.setRange(0.1, 100)
+            s_depth.setValue(defaults[0])
+            s_depth.setDecimals(1)
+            s_depth.setSuffix(" m")
+            s_depth.setToolTip(T(depth_key))
+            s_ping = QDoubleSpinBox()
+            s_ping.setRange(0.1, 100)
+            s_ping.setValue(defaults[1])
+            s_ping.setDecimals(1)
+            s_ping.setToolTip(T(ping_key))
+            h.addWidget(s_depth, 1)
+            h.addWidget(s_ping, 1)
+            return row, s_depth, s_ping
+
+        # 检测方法选择
+        self.combo_school_method = QComboBox()
+        self.combo_school_method.addItems(["echoview", "advanced"])
+        self.combo_school_method.currentTextChanged.connect(self._on_school_method_changed)
+        self.school_layout.addRow(T("school_method"), self.combo_school_method)
+
+        # echoview 方法参数
         self.spin_school_thr = QDoubleSpinBox()
         self.spin_school_thr.setRange(-100, 0)
         self.spin_school_thr.setValue(-55.0)
         self.spin_school_thr.setSuffix(" dB")
+        self.school_layout.addRow(T("school_sv_threshold"), self.spin_school_thr)
 
+        pair_row, self.spin_mincan_depth, self.spin_mincan_ping = _pair_row(
+            (3.0, 10.0), "school_mincan_depth", "school_mincan_ping")
+        self.school_layout.addRow(T("school_mincan"), pair_row)
+
+        pair_row, self.spin_maxlink_depth, self.spin_maxlink_ping = _pair_row(
+            (3.0, 15.0), "school_maxlink_depth", "school_maxlink_ping")
+        self.school_layout.addRow(T("school_maxlink"), pair_row)
+
+        pair_row, self.spin_minsho_depth, self.spin_minsho_ping = _pair_row(
+            (3.0, 15.0), "school_minsho_depth", "school_minsho_ping")
+        self.school_layout.addRow(T("school_minsho"), pair_row)
+
+        # advanced 方法参数
+        self.spin_min_threshold = QDoubleSpinBox()
+        self.spin_min_threshold.setRange(-100, 0)
+        self.spin_min_threshold.setValue(-60.0)
+        self.spin_min_threshold.setSuffix(" dB")
+        self.school_layout.addRow(T("school_min_threshold"), self.spin_min_threshold)
+
+        self.spin_max_depth_dist = QDoubleSpinBox()
+        self.spin_max_depth_dist.setRange(0.01, 10)
+        self.spin_max_depth_dist.setValue(0.1)
+        self.spin_max_depth_dist.setDecimals(2)
+        self.spin_max_depth_dist.setSuffix(" m")
+        self.school_layout.addRow(T("school_max_depth_dist"), self.spin_max_depth_dist)
+
+        self.spin_max_ping_dist = QSpinBox()
+        self.spin_max_ping_dist.setRange(1, 100)
+        self.spin_max_ping_dist.setValue(1)
+        self.school_layout.addRow(T("school_max_ping_dist"), self.spin_max_ping_dist)
+
+        self.spin_max_time_gap = QSpinBox()
+        self.spin_max_time_gap.setRange(1, 200)
+        self.spin_max_time_gap.setValue(20)
+        self.school_layout.addRow(T("school_max_time_gap"), self.spin_max_time_gap)
+
+        self.spin_min_shoal_pings = QSpinBox()
+        self.spin_min_shoal_pings.setRange(1, 100)
+        self.spin_min_shoal_pings.setValue(3)
+        self.school_layout.addRow(T("school_min_shoal_pings"), self.spin_min_shoal_pings)
+
+        self.spin_min_shoal_height = QDoubleSpinBox()
+        self.spin_min_shoal_height.setRange(0.01, 10)
+        self.spin_min_shoal_height.setValue(0.5)
+        self.spin_min_shoal_height.setDecimals(2)
+        self.spin_min_shoal_height.setSuffix(" m")
+        self.school_layout.addRow(T("school_min_shoal_height"), self.spin_min_shoal_height)
+
+        # 检测按钮（始终可见）
         self.btn_detect_schools = QPushButton(T("btn_detect_schools"))
         self.btn_detect_schools.setProperty("cssClass", "primary")
+        self.school_layout.addRow(self.btn_detect_schools)
 
-        school_layout.addRow(T("school_sv_threshold"), self.spin_school_thr)
-        school_layout.addRow(self.btn_detect_schools)
-        school_group.setLayout(school_layout)
+        school_group.setLayout(self.school_layout)
         layout.addWidget(school_group)
 
         self.btn_detect_schools.clicked.connect(self.detect_schools_clicked)
 
-        # ── 密度估算 ──
-        density_group = QGroupBox(T("density_group"))
-        density_layout = QFormLayout()
-        density_layout.setSpacing(6)
-        density_layout.setContentsMargins(8, 12, 8, 8)
-
-        self.spin_ts = QDoubleSpinBox()
-        self.spin_ts.setRange(-70, -20)
-        self.spin_ts.setValue(-30.0)
-        self.spin_ts.setSuffix(" dB")
-
-        self.spin_avg_weight = QDoubleSpinBox()
-        self.spin_avg_weight.setRange(0.001, 100.0)
-        self.spin_avg_weight.setValue(0.5)
-        self.spin_avg_weight.setSuffix(" kg")
-
-        self.btn_compute_density = QPushButton(T("btn_compute_density"))
-        self.btn_compute_density.setProperty("cssClass", "primary")
-
-        density_layout.addRow(T("density_ts_default"), self.spin_ts)
-        density_layout.addRow(T("density_avg_weight"), self.spin_avg_weight)
-        density_layout.addRow(self.btn_compute_density)
-        density_group.setLayout(density_layout)
-        layout.addWidget(density_group)
-
-        self.btn_compute_density.clicked.connect(self.compute_density_clicked)
-
+        # 初始按默认方法（echoview）显示对应参数
+        self._on_school_method_changed(self.combo_school_method.currentText())
 
         # ── 回声积分 ──
         integration_group = QGroupBox(T("integration_group"))
@@ -371,38 +466,6 @@ class ProcessingTab(QWidget):
         btn_layout2.addWidget(self.btn_quality)
         btn_layout2.addWidget(self.btn_multifreq)
         layout.addLayout(btn_layout2)
-
-        # ── 单体目标检测 ──
-        single_target_group = QGroupBox(T("single_target_group"))
-        single_target_layout = QFormLayout()
-        single_target_layout.setSpacing(6)
-        single_target_layout.setContentsMargins(8, 12, 8, 8)
-
-        self.spin_st_threshold = QDoubleSpinBox()
-        self.spin_st_threshold.setRange(-150.0, 0.0)
-        self.spin_st_threshold.setValue(-50.0)
-        self.spin_st_threshold.setDecimals(1)
-        self.spin_st_threshold.setSingleStep(1.0)
-        self.spin_st_threshold.setSuffix(" dB")
-        single_target_layout.addRow(T("single_target_sv_threshold"), self.spin_st_threshold)
-
-        self.spin_st_min_area = QSpinBox()
-        self.spin_st_min_area.setRange(1, 100000)
-        self.spin_st_min_area.setValue(3)
-        single_target_layout.addRow(T("single_target_min_area"), self.spin_st_min_area)
-
-        self.spin_st_max_area = QSpinBox()
-        self.spin_st_max_area.setRange(1, 1000000)
-        self.spin_st_max_area.setValue(500)
-        single_target_layout.addRow(T("single_target_max_area"), self.spin_st_max_area)
-
-        self.btn_single_target = QPushButton(T("btn_single_target"))
-        self.btn_single_target.setProperty("cssClass", "primary")
-        self.btn_single_target.clicked.connect(self.single_target_clicked)
-        single_target_layout.addRow(self.btn_single_target)
-
-        single_target_group.setLayout(single_target_layout)
-        layout.addWidget(single_target_group)
 
         # ── 真实 SED（分裂波束）──
         real_sed_group = QGroupBox(T("single_target_real_group"))
@@ -515,7 +578,6 @@ class ProcessingTab(QWidget):
             config = {
                 "processing": preset.get("processing", {}),
                 "school_detection": preset.get("school_detection", {}),
-                "density": preset.get("density", {}),
             }
             self.load_from_config(config)
             QMessageBox.information(self, T("preset_loaded"),
@@ -573,7 +635,40 @@ class ProcessingTab(QWidget):
         }
 
     def get_school_config(self) -> dict:
-        return {"thr": self.spin_school_thr.value()}
+        return {
+            "method": self.combo_school_method.currentText(),
+            "thr": self.spin_school_thr.value(),
+            "mincan": [self.spin_mincan_depth.value(), self.spin_mincan_ping.value()],
+            "maxlink": [self.spin_maxlink_depth.value(), self.spin_maxlink_ping.value()],
+            "minsho": [self.spin_minsho_depth.value(), self.spin_minsho_ping.value()],
+            "min_threshold": self.spin_min_threshold.value(),
+            "max_depth_distance": self.spin_max_depth_dist.value(),
+            "max_ping_distance": self.spin_max_ping_dist.value(),
+            "max_time_gap": self.spin_max_time_gap.value(),
+            "min_shoal_pings": self.spin_min_shoal_pings.value(),
+            "min_shoal_height": self.spin_min_shoal_height.value(),
+        }
+
+    def _on_school_method_changed(self, method: str):
+        """鱼群检测方法切换：只显示当前方法的参数（QFormLayout 行级显隐）"""
+        # 行索引：0=方法, 1-4=echoview 参数, 5-10=advanced 参数, 11=按钮
+        echoview_visible = method == "echoview"
+        for row in range(1, 5):
+            self.school_layout.setRowVisible(row, echoview_visible)
+        advanced_visible = method == "advanced"
+        for row in range(5, 11):
+            self.school_layout.setRowVisible(row, advanced_visible)
+
+    def _on_bottom_method_changed(self, method: str):
+        """底部检测方法切换：只显示当前方法的参数（QFormLayout 行级显隐）"""
+        # 行索引：0=方法, 1=Sv 阈值(basic), 2-7=enhanced 参数, 8-10=afsc 参数, 11=按钮
+        self.bottom_layout.setRowVisible(1, method == "basic")
+        enhanced_visible = method == "enhanced"
+        for row in range(2, 8):
+            self.bottom_layout.setRowVisible(row, enhanced_visible)
+        afsc_visible = method == "afsc"
+        for row in range(8, 11):
+            self.bottom_layout.setRowVisible(row, afsc_visible)
 
     def get_bottom_config(self) -> dict:
         return {
@@ -581,12 +676,13 @@ class ProcessingTab(QWidget):
             "threshold": self.spin_bottom_thr.value(),
             "peak_threshold": self.spin_peak_thr.value(),
             "discrimination_threshold": self.spin_disc_thr.value(),
-        }
-
-    def get_density_config(self) -> dict:
-        return {
-            "ts_default": self.spin_ts.value(),
-            "avg_weight_kg": self.spin_avg_weight.value(),
+            "saturation_threshold": self.spin_sat_thr.value(),
+            "validation_window": self.spin_val_window.value(),
+            "validation_threshold": self.spin_val_thr.value(),
+            "smoothing_window": self.spin_smooth_window.value(),
+            "search_min": self.spin_search_min.value(),
+            "window_len": self.spin_window_len.value(),
+            "backstep": self.spin_backstep.value(),
         }
 
     def get_integration_config(self) -> dict:
@@ -599,14 +695,6 @@ class ProcessingTab(QWidget):
             "min_threshold": self.spin_integration_min_thr.value(),
             "max_threshold": self.spin_integration_max_thr.value(),
             "ts_default": self.spin_integration_ts_default.value(),
-        }
-
-    def get_single_target_config(self) -> dict:
-        """获取单体目标检测配置"""
-        return {
-            "sv_threshold_db": self.spin_st_threshold.value(),
-            "min_area": self.spin_st_min_area.value(),
-            "max_area": self.spin_st_max_area.value(),
         }
 
     def get_real_sed_config(self) -> dict:
@@ -645,19 +733,53 @@ class ProcessingTab(QWidget):
             self.spin_peak_thr.setValue(bottom["peak_threshold"])
         if "discrimination_threshold" in bottom:
             self.spin_disc_thr.setValue(bottom["discrimination_threshold"])
+        if "saturation_threshold" in bottom:
+            self.spin_sat_thr.setValue(bottom["saturation_threshold"])
+        if "validation_window" in bottom:
+            self.spin_val_window.setValue(int(bottom["validation_window"]))
+        if "validation_threshold" in bottom:
+            self.spin_val_thr.setValue(bottom["validation_threshold"])
+        if "smoothing_window" in bottom:
+            self.spin_smooth_window.setValue(int(bottom["smoothing_window"]))
+        if "search_min" in bottom:
+            self.spin_search_min.setValue(bottom["search_min"])
+        if "window_len" in bottom:
+            self.spin_window_len.setValue(int(bottom["window_len"]))
+        if "backstep" in bottom:
+            self.spin_backstep.setValue(bottom["backstep"])
 
         school = config.get("school_detection", {})
+        if "method" in school:
+            idx = self.combo_school_method.findText(school["method"])
+            if idx >= 0:
+                self.combo_school_method.setCurrentIndex(idx)
         if "thr" in school:
             self.spin_school_thr.setValue(school["thr"])
+        for key, spins in (
+            ("mincan", (self.spin_mincan_depth, self.spin_mincan_ping)),
+            ("maxlink", (self.spin_maxlink_depth, self.spin_maxlink_ping)),
+            ("minsho", (self.spin_minsho_depth, self.spin_minsho_ping)),
+        ):
+            if key in school:
+                pair = school[key]
+                spins[0].setValue(float(pair[0]))
+                spins[1].setValue(float(pair[1]))
+        if "min_threshold" in school:
+            self.spin_min_threshold.setValue(school["min_threshold"])
+        if "max_depth_distance" in school:
+            self.spin_max_depth_dist.setValue(school["max_depth_distance"])
+        if "max_ping_distance" in school:
+            self.spin_max_ping_dist.setValue(int(school["max_ping_distance"]))
+        if "max_time_gap" in school:
+            self.spin_max_time_gap.setValue(int(school["max_time_gap"]))
+        if "min_shoal_pings" in school:
+            self.spin_min_shoal_pings.setValue(int(school["min_shoal_pings"]))
+        if "min_shoal_height" in school:
+            self.spin_min_shoal_height.setValue(school["min_shoal_height"])
 
-        density = config.get("density", {})
         surface = config.get("surface_line", {})
         if "depth_m" in surface:
             self.spin_surface.setValue(surface["depth_m"])
-        if "ts_default" in density:
-            self.spin_ts.setValue(density["ts_default"])
-        if "avg_weight_kg" in density:
-            self.spin_avg_weight.setValue(density["avg_weight_kg"])
 
         integ = config.get("integration", {})
         if "esu_type" in integ:
@@ -673,14 +795,6 @@ class ProcessingTab(QWidget):
             self.spin_integration_max_thr.setValue(float(integ["max_threshold"]))
         if "ts_default" in integ:
             self.spin_integration_ts_default.setValue(float(integ["ts_default"]))
-
-        st = config.get("single_target", {})
-        if "sv_threshold_db" in st:
-            self.spin_st_threshold.setValue(float(st["sv_threshold_db"]))
-        if "min_area" in st:
-            self.spin_st_min_area.setValue(int(st["min_area"]))
-        if "max_area" in st:
-            self.spin_st_max_area.setValue(int(st["max_area"]))
 
         rs = config.get("single_target_real", {})
         if "ts_threshold_db" in rs:
@@ -708,9 +822,7 @@ class ProcessingTab(QWidget):
                 "bottom_detection": self.get_bottom_config(),
             },
             "school_detection": self.get_school_config(),
-            "density": self.get_density_config(),
             "integration": self.get_integration_config(),
-            "single_target": self.get_single_target_config(),
             "single_target_real": self.get_real_sed_config(),
             "surface_line": {"depth_m": self.spin_surface.value()},
         }
@@ -724,24 +836,6 @@ class StatsTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
         layout.setContentsMargins(8, 8, 8, 8)
-
-        # ── 密度摘要（突出显示）──
-        summary_group = QGroupBox(T("stats_density_summary"))
-        summary_layout = QVBoxLayout()
-        summary_layout.setContentsMargins(8, 12, 8, 8)
-
-        self.lbl_abc = QLabel("ABC: --")
-        self.lbl_abc.setStyleSheet("font-size: 13px; font-weight: bold; color: #2f855a;")
-        self.lbl_density = QLabel(f"{T('density_group')}: --")
-        self.lbl_density.setStyleSheet("font-size: 13px; font-weight: bold; color: #1a73e8;")
-        self.lbl_biomass = QLabel(f"{T('density_avg_weight').rstrip(':')}: --")
-        self.lbl_biomass.setStyleSheet("font-size: 13px; font-weight: bold; color: #c05621;")
-
-        summary_layout.addWidget(self.lbl_abc)
-        summary_layout.addWidget(self.lbl_density)
-        summary_layout.addWidget(self.lbl_biomass)
-        summary_group.setLayout(summary_layout)
-        layout.addWidget(summary_group)
 
         # ── 鱼群列表 ──
         schools_group = QGroupBox(T("stats_school_list"))
@@ -760,15 +854,6 @@ class StatsTab(QWidget):
         schools_layout.addWidget(self.table)
         schools_group.setLayout(schools_layout)
         layout.addWidget(schools_group, 1)
-
-    def update_density(self, density_df):
-        """更新密度统计"""
-        if density_df is None or density_df.empty:
-            return
-        row = density_df.iloc[0]
-        self.lbl_abc.setText(T("density_abc_fmt", val=row.get('abc', 0)))
-        self.lbl_density.setText(T("density_val_fmt", val=row.get('density_ind_ha', 0)))
-        self.lbl_biomass.setText(T("density_biomass_fmt", val=row.get('total_biomass_kg_ha', 0)))
 
     def update_schools(self, schools_df):
         """更新鱼群列表"""
@@ -793,11 +878,9 @@ class PropertyPanel(QTabWidget):
     noise_params_changed = Signal(dict)
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
-    compute_density_clicked = Signal()
     stats_clicked = Signal()
     quality_check_clicked = Signal()
     multifreq_clicked = Signal()
-    single_target_clicked = Signal()
     sv_stats_clicked = Signal()
     transect_split_clicked = Signal()
     integration_clicked = Signal()
@@ -822,14 +905,12 @@ class PropertyPanel(QTabWidget):
         self.processing.noise_params_changed.connect(self.noise_params_changed)
         self.processing.surface_line_changed.connect(self.surface_line_changed)
         self.processing.detect_schools_clicked.connect(self.detect_schools_clicked)
-        self.processing.compute_density_clicked.connect(self.compute_density_clicked)
         self.processing.stats_clicked.connect(self.stats_clicked)
         self.processing.detect_bottom_clicked.connect(self.detect_bottom_clicked)
         self.processing.draw_bottom_clicked.connect(self.draw_bottom_clicked)
         self.processing.update_bottom_clicked.connect(self.update_bottom_clicked)
         self.processing.quality_check_clicked.connect(self.quality_check_clicked)
         self.processing.multifreq_clicked.connect(self.multifreq_clicked)
-        self.processing.single_target_clicked.connect(self.single_target_clicked)
         self.processing.sv_stats_clicked.connect(self.sv_stats_clicked)
         self.processing.transect_split_clicked.connect(self.transect_split_clicked)
         self.processing.integration_clicked.connect(self.integration_clicked)

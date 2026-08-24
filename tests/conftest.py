@@ -34,7 +34,6 @@ def sample_config():
             "maxlink": [3.0, 15.0],
             "minsho": [3.0, 15.0],
         },
-        "density": {"ts_default": -30.0},
         "output": {"dir": "D:/data/test/outputs", "formats": ["csv", "png"]},
     }
 

@@ -933,6 +933,7 @@ class EchogramRenderer(QOpenGLWidget):
             self._offset_x += dx
             self._offset_y += dy
             self._pan_start = (sx, sy)
+            self.zoom_changed.emit(self._zoom_x, self._zoom_y)  # 同步导航滑块
             self.update()
 
         elif self._selecting:
@@ -1311,6 +1312,38 @@ class EchogramRenderer(QOpenGLWidget):
         self._select_end = None
         self._fit_to_view()
         self.update()
+
+    # ── 导航（底部缩略图滑块联动）───────────────────────────
+
+    def get_view_ratio(self) -> tuple:
+        """返回当前可见 ping 范围比例 (start, end)，取值 [0,1]。
+
+        用于底部缩略图滑块绘制视口矩形。
+        """
+        if self._n_pings == 0:
+            return (0.0, 1.0)
+        ww = max(self.width(), 1)
+        start = -self._offset_x / self._zoom_x / self._n_pings
+        end = (ww - self._offset_x) / self._zoom_x / self._n_pings
+        start = max(0.0, min(1.0, start))
+        end = max(start, min(1.0, end))
+        return (start, end)
+
+    def set_view_ratio(self, start: float, end: float) -> None:
+        """根据滑块位置设置可见 ping 范围。
+
+        保持当前 zoom 不变，只调整 offset_x 使 [start, end] 范围居中于视图。
+        """
+        if self._n_pings == 0 or self._zoom_x <= 0:
+            return
+        ww = max(self.width(), 1)
+        # 目标：可见区域中心对应 [start,end] 的中心
+        center_ping = ((start + end) / 2) * self._n_pings
+        self._offset_x = ww / 2 - center_ping * self._zoom_x
+        self.update()
+
+    def get_ping_count(self) -> int:
+        return self._n_pings
 
     # ── 工具方法 ──────────────────────────────────────────────
 

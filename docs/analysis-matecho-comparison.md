@@ -710,24 +710,26 @@ def invert(
 
 ### 8.1 任务看板
 
-| 任务 | 优先级 | 状态 | 开始日期 | 完成日期 | 备注 |
+| 任务 | 优先级 | 状态 | 完成日期 | 实现位置 | 备注 |
 |------|--------|------|----------|----------|------|
-| 回声积分模块 | P0 | 待开始 | - | - | 参考 pyEcholab |
-| 增强底部检测 | P0 | 待开始 | - | - | 参考 Matecho |
-| 高级鱼群提取 | P1 | 待开始 | - | - | 参考 Matecho |
-| 单目标检测 | P1 | 待开始 | - | - | 参考 Matecho |
-| 增强噪声去除 | P2 | 待开始 | - | - | 参考 Matecho |
-| 噪声可视化检查 | P2 | 待开始 | - | - | 参考 Matecho |
-| TS 模型反演 | P3 | 待开始 | - | - | 参考 Matecho |
+| 回声积分模块 | P0 | ✅ 完成 | 2026-08-20 | `src/core/integration.py` | ESU pings/distance、ABC、密度单一来源（参考 pyEcholab） |
+| 增强底部检测 | P0 | ✅ 完成 | 2026-08-20 | `src/core/bottom_detection.py` | basic / enhanced / afsc 三方法 + 校验 + GUI 三方法参数联动 |
+| 高级鱼群提取 | P1 | ✅ 完成 | 2026-08-20 | `src/core/shoal_extraction.py` | 逐 ping 聚类 + 跨 ping 连接（参考 Matecho EchoGroupExtraction） |
+| 单目标检测 | P1 | ✅ 完成 | 2026-08-20 | `src/core/sed.py` | 真实分裂波束 SED + 网格聚合 TS_mean（IntegrationGrid 对齐） |
+| 增强噪声去除 | P2 | ✅ 完成 | 2026-08-20 | `src/core/noise.py` | De Robertis + passive 两种估计（参考 Matecho） |
+| 噪声可视化检查 | P2 | ✅ 完成 | 2026-08-20 | `src/core/noise_plot.py` | 检查图 + 报告 |
+| .ep 项目文件 | P1 | ✅ 完成 | 2026-08-22 | `src/core/ep_project.py` | HDF5 轻量项目文件（~12KB），新建/打开/保存/最近文件列表 |
+| 多文件对齐拼接 | P1 | ✅ 完成 | 2026-08-22 | `src/core/merge.py` | 真实时间戳排序 + 深度网格交集重采样 + 去重 |
+| TS 模型反演 | P3 | ⏳ 待开始 | - | `src/core/inversion.py`（规划） | 参考 Matecho |
 
 ### 8.2 版本规划
 
-| 版本 | 主要功能 | 预计时间 |
-|------|----------|----------|
-| v2.1 | 回声积分 + 增强底部检测 | 2 周内 |
-| v2.2 | 高级鱼群提取 + 单目标检测 | 1 月内 |
-| v2.3 | 增强噪声去除 + 可视化检查 | 2 月内 |
-| v3.0 | TS 模型反演 | 3+ 月 |
+| 版本 | 主要功能 | 状态 |
+|------|----------|------|
+| v2.1 | 回声积分 + 增强底部检测 | ✅ 已完成 |
+| v2.2 | 高级鱼群提取 + 单目标检测（SED 网格聚合） | ✅ 已完成 |
+| v2.3 | 增强噪声去除 + 可视化检查 | ✅ 已完成 |
+| v3.0 | TS 模型反演 | ⏳ 规划中 |
 
 ---
 
@@ -738,56 +740,94 @@ def invert(
 ```
 src/
 ├── core/
-│   ├── acoustic.py        # 增强底部检测
-│   ├── integration.py     # 新增：回声积分
-│   ├── shoal_extraction.py # 新增：高级鱼群提取
-│   ├── single_target.py   # 新增：单目标检测
-│   ├── inversion.py       # 新增：TS 模型反演
-│   ├── density.py         # 扩展：支持反演结果
-│   ├── grid.py            # 无变更
-│   ├── school.py          # 保留：基础检测
-│   ├── region.py          # 无变更
-│   ├── quality.py         # 扩展：积分质量检查
-│   └── utils.py           # 无变更
-├── gui/                   # 无变更
-└── viz/                   # 无变更
+│   ├── acoustic.py         # 数据加载/校准 + GPS 附加
+│   ├── integration.py      # ✅ 回声积分（ESU pings/distance、ABC、密度单一来源）
+│   ├── bottom_detection.py # ✅ 增强底部检测（basic/enhanced/afsc）
+│   ├── shoal_extraction.py # ✅ 高级鱼群提取（聚类 + 跨 ping 连接）
+│   ├── sed.py              # ✅ 真实单目标检测（分裂波束 SED + 网格聚合）
+│   ├── merge.py            # ✅ 多文件对齐拼接（时间排序 + 深度重采样 + 去重）
+│   ├── noise.py            # ✅ 增强噪声去除（De Robertis + passive + 报告）
+│   ├── noise_plot.py       # 噪声可视化检查
+│   ├── ep_project.py       # ✅ .ep 项目文件管理（HDF5 读写）
+│   ├── inversion.py        # ⏳ 规划：TS 模型反演
+│   ├── density.py          # 密度估算（abc_integral 单一来源）
+│   ├── school.py           # 基础鱼群检测（echopype detect_shoal）
+│   ├── region.py           # 分析区域裁剪（复用 get_echo_range_1d）
+│   ├── quality.py          # 质量检查（Sv 双范围 + NaN 三级分级）
+│   ├── multifreq.py        # 多频分析
+│   ├── export.py           # 数据导出
+│   └── utils.py            # 公共工具（depth_resolution / ping_resolution / sv_to_linear）
+├── gui/
+│   ├── handlers/           # Mixin（File/Processing/Analysis/Interaction）
+│   ├── left_panel.py       # 左侧变量列表
+│   ├── property_panel.py   # 右侧属性面板（底部/鱼群/积分/SED 参数联动）
+│   ├── stats_dialog.py     # 统计对话框（4 tab：摘要/积分/SED 网格）
+│   ├── navigation_bar.py   # 底部缩略图导航滑块
+│   ├── workers.py          # Worker 线程（含 MergeFilesWorker）
+│   └── main_window.py      # 主窗口（.ep 菜单 + 导航栏集成）
+└── viz/
+    └── opengl_renderer.py  # OpenGL 渲染器（导航栏联动接口）
 ```
+
+> 已删除：`grid.py`（合并进 integration.py）、`single_target.py`（简化版，由 sed.py 取代）、`fileset_tree.py`（文件树，改为 .ep 项目工作流）
 
 ### 9.2 配置文件扩展
 
 ```yaml
-# 新增配置项
+# processing 配置
 processing:
+  sonar_model: "EK80"
   noise_removal:
-    mode: "de_robertis"  # 新增
-    ping_window: 40      # 新增
-    depth_window: 10     # 新增
-    save_check_plot: true # 新增
-  
+    mode: "de_robertis"
+    ping_num: 5
+    range_sample_num: 10
+    SNR_threshold: "3.0dB"
   bottom_detection:
-    method: "enhanced"   # 新增: basic / enhanced / afsc
-    peak_threshold: -40.0           # 新增
-    discrimination_threshold: -50.0 # 新增
-    validation_window: 15           # 新增
-    validation_threshold: 3.0       # 新增
+    method: "enhanced"   # basic / enhanced / afsc
+    threshold: -40.0
+    peak_threshold: -40.0
+    discrimination_threshold: -50.0
+    saturation_threshold: -60.0
+    validation_window: 15
+    validation_threshold: 3.0
+    smoothing_window: 11
+    search_min: 10.0      # afsc 方法
+    window_len: 11         # afsc 方法
+    backstep: 35.0         # afsc 方法
 
+# 鱼群检测配置
 school_detection:
-  method: "advanced"     # 新增: echoview / advanced
-  min_threshold: -60.0   # 新增
-  max_depth_distance: 0.1 # 新增
-  max_ping_distance: 0.6  # 新增
-  migration_enabled: true # 新增
+  method: "advanced"      # echoview / advanced
+  thr: -55.0              # echoview 方法阈值
+  mincan: [3.0, 10.0]     # echoview 最小候选
+  maxlink: [3.0, 15.0]    # echoview 最大连接
+  minsho: [3.0, 15.0]     # echoview 最小鱼群
+  min_threshold: -60.0    # advanced 方法
+  max_depth_distance: 0.1
+  max_ping_distance: 1
+  max_time_gap: 20
+  min_shoal_pings: 3
+  min_shoal_height: 0.5
 
-# 新增模块配置
+# 回声积分配置
 integration:
-  esu_type: "pings"      # pings / seconds / nmi
-  esu_size: 500          # ESU 大小
-  layer_width: 5         # 层宽度 (米)
+  esu_type: "pings"       # pings / distance (GPS 距离)
+  esu_size: 500
+  layer_width: 5.0
+  min_threshold: -70.0
+  max_threshold: 0.0
+  ts_default: -30.0
 
-single_target:
-  enabled: false         # 默认关闭
-  min_ts: -50.0
-  max_ts: -20.0
+# 真实 SED 配置
+single_target_real:
+  ts_threshold_db: -50.0
+  pldl_db: 6.0
+  min_norm_pulse: 0.8
+  max_norm_pulse: 1.5
+  max_angle_std_deg: 0.6
+  max_beam_comp_db: 3.0
+  min_depth_m: 0.0
+  max_depth_m: 200.0
 ```
 
 ---

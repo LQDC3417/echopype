@@ -9,7 +9,6 @@ import traceback
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 RAW_FILE = Path("D:/Administrator/Desktop/echopype/raw_data/20250706SCSK-D20250706-T024009.raw")
 CONFIG_PATH = Path("D:/Administrator/Desktop/echopype/configs/example.yaml")
@@ -143,20 +142,9 @@ def run_all_tests():
         report("detect_schools", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
-    # 7. 密度估算 (FR-06)
+    # 7. 回声积分（含 ABC/密度，替代原网格分析 FR-07）
     # ═══════════════════════════════════════════════════════
-    print("\n[7] 密度估算 (FR-06)")
-    try:
-        from src.core.density import estimate_density
-        density_df = estimate_density(pd.DataFrame(), ds_Sv, config.get("density", {}))
-        report("estimate_density", "OK", f"结果: {len(density_df)} 行, 列: {list(density_df.columns)[:5]}")
-    except Exception:
-        report("estimate_density", "FAIL", traceback.format_exc())
-
-    # ═══════════════════════════════════════════════════════
-    # 8. 回声积分（含 ABC/密度，替代原网格分析 FR-07）
-    # ═══════════════════════════════════════════════════════
-    print("\n[8] 回声积分 (ABC + 密度)")
+    print("\n[7] 回声积分 (ABC + 密度)")
     try:
         from src.core.integration import create_integration_grid, integrate, ESUType
         grid = create_integration_grid(ds_Sv, esu_type=ESUType.PINGS, esu_size=100, layer_width=2.0, surface_depth_m=2.0)
@@ -174,24 +162,9 @@ def run_all_tests():
         report("integration", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
-    # 9. 单体目标检测
+    # 8. 多频分析
     # ═══════════════════════════════════════════════════════
-    print("\n[9] 单体目标检测")
-    try:
-        from src.core.single_target import detect_and_compute_ts
-        targets = detect_and_compute_ts(ds_Sv, config)
-        if not targets.empty:
-            report("single_target", "OK",
-                   f"目标数: {len(targets)}, 列: {list(targets.columns)[:8]}")
-        else:
-            report("single_target", "WARN", "未检测到目标")
-    except Exception:
-        report("single_target", "FAIL", traceback.format_exc())
-
-    # ═══════════════════════════════════════════════════════
-    # 10. 多频分析
-    # ═══════════════════════════════════════════════════════
-    print("\n[10] 多频分析")
+    print("\n[8] 多频分析")
     try:
         from src.core.multifreq import get_channel_summary, compare_frequencies, split_transects
         summary = get_channel_summary(ds_Sv)
@@ -211,9 +184,9 @@ def run_all_tests():
         report("multifreq", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
-    # 11. Sv 统计摘要
+    # 9. Sv 统计摘要
     # ═══════════════════════════════════════════════════════
-    print("\n[11] Sv 统计摘要")
+    print("\n[9] Sv 统计摘要")
     try:
         from src.core.density import sv_statistics_summary
         stats = sv_statistics_summary(ds_Sv)
@@ -222,9 +195,9 @@ def run_all_tests():
         report("sv_statistics_summary", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
-    # 12. 数据导出 (FR-09)
+    # 10. 数据导出 (FR-09)
     # ═══════════════════════════════════════════════════════
-    print("\n[12] 数据导出 (FR-09)")
+    print("\n[10] 数据导出 (FR-09)")
     try:
         import tempfile
         from src.core.export import export_all
@@ -238,12 +211,11 @@ def run_all_tests():
         report("export", "FAIL", traceback.format_exc())
 
     # ═══════════════════════════════════════════════════════
-    # 13. GUI 模块导入
+    # 11. GUI 模块导入
     # ═══════════════════════════════════════════════════════
-    print("\n[13] GUI 模块导入")
+    print("\n[11] GUI 模块导入")
     gui_modules = [
         ("main_window", "from src.gui.main_window import MainWindow"),
-        ("workers", "from src.gui.workers import LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker, DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker, IntegrationWorker, BatchProcessWorker, QualityCheckWorker, MultifreqAnalysisWorker, SingleTargetWorker, SvStatsWorker, TransectSplitWorker"),
         ("property_panel", "from src.gui.property_panel import PropertyPanel"),
         ("opengl_renderer", "from src.viz.opengl_renderer import EchogramRenderer"),
         ("theme", "from src.gui.theme import DARK_THEME"),
@@ -256,9 +228,9 @@ def run_all_tests():
             report(name, "FAIL", str(e))
 
     # ═══════════════════════════════════════════════════════
-    # 14. 内存监控
+    # 12. 内存监控
     # ═══════════════════════════════════════════════════════
-    print("\n[14] 内存监控")
+    print("\n[12] 内存监控")
     try:
         from src.core.utils import get_memory_usage, optimize_array_dtype
         mem = get_memory_usage()

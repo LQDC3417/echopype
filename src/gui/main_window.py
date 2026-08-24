@@ -26,20 +26,19 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QSplitter,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from src.gui.fileset import Fileset
-from src.gui.fileset_tree import FilesetTreeWidget
 from src.gui.i18n import T, set_language
+from src.gui.navigation_bar import EchogramNavBar
 from src.gui.property_panel import PropertyPanel
 from src.gui.region_panel import RegionBrowserWidget
 from src.gui.stats_dialog import StatsDialog
 from src.gui.status_bar import MainStatusBar
 from src.gui.toolbars import EchogramToolBar, MouseMode, StandardToolBar
+from src.gui.workers import MergeFilesWorker
 from src.viz.opengl_renderer import EchogramRenderer
 
 from src.gui.handlers import (
@@ -100,18 +99,12 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._analysis_region_enabled = False  # 分析区域限定（仅控制 UI 渲染，不影响分析裁剪）
         self._schools_mask = None
         self._schools_df = None
-        self._density_df = None
         self._current_worker = None
-        self._batch_worker = None            # 批量处理工作线程
-        self._batch_results: dict[str, object] = {}  # {path_str: ds_Sv}
-        self._current_fileset: Fileset = None
         self._current_channel = ""
         self._undo_stack = []
         self._redo_stack = []
         self._current_mode = MouseMode.NAVIGATE
         self._run_all_chain = False
-        self._raw_file_queue: list[Path] = []
-        self._raw_queue_index = 0
         self._file_cache: dict[str, dict] = {}  # {path_str: {"sv": array, "ds": Dataset, "bottom": array}}
 
         # 变量缓存
@@ -133,6 +126,13 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         # 流水线信号
         self.pipeline_step.connect(self.statusbar.set_step)
 
+    def closeEvent(self, event):
+        """窗口关闭：等待/停止后台 worker，避免 QThread destroyed 崩溃"""
+        worker = self._current_worker
+        if worker is not None and worker.isRunning():
+            worker.wait(5000)  # 最多等 5 秒
+        super().closeEvent(event)
+
     # ═══════════════════════════════════════════════════════
     # 菜单栏
     # ═══════════════════════════════════════════════════════
@@ -142,8 +142,17 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
 
         # ── 文件 ──
         fm = mb.addMenu(T("menu_file"))
-        fm.addAction(self._act(T("import_raw_files"), self._import_raw, "Ctrl+I"))
-        fm.addAction(self._act(T("open_config"), self._open_config, "Ctrl+O"))
+        fm.addAction(self._act(T("new_project"), self._new_project, "Ctrl+N"))
+        fm.addAction(self._act(T("open_project"), self._open_project, "Ctrl+O"))
+        fm.addAction(self._act(T("save_project"), self._save_project, "Ctrl+S"))
+        fm.addSeparator()
+
+        # 最近打开的项目
+        self._recent_menu = fm.addMenu(T("recent_projects"))
+        self._update_recent_menu()
+
+        fm.addSeparator()
+        fm.addAction(self._act(T("open_config"), self._open_config))
         fm.addAction(self._act(T("save_config"), self._save_config, "Ctrl+Shift+S"))
         fm.addSeparator()
         fm.addAction(self._act(T("menu_export"), self._export, "Ctrl+E"))
@@ -183,26 +192,79 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         # ── 处理 ──
         pm = mb.addMenu(T("menu_process"))
         pm.addAction(self._act(T("run_all"), self._run_all, "F5"))
-        pm.addAction(self._act(T("batch_process"), self._batch_process_files, "Ctrl+B"))
         pm.addSeparator()
         pm.addAction(self._act(T("compute_sv"), self._compute_sv, "Ctrl+1"))
         pm.addAction(self._act(T("noise_removal"), self._apply_noise_params, "Ctrl+2"))
         pm.addAction(self._act(T("detect_bottom"), self._detect_bottom, "Ctrl+3"))
         pm.addAction(self._act(T("detect_schools"), self._detect_schools, "Ctrl+4"))
-        pm.addAction(self._act(T("compute_density"), self._compute_density, "Ctrl+5"))
 
         # ── 分析 ──
         am = mb.addMenu(T("menu_analysis"))
         am.addAction(self._act(T("menu_integration"), self._run_integration))
-        am.addAction(self._act(T("menu_single_target"), self._run_single_target_detection))
         am.addAction(self._act(T("btn_real_sed"), self._run_real_sed))
         am.addSeparator()
-        am.addAction(self._act(T("export_density_report"), self._export))
         am.addAction(self._act(T("menu_export_schools"), self._export_schools))
 
         # ── 帮助 ──
         hm = mb.addMenu(T("menu_help"))
         hm.addAction(self._act(T("about"), self._show_about))
+
+    def _update_recent_menu(self):
+        from src.gui.handlers.file_handlers import _load_recent
+        self._recent_menu.clear()
+        recent = _load_recent()
+        if not recent:
+            action = self._recent_menu.addAction(T("recent_empty"))
+            action.setEnabled(False)
+            return
+        for path in recent:
+            p = Path(path)
+            action = self._recent_menu.addAction(f"{p.name}  ({p.parent})")
+            action.triggered.connect(lambda checked=False, pp=path: self._open_recent(pp))
+
+    def _update_nav_bar(self, *args):
+        """渲染器视图变化 → 同步导航滑块"""
+        ratio = self.echogram.get_view_ratio()
+        self.nav_bar.set_view_ratio(*ratio)
+
+    def _open_recent(self, path: str):
+        """打开最近列表中的项目"""
+        # 等待旧 worker 完成，避免线程引用丢失
+        if self._current_worker is not None and self._current_worker.isRunning():
+            self._current_worker.wait(5000)
+        self._current_worker = None
+        try:
+            from src.gui.handlers.file_handlers import _save_recent
+            from src.core.ep_project import EpProject
+
+            proj = EpProject.load(Path(path))
+            all_ok, missing = proj.verify_raw_files()
+            if not all_ok:
+                missing_list = "\n".join(str(p) for p in missing[:20])
+                QMessageBox.critical(
+                    self, T("dialog_error"),
+                    T("msg_project_raw_missing", files=missing_list)
+                )
+                return
+
+            self._current_raw_files = proj.raw_files
+            self._current_project_path = Path(path)
+            self._config = proj.config
+            self._incremental_sv = None
+
+            self.statusbar.show_progress(T("msg_loading_files", n=len(proj.raw_files)))
+            self._current_worker = MergeFilesWorker(proj.raw_files, proj.config)
+            self._current_worker.finished.connect(
+                lambda ds: self._on_project_loaded(ds, proj)
+            )
+            self._current_worker.error.connect(self._on_worker_error)
+            self._current_worker.progress.connect(self.statusbar.set_status)
+            self._current_worker.progress_num.connect(self.statusbar.set_progress_value)
+            self._current_worker.file_ready.connect(self._on_file_ready)
+            self._current_worker.start()
+            _save_recent(str(path))
+        except Exception as e:
+            QMessageBox.critical(self, T("dialog_error"), f"{e}")
 
     def _register_dock_view_actions(self):
         """将各 Dock 的显示/隐藏切换加入视图菜单"""
@@ -248,27 +310,27 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.statusbar = MainStatusBar(self)
         self.setStatusBar(self.statusbar)
 
-        # ── 中央：View Tab 容器 ──
+        # ── 中央：Echogram + 底部导航滑块 ──
         self.echogram = EchogramRenderer()
+        self.nav_bar = EchogramNavBar()
         self.view_tabs = QTabWidget()
-        self.view_tabs.addTab(self.echogram, T("view_tab", n=1))
+        central_widget = QWidget()
+        central_layout = QVBoxLayout(central_widget)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addWidget(self.echogram, 1)
+        central_layout.addWidget(self.nav_bar)
+        self.view_tabs.addTab(central_widget, T("view_tab", n=1))
         self.setCentralWidget(self.view_tabs)
 
-        # ── 左侧 Dock：Matecho风格综合面板 ──
+        # ── 左侧 Dock：变量列表面板 ──
         from src.gui.left_panel import LeftPanel
         self.left_panel = LeftPanel()
-        self.fileset_tree = FilesetTreeWidget()
         self.variable_list = self.left_panel.variable_list
 
-        # 文件树 + 左侧面板垂直分割
-        left_split = QSplitter(Qt.Vertical)
-        left_split.addWidget(self.fileset_tree)
-        left_split.addWidget(self.left_panel)
-        left_split.setSizes([200, 400])
-
         self.dock_left = QDockWidget(T("fileset_ctrl_title"), self)
-        self.dock_left.setObjectName("dockFileset")
-        self.dock_left.setWidget(left_split)
+        self.dock_left.setObjectName("dockVariables")
+        self.dock_left.setWidget(self.left_panel)
         self.dock_left.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
         )
@@ -339,13 +401,8 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
     # ═══════════════════════════════════════════════════════
 
     def _connect_signals(self):
-        # 文件集面板
-        self.fileset_tree.fileset_selected.connect(self._on_fileset_selected)
-        self.fileset_tree.file_selected.connect(self._load_file)
-        self.fileset_tree.channel_selected.connect(self._on_channel_selected)
-
         # 标准工具栏
-        self.std_toolbar.open_clicked.connect(self._import_raw)
+        self.std_toolbar.open_clicked.connect(self._new_project)
         self.std_toolbar.open_config_clicked.connect(self._open_config)
         self.std_toolbar.save_config_clicked.connect(self._save_config)
         self.std_toolbar.run_clicked.connect(self._run_all)
@@ -360,10 +417,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.echo_toolbar.reset_view_clicked.connect(self._reset_view)
         self.echo_toolbar.fit_view_clicked.connect(self._fit_view)
 
-        # 工具栏翻页按钮
-        self.echo_toolbar.prev_file_clicked.connect(lambda: self._switch_file(-1))
-        self.echo_toolbar.next_file_clicked.connect(lambda: self._switch_file(1))
-
         # Echogram 交互
         self.echogram.mouse_moved.connect(self.statusbar.set_coords)
         self.echogram.mouse_moved.connect(self._update_depth_at_cursor)
@@ -371,6 +424,10 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.echogram.bottom_line_edited.connect(self._on_bottom_line_edited)
         self.echogram.sv_at_cursor.connect(self.statusbar.set_sv)
         self.echogram.zoom_changed.connect(self.statusbar.set_zoom_info)
+        self.echogram.zoom_changed.connect(self._update_nav_bar)
+
+        # 导航滑块
+        self.nav_bar.view_moved.connect(self.echogram.set_view_ratio)
 
         # 右键菜单信号
         self.echogram.surface_line_requested.connect(self._on_surface_line_dialog)
@@ -378,18 +435,13 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.echogram.re_detect_bottom.connect(self._detect_bottom)
         self.echogram.update_bottom_requested.connect(self._on_update_bottom)
 
-        # echogram 翻页信号
-        self.echogram.file_page_requested.connect(self._switch_file)
-
         # 属性面板（处理参数）
         self.property_panel.surface_line_changed.connect(self._on_surface_line_changed)
         self.property_panel.detect_schools_clicked.connect(self._detect_schools)
-        self.property_panel.compute_density_clicked.connect(self._compute_density)
         self.property_panel.stats_clicked.connect(self._show_stats)
         self.property_panel.noise_params_changed.connect(self._on_noise_params_changed)
         self.property_panel.quality_check_clicked.connect(self._run_quality_check)
         self.property_panel.multifreq_clicked.connect(self._run_multifreq_analysis)
-        self.property_panel.single_target_clicked.connect(self._run_single_target_detection)
         self.property_panel.sv_stats_clicked.connect(self._run_sv_stats)
         self.property_panel.transect_split_clicked.connect(self._run_transect_split)
         self.property_panel.integration_clicked.connect(self._run_integration)
@@ -418,28 +470,26 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
                     "SNR_threshold": "3.0dB",
                 },
                 "bottom_detection": {
-                    "method": "basic", "threshold": -50.0,
-                    "offset_m": 0.5, "bin_skip_from_surface": 200,
+                    "method": "enhanced", "threshold": -40.0,
+                    "offset_m": 0.5, "bin_skip_from_surface": 50,
+                    "peak_threshold": -40.0, "discrimination_threshold": -50.0,
+                    "saturation_threshold": -60.0,
+                    "validation_window": 15, "validation_threshold": 3.0,
+                    "smoothing_window": 11,
+                    "search_min": 10.0, "window_len": 11, "backstep": 35.0,
                 },
             },
             "school_detection": {
-                "method": "echoview", "thr": -55.0,
+                "method": "advanced", "thr": -55.0,
                 "mincan": [3, 10], "maxlink": [3, 15], "minsho": [3, 15],
+                "min_threshold": -60.0, "max_depth_distance": 0.1,
+                "max_ping_distance": 1, "max_time_gap": 20,
+                "min_shoal_pings": 3, "min_shoal_height": 0.5,
             },
-            "density": {"ts_default": -30.0},
             "integration": {
                 "esu_type": "pings", "esu_size": 500,
                 "layer_width": 5.0, "min_threshold": -70.0,
                 "max_threshold": 0.0, "ts_default": -30.0,
-            },
-            "single_target": {
-                "sv_threshold_db": -50.0, "min_area": 3, "max_area": 500,
-            },
-            "single_target_real": {
-                "ts_threshold_db": -50.0, "pldl_db": 6.0,
-                "min_norm_pulse": 0.8, "max_norm_pulse": 1.5,
-                "max_angle_std_deg": 0.6, "max_beam_comp_db": 3.0,
-                "min_depth_m": 0.0, "max_depth_m": 200.0,
             },
         }
 
@@ -467,6 +517,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
 
     # -- Mixin methods split into handlers/ modules --
     # FileMixin:       file import, batch, cache, switch, variable list
-    # ProcessingMixin:  Sv, noise, bottom, schools, density, integration
+    # ProcessingMixin:  Sv, noise, bottom, schools, integration
     # AnalysisMixin:    quality, multifreq, single target, Sv stats, transect
     # InteractionMixin: mouse, region, undo/redo, view, export

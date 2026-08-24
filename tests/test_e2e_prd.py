@@ -5,8 +5,7 @@
 - FR-03: 噪声去除
 - FR-04: 底部检测
 - FR-05: 鱼群检测
-- FR-06: 密度估算
-- FR-07: 网格分析
+- FR-07: 网格分析（回声积分，含 ABC/密度列）
 - FR-08: 质量检查
 - FR-09: 数据导出
 - FR-10~FR-13: GUI 导入验证
@@ -123,17 +122,6 @@ class TestFR05_SchoolDetection:
 
 
 # ═══════════════════════════════════════════════════════
-# FR-06: 密度估算
-# ═══════════════════════════════════════════════════════
-
-class TestFR06_DensityEstimation:
-    def test_density_empty_schools(self, ds_Sv):
-        from src.core.density import estimate_density
-        result = estimate_density(pd.DataFrame(), ds_Sv, {"ts_default": -30.0})
-        assert isinstance(result, pd.DataFrame)
-
-
-# ═══════════════════════════════════════════════════════
 # FR-07: 网格分析
 # ═══════════════════════════════════════════════════════
 
@@ -216,13 +204,13 @@ class TestFR10_GUI:
     def test_import_all_workers(self):
         from src.gui.workers import (
             LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
-            DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker,
+            DetectSeafloorWorker, DetectSchoolsWorker,
             IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
             MultifreqAnalysisWorker,
         )
         assert all(w is not None for w in [
             LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
-            DetectSeafloorWorker, DetectSchoolsWorker, ComputeDensityWorker,
+            DetectSeafloorWorker, DetectSchoolsWorker,
             IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
             MultifreqAnalysisWorker,
         ])

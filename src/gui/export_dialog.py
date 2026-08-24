@@ -53,16 +53,13 @@ class ExportDialog(QDialog):
 
         self.chk_sv = QCheckBox(T("export_sv_data"))
         self.chk_schools = QCheckBox(T("export_school_list"))
-        self.chk_density = QCheckBox(T("export_density_est"))
         self.chk_grid = QCheckBox(T("export_grid_stats"))
 
         self.chk_sv.setChecked(True)
         self.chk_schools.setChecked(True)
-        self.chk_density.setChecked(True)
 
         content_layout.addWidget(self.chk_sv)
         content_layout.addWidget(self.chk_schools)
-        content_layout.addWidget(self.chk_density)
         content_layout.addWidget(self.chk_grid)
         content_group.setLayout(content_layout)
         layout.addWidget(content_group)
@@ -97,6 +94,5 @@ class ExportDialog(QDialog):
         return {
             "sv": self.chk_sv.isChecked(),
             "schools": self.chk_schools.isChecked(),
-            "density": self.chk_density.isChecked(),
             "grid": self.chk_grid.isChecked(),
         }

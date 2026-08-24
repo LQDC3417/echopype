@@ -1,6 +1,7 @@
 """高级鱼群提取模块测试"""
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
@@ -12,6 +13,7 @@ from src.core.shoal_extraction import (
     shoals_to_dataframe,
     extract_shoals,
 )
+from src.core.sed import aggregate_targets_to_grid
 
 
 @pytest.fixture
@@ -174,3 +176,71 @@ class TestExtractShoals:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+# ── aggregate_targets_to_grid ─────────────────────────────
+
+
+class TestAggregateTargetsToGrid:
+    """SED 网格聚合测试"""
+
+    @pytest.fixture
+    def mock_grid_config(self):
+        return {"integration": {"esu_type": "pings", "esu_size": 10, "layer_width": 5.0}}
+
+    @pytest.fixture
+    def mock_grid_ds(self):
+        """带 echo_range 的简单 ds（50 pings × 20 samples）"""
+        n_pings, n_samples = 50, 20
+        echo_range = np.broadcast_to(
+            np.arange(0.5, n_samples * 0.5 + 0.5, 0.5)[:n_samples], (n_pings, n_samples)
+        ).copy()
+        sv = np.random.uniform(-80, -30, (n_pings, n_samples)).astype(float)
+        return xr.Dataset({
+            "Sv": xr.DataArray(sv, dims=["ping_time", "range_sample"]),
+            "echo_range": xr.DataArray(echo_range, dims=["ping_time", "range_sample"]),
+            "ping_time": xr.DataArray(np.arange(n_pings), dims=["ping_time"]),
+            "range_sample": xr.DataArray(np.arange(n_samples), dims=["range_sample"]),
+        })
+
+    def test_empty_targets(self, mock_grid_ds, mock_grid_config):
+        """空 targets → 全 NaN 网格"""
+        targets = pd.DataFrame(columns=["ping_idx", "range_m", "ts_db"])
+        grid_df = aggregate_targets_to_grid(targets, mock_grid_ds, mock_grid_config)
+        assert len(grid_df) > 0
+        assert (grid_df["n_targets"] == 0).all()
+        assert grid_df["ts_mean"].isna().all()
+
+    def test_single_target(self, mock_grid_ds, mock_grid_config):
+        """单个目标归入正确网格"""
+        targets = pd.DataFrame({"ping_idx": [5], "range_m": [3.0], "ts_db": [-40.0]})
+        grid_df = aggregate_targets_to_grid(targets, mock_grid_ds, mock_grid_config)
+        with_targets = grid_df[grid_df["n_targets"] > 0]
+        assert len(with_targets) == 1
+        assert with_targets.iloc[0]["n_targets"] == 1
+        assert with_targets.iloc[0]["ts_mean"] == pytest.approx(-40.0, abs=0.1)
+
+    def test_multiple_targets_same_cell(self, mock_grid_ds, mock_grid_config):
+        """同网格多个目标 → TS 线性域均值"""
+        targets = pd.DataFrame({
+            "ping_idx": [5, 6, 7],
+            "range_m": [3.0, 3.5, 4.0],
+            "ts_db": [-40.0, -40.0, -40.0],
+        })
+        grid_df = aggregate_targets_to_grid(targets, mock_grid_ds, mock_grid_config)
+        with_targets = grid_df[grid_df["n_targets"] > 0]
+        assert len(with_targets) == 1
+        assert with_targets.iloc[0]["n_targets"] == 3
+        # 同值均值 = 本身
+        assert with_targets.iloc[0]["ts_mean"] == pytest.approx(-40.0, abs=0.1)
+
+    def test_output_columns(self, mock_grid_ds, mock_grid_config):
+        """输出列名完整"""
+        targets = pd.DataFrame({"ping_idx": [5], "range_m": [3.0], "ts_db": [-40.0]})
+        grid_df = aggregate_targets_to_grid(targets, mock_grid_ds, mock_grid_config)
+        expected_cols = {
+            "interval", "layer", "ping_start", "ping_end",
+            "depth_start", "depth_end", "n_targets", "ts_mean",
+            "ts_std", "ts_min", "ts_max", "center_lat", "center_lon",
+        }
+        assert expected_cols.issubset(set(grid_df.columns))

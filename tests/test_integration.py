@@ -200,7 +200,6 @@ def test_full_pipeline():
             "maxlink": [2.0, 10.0],
             "minsho": [2.0, 10.0],
         },
-        "density": {"ts_default": -30.0},
         "output": {"dir": tempfile.mkdtemp(), "formats": ["csv"]},
     }
 
@@ -211,13 +210,15 @@ def test_full_pipeline():
     assert ds_Sv is not None
     assert "Sv" in ds_Sv
 
-    from src.core.school import detect_schools, schools_to_dataframe
+    from src.core.school import detect_schools
     mask = detect_schools(ds_Sv, config)
-    schools_df = schools_to_dataframe(mask, ds_Sv)
+    assert mask is not None
 
-    from src.core.density import estimate_density
-    density_df = estimate_density(schools_df, ds_Sv, config)
-    assert "density_ind_ha" in density_df.columns
+    # 回声积分输出密度列（integration 的密度换算，非独立密度检测）
+    from src.core.integration import ESUType, create_integration_grid, integrate
+    grid = create_integration_grid(ds_Sv, esu_type=ESUType.PINGS, esu_size=100, layer_width=5.0)
+    result = integrate(ds_Sv, grid)
+    assert "density_ind_ha" in result.to_dataframe().columns
 
 
 if __name__ == '__main__':

@@ -4,7 +4,14 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from src.core.utils import squeeze_sv, sv_to_linear, get_sv_array, get_vertical_coords
+from src.core.utils import (
+    depth_resolution,
+    get_sv_array,
+    get_vertical_coords,
+    ping_resolution,
+    squeeze_sv,
+    sv_to_linear,
+)
 
 
 # ── squeeze_sv ────────────────────────────────────────────
@@ -129,3 +136,32 @@ def test_get_vertical_coords_fallback_to_range_sample():
     assert len(result) == 10
     # range_sample 是 0, 1, 2, ...
     assert result[0] == pytest.approx(0.0)
+
+
+# ── depth_resolution / ping_resolution ────────────────────
+
+def test_depth_resolution_skips_zero_diffs():
+    """零差值（EK80 重复深度填充）不拉低分辨率"""
+    depth = np.array([0.0, 1.0, 1.0, 1.0, 3.0])  # 重复 1.0
+    result = depth_resolution(depth)
+    # diff = [1, 0, 0, 2]，非零中位数 = median([1, 2]) = 1.5
+    assert result == pytest.approx(1.5)
+
+
+def test_depth_resolution_short_array():
+    """长度 <= 1 时返回默认 0.1"""
+    assert depth_resolution(np.array([1.0])) == pytest.approx(0.1)
+    assert depth_resolution(np.array([])) == pytest.approx(0.1)
+
+
+def test_ping_resolution_datetime64():
+    """datetime64 ping_time → 秒"""
+    ping_time = np.array(["2026-01-01T00:00:00", "2026-01-01T00:00:05",
+                          "2026-01-01T00:00:10"], dtype="datetime64")
+    assert ping_resolution(ping_time) == pytest.approx(5.0)
+
+
+def test_ping_resolution_numeric():
+    """数值 ping_time → 原值"""
+    assert ping_resolution(np.array([0.0, 2.0, 4.0])) == pytest.approx(2.0)
+    assert ping_resolution(np.array([0.0])) == pytest.approx(1.0)

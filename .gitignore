@@ -61,6 +61,9 @@ fix_f821.py
 patch1.patch
 ruff_errors.json
 
+# Quick launch scripts (local only, not committed)
+start_gui.bat
+
 # Root-level debug / ad-hoc test scripts (not part of tests/ suite)
 /test_area_debug.py
 /test_depth_debug.py
