@@ -99,7 +99,6 @@ _TEXTS = {
 
     # 处理菜单
     "run_all": {"zh": "全部运行", "en": "Run All"},
-    "batch_process": {"zh": "批量处理文件...", "en": "Batch Process Files..."},
     "compute_sv": {"zh": "计算 Sv", "en": "Compute Sv"},
     "noise_removal": {"zh": "噪声去除", "en": "Noise Removal"},
     "detect_bottom": {"zh": "检测底部", "en": "Detect Bottom"},
@@ -413,10 +412,6 @@ _TEXTS = {
     "msg_bottom_detected": {"zh": "底部检测完成 — 分析区域已启用，已进入绘制底线模式", "en": "Bottom detected — analysis region enabled, entered draw-bottom mode"},
     "msg_schools_detected": {"zh": "鱼群检测完成: {n} 个鱼群像素", "en": "School detection done: {n} pixels"},
     "msg_export_done": {"zh": "导出完成: {n} 个文件 → {dir}", "en": "Export done: {n} files → {dir}"},
-    "msg_batch_processing": {"zh": "批量处理 {n} 个文件...", "en": "Batch processing {n} files..."},
-    "msg_batch_done": {"zh": "批量处理完成: 成功 {ok}, 失败 {fail}", "en": "Batch done: {ok} success, {fail} failed"},
-    "msg_batch_result_title": {"zh": "批量处理完成", "en": "Batch Processing Complete"},
-    "msg_batch_result": {"zh": "成功 {ok} 个文件，失败 {fail} 个文件", "en": "{ok} files succeeded, {fail} files failed"},
     "msg_config_loaded": {"zh": "配置已加载: {path}", "en": "Config loaded: {path}"},
     "msg_config_saved": {"zh": "配置已保存: {path}", "en": "Config saved: {path}"},
     "msg_no_config": {"zh": "无配置可保存", "en": "No config to save"},
@@ -481,10 +476,6 @@ _TEXTS = {
     "quality_bottom_exceed": {"zh": "底线超出采样范围", "en": "Bottom exceeds sample range"},
     "quality_bottom_jump": {"zh": "底线跳变过大（最大 {val:.0f} samples）", "en": "Bottom jump too large (max {val:.0f} samples)"},
     "quality_bottom_nan_high": {"zh": "底线 NaN 比例 {ratio:.1%} 过高（>30%）", "en": "Bottom NaN ratio {ratio:.1%} too high (>30%)"},
-
-    # ── 网格分析错误/进度 ──
-    "batch_file_fail": {"zh": "✗ 失败 [{done}/{total}]: {name}", "en": "✗ Fail [{done}/{total}]: {name}"},
-    "batch_file_ok": {"zh": "✓ 完成 [{done}/{total}]: {name}", "en": "✓ Done [{done}/{total}]: {name}"},
 
     # ── 语言切换 ──
     "menu_language": {"zh": "语言(&L)", "en": "&Language"},

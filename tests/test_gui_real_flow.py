@@ -215,13 +215,13 @@ def step12_workers():
     from src.gui.workers import (
         LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
         DetectSeafloorWorker, DetectSchoolsWorker,
-        IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
+        IntegrationWorker, QualityCheckWorker,
         TransectSplitWorker,
     )
     workers = [
         LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
         DetectSeafloorWorker, DetectSchoolsWorker,
-        IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
+        IntegrationWorker, QualityCheckWorker,
         TransectSplitWorker,
     ]
     print(f"  Worker 类数: {len(workers)}")

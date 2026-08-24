@@ -205,13 +205,13 @@ class TestFR10_GUI:
         from src.gui.workers import (
             LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
             DetectSeafloorWorker, DetectSchoolsWorker,
-            IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
+            IntegrationWorker, QualityCheckWorker,
             MultifreqAnalysisWorker,
         )
         assert all(w is not None for w in [
             LoadFileWorker, ComputeSvWorker, NoiseRemovalWorker,
             DetectSeafloorWorker, DetectSchoolsWorker,
-            IntegrationWorker, BatchProcessWorker, QualityCheckWorker,
+            IntegrationWorker, QualityCheckWorker,
             MultifreqAnalysisWorker,
         ])
 
