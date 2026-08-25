@@ -2,7 +2,7 @@
 
 设计原则：
 - 中文为默认语言，可切换英文
-- 简洁的文字标签，无 emoji
+- Qt 内置标准图标（QStyle.StandardPixmap），深色主题自动适配
 - 状态一目了然（选中态、禁用态）
 - 参数控件紧凑排列
 - 参照 Echoview 布局：单行工具栏 + 紧凑控件
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QLabel,
     QSlider,
+    QStyle,
     QToolBar,
 )
 
@@ -48,31 +49,40 @@ class StandardToolBar(QToolBar):
         self.setMovable(False)
         self.setObjectName("StandardToolBar")
         self.setIconSize(QSize(16, 16))
-        self.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
         # ─── 文件操作 ───
-        self.addAction(self._act(T("toolbar_import"), self.open_clicked, "Ctrl+I"))
-        self.addAction(self._act(T("toolbar_open_config"), self.open_config_clicked, "Ctrl+O"))
-        self.addAction(self._act(T("toolbar_save_config"), self.save_config_clicked, "Ctrl+Shift+S"))
+        self.addAction(self._act(T("toolbar_import"), self.open_clicked, "Ctrl+I",
+                                 QStyle.SP_DialogOpenButton))
+        self.addAction(self._act(T("toolbar_open_config"), self.open_config_clicked, "Ctrl+O",
+                                 QStyle.SP_DirOpenIcon))
+        self.addAction(self._act(T("toolbar_save_config"), self.save_config_clicked, "Ctrl+Shift+S",
+                                 QStyle.SP_DialogSaveButton))
         self.addSeparator()
 
         # ─── 流程控制 ───
-        self._run_act = self._act(T("toolbar_run_all"), self.run_clicked, "F5")
+        self._run_act = self._act(T("toolbar_run_all"), self.run_clicked, "F5",
+                                  QStyle.SP_MediaPlay)
         self.addAction(self._run_act)
         self.addSeparator()
 
         # ─── 撤销/重做 ───
-        self.addAction(self._act(T("toolbar_undo"), self.undo_clicked, "Ctrl+Z"))
-        self.addAction(self._act(T("toolbar_redo"), self.redo_clicked, "Ctrl+Y"))
+        self.addAction(self._act(T("toolbar_undo"), self.undo_clicked, "Ctrl+Z",
+                                 QStyle.SP_ArrowBack))
+        self.addAction(self._act(T("toolbar_redo"), self.redo_clicked, "Ctrl+Y",
+                                 QStyle.SP_ArrowForward))
         self.addSeparator()
 
         # ─── 导出 ───
-        self.addAction(self._act(T("toolbar_export"), self.export_clicked, "Ctrl+E"))
+        self.addAction(self._act(T("toolbar_export"), self.export_clicked, "Ctrl+E",
+                                 QStyle.SP_DialogSaveButton))
 
-    def _act(self, text, signal, shortcut=None):
+    def _act(self, text, signal, shortcut=None, icon_standard=None):
         a = QAction(text, self)
         if shortcut:
             a.setShortcut(shortcut)
+        if icon_standard is not None:
+            a.setIcon(self.style().standardIcon(icon_standard))
         a.triggered.connect(signal)
         return a
 
@@ -95,7 +105,7 @@ class EchogramToolBar(QToolBar):
         self.setMovable(False)
         self.setObjectName("EchogramToolBar")
         self.setIconSize(QSize(16, 16))
-        self.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
         # ─── 鼠标模式 ───
         self.addWidget(self._label(T("toolbar_mode")))
@@ -110,14 +120,18 @@ class EchogramToolBar(QToolBar):
         self.addSeparator()
 
         # ─── 视图控制 ───
-        self.addAction(self._act(T("toolbar_reset"), self.reset_view_clicked))
-        self.addAction(self._act(T("toolbar_fit"), self.fit_view_clicked))
+        self.addAction(self._act(T("toolbar_reset"), self.reset_view_clicked,
+                                 None, QStyle.SP_BrowserReload))
+        self.addAction(self._act(T("toolbar_fit"), self.fit_view_clicked,
+                                 None, QStyle.SP_ArrowUp))
 
         self.addSeparator()
 
         # ─── 文件翻页 ───
-        self.addAction(self._act(T("toolbar_prev"), self.prev_file_clicked))
-        self.addAction(self._act(T("toolbar_next"), self.next_file_clicked))
+        self.addAction(self._act(T("toolbar_prev"), self.prev_file_clicked,
+                                 None, QStyle.SP_ArrowLeft))
+        self.addAction(self._act(T("toolbar_next"), self.next_file_clicked,
+                                 None, QStyle.SP_ArrowRight))
 
         self.addSeparator()
 
@@ -180,16 +194,18 @@ class EchogramToolBar(QToolBar):
         """重新翻译界面文本（语言切换时调用）"""
         self._update_mode_items()
 
-    def _act(self, text, signal, shortcut=None):
+    def _act(self, text, signal, shortcut=None, icon_standard=None):
         a = QAction(text, self)
         if shortcut:
             a.setShortcut(shortcut)
+        if icon_standard is not None:
+            a.setIcon(self.style().standardIcon(icon_standard))
         a.triggered.connect(signal)
         return a
 
     def _label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #666; font-size: 11px;")
+        lbl.setStyleSheet("color: #8a8a92; font-size: 11px;")
         return lbl
 
     def _on_cmap_changed(self, cmap):
@@ -204,3 +220,4 @@ class EchogramToolBar(QToolBar):
         self.lbl_vmax.setText(str(vmax))
         cmap = self.cmap_combo.currentText()
         self.colormap_changed.emit(cmap, vmin, vmax)
+

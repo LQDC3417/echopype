@@ -81,11 +81,11 @@ class EchogramNavBar(QWidget):
             painter.end()
             return
 
-        # 背景
-        painter.fillRect(0, 0, w, h, QColor(30, 34, 42))
+        # 背景（深色主题统一）
+        painter.fillRect(0, 0, w, h, QColor(30, 30, 34))
 
         if self._thumb is None:
-            painter.setPen(QColor(100, 110, 125))
+            painter.setPen(QColor(138, 138, 146))
             painter.drawText(8, h // 2 + 4, "加载数据后显示导航")
             painter.end()
             return
@@ -104,8 +104,8 @@ class EchogramNavBar(QWidget):
         start, end = self._view_ratio
         x0 = 4 + start * thumb_w
         x1 = 4 + end * thumb_w
-        painter.setBrush(QColor(70, 140, 220, 60))
-        painter.setPen(QColor(110, 180, 255, 200))
+        painter.setBrush(QColor(0, 180, 216, 60))
+        painter.setPen(QColor(51, 197, 225, 220))
         painter.drawRect(int(x0), 4, max(1, int(x1 - x0)), thumb_h)
 
         painter.end()

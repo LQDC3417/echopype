@@ -354,7 +354,7 @@ class EchogramRenderer(QOpenGLWidget):
 
 
     def initializeGL(self) -> None:
-        glClearColor(1.0, 1.0, 1.0, 1.0)
+        glClearColor(0.12, 0.12, 0.14, 1.0)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
