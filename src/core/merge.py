@@ -54,7 +54,7 @@ def compute_common_grid(ds_list: list[xr.Dataset]) -> np.ndarray:
         v = g[np.isfinite(g)]
         if len(v) == 0:
             return None, None
-        return v[0], v[-1]
+        return float(np.min(v)), float(np.max(v))
 
     valid_grids = [_valid_extent(g) for g in grids]
     starts = [s for s, e in valid_grids if s is not None]
@@ -71,7 +71,7 @@ def compute_common_grid(ds_list: list[xr.Dataset]) -> np.ndarray:
         return first
 
     # 用第一个文件的有效相邻差值中位数作为公共网格间距
-    diff_first = np.abs(np.diff(first[np.isfinite(first)]))
+    diff_first = np.abs(np.diff(np.sort(first[np.isfinite(first)])))
     dr = float(np.median(diff_first)) if len(diff_first) > 0 else 1.0
     if not np.isfinite(dr) or dr <= 0:
         dr = 1.0
@@ -106,7 +106,14 @@ def _resample_sv(ds_Sv: xr.Dataset, common_grid: np.ndarray) -> np.ndarray:
         valid = np.isfinite(row) & np.isfinite(er)
         if np.count_nonzero(valid) < 2:
             continue
-        out[i] = np.interp(common_grid, er[valid], row[valid], left=np.nan, right=np.nan)
+        xp = er[valid]
+        fp = row[valid]
+        order = np.argsort(xp, kind="stable")
+        xp = xp[order]
+        fp = fp[order]
+        xp, unique_idx = np.unique(xp, return_index=True)
+        fp = fp[unique_idx]
+        out[i] = np.interp(common_grid, xp, fp, left=np.nan, right=np.nan)
 
     return out
 
@@ -166,8 +173,8 @@ def merge_aligned(ds_list: list[xr.Dataset], dedup: bool = True) -> xr.Dataset:
     times_sorted = times_all[sort_idx]
 
     # 去重（时间戳相同的 ping 只保留第一个）
+    keep = np.ones(len(sv_all), dtype=bool)
     if dedup and len(times_sorted) > 1:
-        keep = np.ones(len(times_sorted), dtype=bool)
         t_prev = times_sorted[0]
         for i in range(1, len(times_sorted)):
             if times_sorted[i] == t_prev:
@@ -208,6 +215,23 @@ def merge_aligned(ds_list: list[xr.Dataset], dedup: bool = True) -> xr.Dataset:
     )
     merged.coords["echo_range"] = (("channel", "ping_time", "range_sample"), er_2d)
     merged.coords["depth"] = (("channel", "ping_time", "range_sample"), er_2d)
+
+    # 复制标量校准变量（声速/吸收/波束参数等，同一调查所有文件一致，取第一个文件）
+    # 缺失这些变量会导致下游 remove_background_noise 等报 KeyError
+    first = ds_list[0]
+    for vname in first.data_vars:
+        if vname == "Sv":
+            continue
+        da = first[vname]
+        if da.ndim == 0:
+            merged[vname] = da
+    # per-ping 校准变量（gain/sa_correction）：取合并后各 ping 的拼接值
+    for vname in ("gain_correction", "sa_correction"):
+        if vname in first.data_vars:
+            vals = np.concatenate([ds[vname].values for ds in ds_list])[sort_idx]
+            if dedup and len(times_sorted) > 1:
+                vals = vals[keep]
+            merged[vname] = (("ping_time",), vals)
 
     logger.info(
         f"对齐拼接完成: {len(times_sorted)} pings × {len(common_grid)} samples"
