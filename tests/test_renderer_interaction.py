@@ -71,3 +71,16 @@ def test_pan_mode_uses_left_drag_to_move_echogram(qapp):
         assert after != before
     finally:
         renderer.close()
+def test_overlay_visibility_does_not_drop_cached_result(qapp):
+    """关闭 overlay 只影响绘制，不应清除已计算的底线。"""
+    from src.viz.opengl_renderer import EchogramRenderer
+
+    renderer = EchogramRenderer()
+    bottom = np.array([10.0, 11.0, 12.0], dtype=np.float32)
+    try:
+        renderer.set_bottom_line(bottom)
+        renderer.set_overlay_visible("bottom", False)
+        assert np.array_equal(renderer.get_bottom_line(), bottom)
+        assert renderer._overlay_visibility["bottom"] is False
+    finally:
+        renderer.close()

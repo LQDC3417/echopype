@@ -103,6 +103,11 @@ class EchogramRenderer(QOpenGLWidget):
         self._surface_line = None  # float — 表线深度(in sample index units)
         self._school_mask = None
         self._single_targets = None  # np.ndarray (N, 2) — ping_idx, sample_idx
+        self._overlay_visibility = {
+            "noise": True,
+            "bottom": True,
+            "school": True,
+        }
 
         # 网格叠加
         self._grid_cells = None   # list[dict] — ping_start/end, depth_lo/hi (sample index)
@@ -348,6 +353,13 @@ class EchogramRenderer(QOpenGLWidget):
             self._bottom_drawing = False
         self.setCursor(Qt.OpenHandCursor if mode == MouseMode.PAN else Qt.ArrowCursor)
 
+    def set_overlay_visible(self, overlay: str, visible: bool) -> None:
+        """只切换 overlay 的显示状态，保留已计算的结果缓存。"""
+        if overlay not in self._overlay_visibility:
+            raise ValueError(f"unknown overlay: {overlay}")
+        self._overlay_visibility[overlay] = bool(visible)
+        self.update()
+
     def set_analysis_region_enabled(self, enabled: bool) -> None:
         """设置分析区域限定标志"""
         self._analysis_region_enabled = enabled
@@ -388,13 +400,13 @@ class EchogramRenderer(QOpenGLWidget):
         # 网格叠加在 echogram 之上、底线/鱼群之下
         if self._grid_cells is not None:
             self._draw_grid_overlay()
-        if self._noise_mask is not None:
+        if self._noise_mask is not None and self._overlay_visibility["noise"]:
             self._draw_noise_overlay()
-        if self._bottom_line is not None:
+        if self._bottom_line is not None and self._overlay_visibility["bottom"]:
             self._draw_bottom_line()
         if self._surface_line is not None:
             self._draw_surface_line()
-        if self._school_mask is not None:
+        if self._school_mask is not None and self._overlay_visibility["school"]:
             self._draw_school_overlay()
         if self._single_targets is not None:
             self._draw_single_targets()

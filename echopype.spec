@@ -13,6 +13,7 @@ ROOT = Path(SPECPATH)
 datas = [
     (str(ROOT / "configs"), "configs"),
     (str(ROOT / "docs"), "docs"),
+    (str(ROOT / "src" / "gui" / "assets"), "src/gui/assets"),
 ]
 
 # 隐式导入（PyInstaller 可能漏掉的模块）

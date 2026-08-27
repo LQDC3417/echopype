@@ -32,8 +32,6 @@ def test_worker_error_is_written_to_scrollable_panel_without_modal_dialog(qapp, 
         assert window._message_text.verticalScrollBar().maximum() >= 0
     finally:
         window.close()
-
-
 def test_empty_bottom_result_is_reported_in_message_panel(qapp):
     """底线算法返回全空结果时，GUI 应明确提示原因而不是静默空白。"""
     import numpy as np

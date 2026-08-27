@@ -13,7 +13,7 @@
 from pathlib import Path
 
 import yaml
-from PySide6.QtCore import QSettings, Qt, Signal
+from PySide6.QtCore import QSettings, QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -28,11 +28,12 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from src.gui.icons import icon
 from src.gui.i18n import T
 
 # 预设配置文件路径
@@ -48,11 +49,11 @@ class _InfoRow(QWidget):
         layout.setSpacing(8)
 
         self.lbl_label = QLabel(label)
-        self.lbl_label.setStyleSheet("color: #4a5568; font-size: 11px;")
+        self.lbl_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
         self.lbl_label.setFixedWidth(70)
 
         self.lbl_value = QLabel(value)
-        self.lbl_value.setStyleSheet("color: #2c3e50; font-size: 11px;")
+        self.lbl_value.setStyleSheet("color: #e2e8f0; font-size: 11px;")
         self.lbl_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         layout.addWidget(self.lbl_label)
@@ -63,9 +64,9 @@ class _InfoRow(QWidget):
         self.lbl_value.setText(value)
         no_data_values = ["--", T("info_no_data"), ""]
         if value in no_data_values:
-            self.lbl_value.setStyleSheet("color: #a0aec0; font-size: 11px;")
+            self.lbl_value.setStyleSheet("color: #64748b; font-size: 11px;")
         else:
-            self.lbl_value.setStyleSheet("color: #2c3e50; font-size: 11px;")
+            self.lbl_value.setStyleSheet("color: #e2e8f0; font-size: 11px;")
 
 
 class FileInfoTab(QWidget):
@@ -133,16 +134,15 @@ class ProcessingTab(QWidget):
         self._presets = self._load_presets()
         self._settings = QSettings("Echopype", "FishAcoustics")
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
         container = QWidget()
         layout = QVBoxLayout(container)
+        self._content_container = container
+        self._content_layout = layout
         layout.setSpacing(8)
         layout.setContentsMargins(8, 8, 8, 8)
 
         # ── 预设配置 ──
-        preset_group = QGroupBox(T("preset_group"))
+        preset_group = self.preset_group = QGroupBox(T("preset_group"))
         preset_layout = QHBoxLayout()
         preset_layout.setSpacing(6)
         preset_layout.setContentsMargins(8, 12, 8, 8)
@@ -164,7 +164,7 @@ class ProcessingTab(QWidget):
         layout.addWidget(preset_group)
 
         # ── 噪声去除参数 ──
-        noise_group = QGroupBox(T("noise_group"))
+        noise_group = self.noise_group = QGroupBox(T("noise_group"))
         noise_layout = QFormLayout()
         noise_layout.setSpacing(6)
         noise_layout.setContentsMargins(8, 12, 8, 8)
@@ -193,7 +193,7 @@ class ProcessingTab(QWidget):
         self.spin_snr.valueChanged.connect(self._emit_noise_params)
 
         # ── 表线设置 ──
-        surface_group = QGroupBox(T("surface_group"))
+        surface_group = self.surface_group = QGroupBox(T("surface_group"))
         surface_layout = QFormLayout()
         surface_layout.setSpacing(6)
         surface_layout.setContentsMargins(8, 12, 8, 8)
@@ -211,7 +211,7 @@ class ProcessingTab(QWidget):
         )
 
         # ── 底部检测参数 ──
-        bottom_group = QGroupBox(T("bottom_group"))
+        bottom_group = self.bottom_group = QGroupBox(T("bottom_group"))
         self.bottom_layout = QFormLayout()
         self.bottom_layout.setSpacing(6)
         self.bottom_layout.setContentsMargins(8, 12, 8, 8)
@@ -305,7 +305,7 @@ class ProcessingTab(QWidget):
         self._on_bottom_method_changed(self.combo_bottom_method.currentText())
 
         # ── 鱼群检测参数 ──
-        school_group = QGroupBox(T("school_group"))
+        school_group = self.school_group = QGroupBox(T("school_group"))
         self.school_layout = QFormLayout()
         self.school_layout.setSpacing(6)
         self.school_layout.setContentsMargins(8, 12, 8, 8)
@@ -406,7 +406,7 @@ class ProcessingTab(QWidget):
         self._on_school_method_changed(self.combo_school_method.currentText())
 
         # ── 回声积分 ──
-        integration_group = QGroupBox(T("integration_group"))
+        integration_group = self.integration_group = QGroupBox(T("integration_group"))
         integration_layout = QFormLayout()
         integration_layout.setSpacing(6)
         integration_layout.setContentsMargins(8, 12, 8, 8)
@@ -472,7 +472,7 @@ class ProcessingTab(QWidget):
         layout.addLayout(btn_layout2)
 
         # ── 真实 SED（分裂波束）──
-        real_sed_group = QGroupBox(T("single_target_real_group"))
+        real_sed_group = self.real_sed_group = QGroupBox(T("single_target_real_group"))
         real_sed_layout = QFormLayout()
         real_sed_layout.setSpacing(6)
         real_sed_layout.setContentsMargins(8, 12, 8, 8)
@@ -554,11 +554,9 @@ class ProcessingTab(QWidget):
         layout.addWidget(self.btn_apply_all)
 
         layout.addStretch()
-        scroll.setWidget(container)
-
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(scroll)
+        main_layout.addWidget(container)
 
         # 恢复上次配置
         self._restore_settings()
@@ -965,7 +963,96 @@ class StatsTab(QWidget):
             self.table.setItem(i, 5, QTableWidgetItem(f"{row.get('centroid_depth', 0):.1f} m"))
 
 
-class PropertyPanel(QTabWidget):
+class DisplaySettingsPanel(QWidget):
+    """Echogram 显示设置，和处理参数分离，修改后立即更新画面。"""
+
+    display_params_changed = Signal(str, float, float)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QFormLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        self.combo_cmap = QComboBox()
+        self.combo_cmap.setObjectName("displayColorMap")
+        self.combo_cmap.addItems(["jet", "viridis", "inferno", "gray"])
+        layout.addRow(T("toolbar_color"), self.combo_cmap)
+
+        self.spin_vmin = QDoubleSpinBox()
+        self.spin_vmin.setObjectName("displayVmin")
+        self.spin_vmin.setRange(-100.0, 0.0)
+        self.spin_vmin.setValue(-70.0)
+        self.spin_vmin.setSuffix(" dB")
+        layout.addRow(T("toolbar_sv_min"), self.spin_vmin)
+
+        self.spin_vmax = QDoubleSpinBox()
+        self.spin_vmax.setObjectName("displayVmax")
+        self.spin_vmax.setRange(-100.0, 0.0)
+        self.spin_vmax.setValue(-20.0)
+        self.spin_vmax.setSuffix(" dB")
+        layout.addRow(T("toolbar_sv_max"), self.spin_vmax)
+
+        self.combo_cmap.currentTextChanged.connect(self._emit_changed)
+        self.spin_vmin.valueChanged.connect(self._emit_changed)
+        self.spin_vmax.valueChanged.connect(self._emit_changed)
+
+    def _emit_changed(self, *_args):
+        vmin = min(self.spin_vmin.value(), self.spin_vmax.value() - 0.1)
+        vmax = max(self.spin_vmax.value(), self.spin_vmin.value() + 0.1)
+        self.display_params_changed.emit(self.combo_cmap.currentText(), vmin, vmax)
+
+    def set_values(self, cmap: str, vmin: float, vmax: float) -> None:
+        """同步工具栏的显示设置，避免两处 UI 状态不一致。"""
+        self.combo_cmap.blockSignals(True)
+        self.spin_vmin.blockSignals(True)
+        self.spin_vmax.blockSignals(True)
+        self.combo_cmap.setCurrentText(cmap)
+        self.spin_vmin.setValue(vmin)
+        self.spin_vmax.setValue(vmax)
+        self.combo_cmap.blockSignals(False)
+        self.spin_vmin.blockSignals(False)
+        self.spin_vmax.blockSignals(False)
+
+
+class AccordionSection(QWidget):
+    """参考图风格的可折叠属性区块，内容仍由现有参数控件提供。"""
+
+    def __init__(self, title: str, icon_name: str, content: QWidget, parent=None):
+        super().__init__(parent)
+        self.setObjectName("accordionSection")
+        self._content = content
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.header = QToolButton(self)
+        self.header.setObjectName("accordionHeader")
+        self.header.setText(title)
+        self.header.setIcon(icon(icon_name))
+        self.header.setIconSize(QSize(20, 20))
+        self.header.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.header.setCheckable(True)
+        self.header.setChecked(True)
+        self.header.setToolTip(title)
+        self.header.toggled.connect(self.set_expanded)
+        layout.addWidget(self.header)
+
+        self.body = QWidget(self)
+        body_layout = QVBoxLayout(self.body)
+        body_layout.setContentsMargins(10, 8, 10, 10)
+        body_layout.setSpacing(6)
+        body_layout.addWidget(content)
+        layout.addWidget(self.body)
+
+    def set_expanded(self, expanded: bool) -> None:
+        self.body.setVisible(expanded)
+        self.header.setProperty("expanded", expanded)
+        self.header.style().unpolish(self.header)
+        self.header.style().polish(self.header)
+
+
+class PropertyPanel(QWidget):
     """右侧属性面板 — 参照 Echoview Properties 面板"""
 
     noise_params_changed = Signal(dict)
@@ -986,17 +1073,64 @@ class PropertyPanel(QTabWidget):
     draw_bottom_clicked = Signal()
     update_bottom_clicked = Signal()
     apply_all_clicked = Signal()
+    export_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("PropertyPanel")
 
         self.file_info = FileInfoTab()
+        self.display = DisplaySettingsPanel()
         self.processing = ProcessingTab()
         self.stats = StatsTab()
+        self.processing.btn_apply_all.hide()
 
-        self.addTab(self.file_info, T("tab_file_info"))
-        self.addTab(self.processing, T("tab_processing"))
-        self.addTab(self.stats, T("tab_statistics"))
+        scroll = QScrollArea(self)
+        scroll.setObjectName("propertyScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        container = QWidget()
+        content_layout = QVBoxLayout(container)
+        content_layout.setContentsMargins(8, 8, 8, 8)
+        content_layout.setSpacing(8)
+
+        processing_overview = self._bundle_processing_widgets(
+            self.processing.preset_group,
+            self.processing.noise_group,
+            self.processing.surface_group,
+        )
+        export_panel = self._make_export_panel()
+        annotation_panel = self._make_annotation_panel()
+        section_specs = (
+            ("file_info", T("tab_file_info"), "file_info", self.file_info),
+            ("display", T("panel_display_settings"), "display", self.display),
+            ("processing", T("tab_processing"), "processing", processing_overview),
+            ("bottom", T("bottom_group"), "bottom", self.processing.bottom_group),
+            ("export", T("toolbar_export"), "export", export_panel),
+            ("annotations", T("panel_annotations"), "ruler", annotation_panel),
+            ("advanced", T("panel_advanced_analysis"), "advanced", self.processing),
+        )
+        self._sections = {}
+        for section_id, title, icon_name, widget in section_specs:
+            section = AccordionSection(title, icon_name, widget)
+            section.setObjectName(f"accordion_{section_id}")
+            self._sections[section_id] = section
+            content_layout.addWidget(section)
+        content_layout.addStretch()
+        scroll.setWidget(container)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(scroll)
+        self.setStyleSheet(
+            "QScrollArea { background: #15191e; border: none; }"
+            "QWidget#accordionSection { background: #1b2128; border: 1px solid #34414d; "
+            "border-radius: 6px; }"
+            "QToolButton#accordionHeader { background: #1b2128; color: #00cbea; border: none; "
+            "padding: 9px 10px; text-align: left; font-weight: 600; font-size: 13px; }"
+            "QToolButton#accordionHeader:hover { background: #222b34; }"
+        )
 
         # 转发信号
         self.processing.noise_params_changed.connect(self.noise_params_changed)
@@ -1016,7 +1150,48 @@ class PropertyPanel(QTabWidget):
         self.processing.transect_split_clicked.connect(self.transect_split_clicked)
         self.processing.integration_clicked.connect(self.integration_clicked)
         self.processing.real_sed_clicked.connect(self.real_sed_clicked)
-        self.processing.apply_all_clicked.connect(self.apply_all_clicked)
+
+    @staticmethod
+    def _take_processing_widget(widget: QWidget) -> QWidget:
+        """把已有参数控件从旧容器转入参考图的分区，不改变任何信号。"""
+        parent = widget.parentWidget()
+        if parent is not None and parent.layout() is not None:
+            parent.layout().removeWidget(widget)
+        return widget
+
+    def _bundle_processing_widgets(self, *widgets: QWidget) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        for widget in widgets:
+            layout.addWidget(self._take_processing_widget(widget))
+        return panel
+
+    def _make_export_panel(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(QLabel(T("panel_export_hint")))
+        button = QPushButton(T("toolbar_export"))
+        button.setProperty("cssClass", "primary")
+        button.clicked.connect(self.export_clicked)
+        layout.addWidget(button)
+        return panel
+
+    def _make_annotation_panel(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        layout.addWidget(QLabel(T("panel_annotation_tools_hint")))
+        layout.addWidget(QLabel(T("panel_annotation_result_hint")))
+        return panel
+
+    def section_ids(self) -> tuple[str, ...]:
+        """返回属性区顺序，供布局回归测试和后续功能扩展使用。"""
+        return tuple(self._sections)
 
     def save_settings(self):
         """保存当前配置"""

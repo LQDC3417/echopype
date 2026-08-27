@@ -132,7 +132,8 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
     def closeEvent(self, event):
         """窗口关闭：等待/停止后台 worker，避免 QThread destroyed 崩溃"""
         worker = self._current_worker
-        if worker is not None and worker.isRunning():
+        is_running = getattr(worker, "isRunning", None)
+        if callable(is_running) and is_running():
             worker.wait(5000)  # 最多等 5 秒
         super().closeEvent(event)
 
@@ -302,7 +303,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.std_toolbar = StandardToolBar(self)
         self.addToolBar(self.std_toolbar)
         self.echo_toolbar = EchogramToolBar(self)
-        self.addToolBarBreak()
         self.addToolBar(self.echo_toolbar)
 
         # ── 统计对话框 ──
@@ -316,6 +316,9 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.echogram = EchogramRenderer()
         self.nav_bar = EchogramNavBar()
         self.view_tabs = QTabWidget()
+        self.view_tabs.setDocumentMode(True)
+        self.view_tabs.setUsesScrollButtons(True)
+        self.view_tabs.setObjectName("documentTabs")
         central_widget = QWidget()
         central_layout = QVBoxLayout(central_widget)
         central_layout.setContentsMargins(0, 0, 0, 0)
@@ -336,6 +339,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.dock_left.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
         )
+        self._hide_dock_title(self.dock_left)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_left)
 
         # ── 右侧 Dock：属性面板 ──
@@ -346,6 +350,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.dock_right.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
         )
+        self._hide_dock_title(self.dock_right)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock_right)
 
         # ── 底部 Dock：区域浏览器 + 消息日志 tab ──
@@ -364,12 +369,20 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.dock_bottom.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
         )
+        self._hide_dock_title(self.dock_bottom)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_bottom)
 
         # 默认尺寸：左 260px，右 300px，底部 160px
-        self.resizeDocks([self.dock_left], [260], Qt.Horizontal)
-        self.resizeDocks([self.dock_right], [300], Qt.Horizontal)
+        self.resizeDocks([self.dock_left], [240], Qt.Horizontal)
+        self.resizeDocks([self.dock_right], [360], Qt.Horizontal)
         self.resizeDocks([self.dock_bottom], [160], Qt.Vertical)
+
+    @staticmethod
+    def _hide_dock_title(dock: QDockWidget) -> None:
+        """去除传统 Dock 标题栏，保留停靠、缩放和菜单中的显示控制。"""
+        title_bar = QWidget(dock)
+        title_bar.setFixedHeight(0)
+        dock.setTitleBarWidget(title_bar)
 
     # ═══════════════════════════════════════════════════════
     # 消息日志（线程安全）
@@ -418,9 +431,21 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         # Echogram 工具栏
         self.echo_toolbar.mode_changed.connect(self._on_mode_changed)
         self.echo_toolbar.mode_changed.connect(lambda m: self.echogram.set_mouse_mode(m.value))
-        self.echo_toolbar.colormap_changed.connect(self.echogram.set_colormap)
+        self.echo_toolbar.colormap_changed.connect(self._on_toolbar_colormap_changed)
+        self.property_panel.display.display_params_changed.connect(
+            self._on_display_params_changed
+        )
         self.echo_toolbar.reset_view_clicked.connect(self._reset_view)
         self.echo_toolbar.fit_view_clicked.connect(self._fit_view)
+        self._act_noise.toggled.connect(
+            lambda visible: self.echogram.set_overlay_visible("noise", visible)
+        )
+        self._act_school.toggled.connect(
+            lambda visible: self.echogram.set_overlay_visible("school", visible)
+        )
+        self._act_bottom.toggled.connect(
+            lambda visible: self.echogram.set_overlay_visible("bottom", visible)
+        )
 
         # Echogram 交互
         self.echogram.mouse_moved.connect(self.statusbar.set_coords)
@@ -458,13 +483,15 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.property_panel.detect_bottom_clicked.connect(self._detect_bottom)
         self.property_panel.draw_bottom_clicked.connect(self._start_draw_bottom)
         self.property_panel.update_bottom_clicked.connect(self._on_update_bottom)
-        self.property_panel.apply_all_clicked.connect(self._apply_all_params)
+        self.property_panel.export_clicked.connect(self._export)
 
         # 变量列表
         self.variable_list.variable_selected.connect(self._on_variable_selected)
 
         # 区域面板（信号通过 RegionBrowserWidget 转发）
         self.region_browser.region_deleted.connect(self._on_region_deleted)
+
+        self._set_overlay_actions_enabled(False)
 
     # ═══════════════════════════════════════════════════════
     # 配置
@@ -521,7 +548,8 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
     def _on_worker_error(self, msg):
         self._run_all_chain = False
         self.statusbar.hide_progress()
-        self.statusbar.set_status(f"{T('dialog_error')}: {msg}")
+        summary = next((line.strip() for line in reversed(msg.splitlines()) if line.strip()), msg)
+        self.statusbar.set_status(f"{T('dialog_error')}: {summary[:180]}")
         self._append_error_message(msg)
 
     def _connect_latest_worker(self, worker, finished=None):
@@ -569,6 +597,19 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._message_text.appendPlainText(msg.rstrip())
         self._bottom_tabs.setCurrentIndex(1)
         self.dock_bottom.show()
+
+    def _on_toolbar_colormap_changed(self, cmap: str, vmin: float, vmax: float) -> None:
+        self.property_panel.display.set_values(cmap, vmin, vmax)
+        self.echogram.set_colormap(cmap, vmin, vmax)
+
+    def _on_display_params_changed(self, cmap: str, vmin: float, vmax: float) -> None:
+        self.echo_toolbar.set_display_values(cmap, vmin, vmax)
+        self.echogram.set_colormap(cmap, vmin, vmax)
+
+    def _set_overlay_actions_enabled(self, enabled: bool) -> None:
+        """无数据时禁用结果开关，导入成功后恢复可用。"""
+        for action in (self._act_noise, self._act_school, self._act_bottom):
+            action.setEnabled(enabled)
 
     # ═══════════════════════════════════════════════════════
     # 文件操作 — 批量导入

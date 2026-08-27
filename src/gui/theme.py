@@ -13,7 +13,7 @@ DARK_THEME = """
    ═══════════════════════════════════════════════════════════ */
 
 QMainWindow, QWidget {
-    background-color: #1e1e22;
+    background-color: #15191e;
     color: #e0e0e6;
     font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
     font-size: 12px;
@@ -65,36 +65,38 @@ QMenu::item:disabled {
 
 /* ── 工具栏 ── */
 QToolBar {
-    background-color: #26262c;
-    border-bottom: 1px solid #3a3a42;
-    padding: 3px;
-    spacing: 2px;
+    background-color: #15191e;
+    border-bottom: 1px solid #34414d;
+    padding: 5px 8px;
+    spacing: 4px;
 }
 QToolBar QToolButton {
     background-color: transparent;
     color: #e0e0e6;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    padding: 4px 10px;
-    margin: 1px;
+    border: 1px solid #34414d;
+    border-radius: 5px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 3px;
+    margin: 0;
     font-size: 12px;
 }
 QToolBar QToolButton:hover {
-    background-color: #2d2d35;
-    border-color: #00b4d8;
+    background-color: #222b34;
+    border-color: #00cbea;
 }
 QToolBar QToolButton:pressed {
-    background-color: #383842;
+    background-color: #293641;
 }
 QToolBar QToolButton:checked {
-    background-color: #00b4d8;
-    color: #06262a;
-    border-color: #00b4d8;
+    background-color: #113743;
+    color: #00cbea;
+    border-color: #00cbea;
 }
 QToolBar::separator {
     width: 1px;
-    background: #3a3a42;
-    margin: 4px 4px;
+    background: #34414d;
+    margin: 5px 6px;
 }
 
 /* ── 下拉框 ── */
@@ -201,20 +203,20 @@ QTableWidget::item:selected {
 
 /* ── 分组框 ── */
 QGroupBox {
-    color: #00b4d8;
-    border: 1px solid #3a3a42;
+    color: #cdd8e1;
+    border: 1px solid #34414d;
     border-radius: 6px;
-    margin-top: 12px;
+    margin-top: 8px;
     padding-top: 16px;
     font-weight: bold;
     font-size: 11px;
-    background-color: #26262c;
+    background-color: #1b2128;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
     left: 10px;
     padding: 0 6px;
-    color: #00b4d8;
+    color: #8fa2b1;
 }
 
 /* ── 数值输入 ── */
@@ -300,26 +302,26 @@ QSplitter::handle:hover {
 
 /* ── 标签页 ── */
 QTabWidget::pane {
-    border: 1px solid #3a3a42;
-    border-radius: 6px;
-    background-color: #26262c;
+    border: none;
+    border-radius: 0;
+    background-color: #15191e;
     top: -1px;
 }
 QTabBar::tab {
-    background-color: #2a2a30;
-    color: #8a8a92;
-    border: 1px solid #3a3a42;
+    background-color: #15191e;
+    color: #8fa2b1;
+    border: 1px solid #34414d;
     border-bottom: none;
     border-top-left-radius: 6px;
     border-top-right-radius: 6px;
-    padding: 6px 16px;
+    padding: 7px 16px;
     margin-right: 2px;
     font-size: 11px;
 }
 QTabBar::tab:selected {
-    background-color: #26262c;
-    color: #00b4d8;
-    border-bottom: 2px solid #00b4d8;
+    background-color: #1b2128;
+    color: #d7e1e8;
+    border-bottom: 2px solid #00cbea;
 }
 QTabBar::tab:hover:!selected {
     background-color: #2d2d35;
@@ -486,8 +488,8 @@ QDockWidget {
     titlebar-close-icon: none;
 }
 QDockWidget::title {
-    background-color: #2a2a30;
-    color: #8a8a92;
+    background-color: #15191e;
+    color: #8fa2b1;
     padding: 4px 8px;
     border-bottom: 1px solid #3a3a42;
     text-align: left;

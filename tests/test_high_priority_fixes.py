@@ -7,7 +7,11 @@ from pathlib import Path
 
 from src.core.integration import IntegrationGrid, integrate
 from src.core.merge import _resample_sv
-from src.core.noise import apply_noise_reduction, estimate_noise_de_robertis
+from src.core.noise import (
+    _legacy_apply_noise_reduction,
+    apply_noise_reduction,
+    estimate_noise_de_robertis,
+)
 from src.core.export import export_to_zarr
 from src.core import acoustic
 from src.gui.handlers.file_handlers import FileMixin
@@ -84,6 +88,23 @@ def test_noise_reduction_keeps_channel_specific_results():
 
     means = np.nanmean(result["Sv_corrected"].values, axis=(1, 2))
     assert means.tolist() == pytest.approx([-30.0, -10.0])
+
+
+def test_legacy_noise_reduction_uses_configured_threshold_in_passive_mode():
+    ds = _make_sv_dataset([[-40.0, -42.0], [-41.0, -43.0]])
+
+    result = _legacy_apply_noise_reduction(
+        ds,
+        {
+            "noise_removal": {
+                "mode": "passive",
+                "snr_threshold": -999.0,
+                "low_Sv_dB": -150.0,
+            }
+        },
+    )
+
+    assert result["Sv_corrected"].values.tolist() == ds["Sv"].values.tolist()
 
 
 def test_merge_resampling_handles_descending_echo_range():
@@ -172,7 +193,7 @@ def test_zarr_export_refuses_to_remove_existing_output(tmp_path, monkeypatch):
     assert marker.exists()
 
 
-def test_process_all_files_reports_partial_open_failure(monkeypatch):
+def test_process_all_files_keeps_successes_and_records_partial_open_failure(monkeypatch):
     good = Path("good.raw")
     bad = Path("bad.raw")
     monkeypatch.setattr(acoustic, "load_raw_files", lambda config: [good, bad])
@@ -186,5 +207,7 @@ def test_process_all_files_reports_partial_open_failure(monkeypatch):
     monkeypatch.setattr(acoustic, "open_single_file", open_with_failure)
     monkeypatch.setattr(acoustic, "process_single_file", lambda ed, config: _make_sv_dataset([[1.0]]))
 
-    with pytest.raises(RuntimeError, match="bad.raw"):
-        acoustic.process_all_files({})
+    result = acoustic.process_all_files({})
+
+    assert result["Sv"].values.tolist() == [[1.0]]
+    assert result.attrs["failed_raw_files"] == ["bad.raw"]

@@ -13,13 +13,15 @@ from enum import Enum
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QComboBox,
     QLabel,
     QSlider,
-    QStyle,
     QToolBar,
+    QToolButton,
 )
 
+from src.gui.icons import icon
 from src.gui.i18n import T
 
 
@@ -49,41 +51,35 @@ class StandardToolBar(QToolBar):
         super().__init__("Standard", parent)
         self.setMovable(False)
         self.setObjectName("StandardToolBar")
-        self.setIconSize(QSize(16, 16))
-        self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.setIconSize(QSize(22, 22))
+        self.setToolButtonStyle(Qt.ToolButtonIconOnly)
 
         # ─── 文件操作 ───
-        self.addAction(self._act(T("toolbar_import"), self.open_clicked, "Ctrl+I",
-                                 QStyle.SP_DialogOpenButton))
-        self.addAction(self._act(T("toolbar_open_config"), self.open_config_clicked, "Ctrl+O",
-                                 QStyle.SP_DirOpenIcon))
-        self.addAction(self._act(T("toolbar_save_config"), self.save_config_clicked, "Ctrl+Shift+S",
-                                 QStyle.SP_DialogSaveButton))
+        self.addAction(self._act(T("toolbar_import"), self.open_clicked, "import", "Ctrl+I"))
+        self.addAction(self._act(T("toolbar_open_config"), self.open_config_clicked, "open", "Ctrl+O"))
+        self.addAction(self._act(T("toolbar_save_config"), self.save_config_clicked, "save", "Ctrl+Shift+S"))
         self.addSeparator()
 
         # ─── 流程控制 ───
-        self._run_act = self._act(T("toolbar_run_all"), self.run_clicked, "F5",
-                                  QStyle.SP_MediaPlay)
+        self._run_act = self._act(T("toolbar_run_all"), self.run_clicked, "run", "F5")
         self.addAction(self._run_act)
         self.addSeparator()
 
         # ─── 撤销/重做 ───
-        self.addAction(self._act(T("toolbar_undo"), self.undo_clicked, "Ctrl+Z",
-                                 QStyle.SP_ArrowBack))
-        self.addAction(self._act(T("toolbar_redo"), self.redo_clicked, "Ctrl+Y",
-                                 QStyle.SP_ArrowForward))
+        self.addAction(self._act(T("toolbar_undo"), self.undo_clicked, "undo", "Ctrl+Z"))
+        self.addAction(self._act(T("toolbar_redo"), self.redo_clicked, "redo", "Ctrl+Y"))
         self.addSeparator()
 
         # ─── 导出 ───
-        self.addAction(self._act(T("toolbar_export"), self.export_clicked, "Ctrl+E",
-                                 QStyle.SP_DialogSaveButton))
+        self.addAction(self._act(T("toolbar_export"), self.export_clicked, "export", "Ctrl+E"))
 
-    def _act(self, text, signal, shortcut=None, icon_standard=None):
+    def _act(self, text, signal, icon_name, shortcut=None):
         a = QAction(text, self)
+        a.setIcon(icon(icon_name))
+        a.setToolTip(text)
+        a.setStatusTip(text)
         if shortcut:
             a.setShortcut(shortcut)
-        if icon_standard is not None:
-            a.setIcon(self.style().standardIcon(icon_standard))
         a.triggered.connect(signal)
         return a
 
@@ -105,39 +101,48 @@ class EchogramToolBar(QToolBar):
         super().__init__("Echogram", parent)
         self.setMovable(False)
         self.setObjectName("EchogramToolBar")
-        self.setIconSize(QSize(16, 16))
-        self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.setIconSize(QSize(22, 22))
+        self.setToolButtonStyle(Qt.ToolButtonIconOnly)
 
         # ─── 鼠标模式 ───
-        self.addWidget(self._label(T("toolbar_mode")))
         self.mode_combo = QComboBox()
         self._update_mode_items()
-        self.mode_combo.setMinimumWidth(100)
-        self.mode_combo.currentIndexChanged.connect(
-            lambda idx: self.mode_changed.emit(MouseMode(idx))
-        )
-        self.addWidget(self.mode_combo)
+        self.mode_combo.hide()
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
+        self._mode_buttons = {}
+        for mode, icon_name, label in (
+            (MouseMode.NAVIGATE, "pointer", T("mode_navigate")),
+            (MouseMode.SELECT_NOISE, "noise", T("mode_select_noise")),
+            (MouseMode.DRAW_BOTTOM, "bottom", T("mode_draw_bottom")),
+            (MouseMode.INSPECT, "inspect", T("mode_inspect")),
+        ):
+            self._add_mode_button(mode, icon_name, label)
+        self.pan_button = self._add_mode_button(MouseMode.PAN, "pan_open", T("mode_pan"))
+        self.pan_button.setObjectName("panToolButton")
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_index_changed)
 
         self.addSeparator()
 
         # ─── 视图控制 ───
-        self.addAction(self._act(T("toolbar_reset"), self.reset_view_clicked,
-                                 None, QStyle.SP_BrowserReload))
-        self.addAction(self._act(T("toolbar_fit"), self.fit_view_clicked,
-                                 None, QStyle.SP_ArrowUp))
+        self.addAction(self._act(T("toolbar_reset"), self.reset_view_clicked, "reset"))
+        self.addAction(self._act(T("toolbar_fit"), self.fit_view_clicked, "fit"))
 
         self.addSeparator()
 
         # ─── 文件翻页 ───
-        self.addAction(self._act(T("toolbar_prev"), self.prev_file_clicked,
-                                 None, QStyle.SP_ArrowLeft))
-        self.addAction(self._act(T("toolbar_next"), self.next_file_clicked,
-                                 None, QStyle.SP_ArrowRight))
+        self.addAction(self._act(T("toolbar_prev"), self.prev_file_clicked, "prev"))
+        self.addAction(self._act(T("toolbar_next"), self.next_file_clicked, "next"))
 
         self.addSeparator()
 
         # ─── 颜色映射 ───
-        self.addWidget(self._label(T("toolbar_color")))
+        color_icon = QToolButton(self)
+        color_icon.setIcon(icon("palette"))
+        color_icon.setToolTip(T("toolbar_color"))
+        color_icon.setAccessibleName(T("toolbar_color"))
+        color_icon.setEnabled(False)
+        self.addWidget(color_icon)
         self.cmap_combo = QComboBox()
         self.cmap_combo.addItems(["jet", "viridis", "inferno", "gray"])
         self.cmap_combo.setMinimumWidth(80)
@@ -190,18 +195,46 @@ class EchogramToolBar(QToolBar):
             T("mode_pan"),
         ])
         self.mode_combo.setCurrentIndex(current if current >= 0 else 0)
+        if hasattr(self, "pan_button"):
+            self.pan_button.setChecked(self.mode_combo.currentIndex() == MouseMode.PAN.value)
         self.mode_combo.blockSignals(False)
+
+    def _on_mode_index_changed(self, index: int):
+        button = getattr(self, "_mode_buttons", {}).get(MouseMode(index))
+        if button is not None:
+            button.setChecked(True)
+        self.mode_changed.emit(MouseMode(index))
+
+    def _add_mode_button(self, mode: MouseMode, icon_name: str, label: str) -> QToolButton:
+        button = QToolButton(self)
+        button.setCheckable(True)
+        button.setIcon(icon(icon_name))
+        button.setIconSize(QSize(22, 22))
+        button.setToolTip(label)
+        button.setAccessibleName(label)
+        button.clicked.connect(lambda checked=False, selected=mode: self._select_mode(selected))
+        self._mode_group.addButton(button, mode.value)
+        self._mode_buttons[mode] = button
+        self.addWidget(button)
+        return button
+
+    def _select_mode(self, mode: MouseMode) -> None:
+        """图标工具与保留的模式选择状态始终同步。"""
+        self._mode_buttons[mode].setChecked(True)
+        if self.mode_combo.currentIndex() != mode.value:
+            self.mode_combo.setCurrentIndex(mode.value)
 
     def retranslate_ui(self):
         """重新翻译界面文本（语言切换时调用）"""
         self._update_mode_items()
 
-    def _act(self, text, signal, shortcut=None, icon_standard=None):
+    def _act(self, text, signal, icon_name, shortcut=None):
         a = QAction(text, self)
+        a.setIcon(icon(icon_name))
+        a.setToolTip(text)
+        a.setStatusTip(text)
         if shortcut:
             a.setShortcut(shortcut)
-        if icon_standard is not None:
-            a.setIcon(self.style().standardIcon(icon_standard))
         a.triggered.connect(signal)
         return a
 
@@ -222,4 +255,18 @@ class EchogramToolBar(QToolBar):
         self.lbl_vmax.setText(str(vmax))
         cmap = self.cmap_combo.currentText()
         self.colormap_changed.emit(cmap, vmin, vmax)
+
+    def set_display_values(self, cmap: str, vmin: float, vmax: float) -> None:
+        """同步右侧显示设置，避免工具栏和属性面板各自维护一份状态。"""
+        self.cmap_combo.blockSignals(True)
+        self.slider_vmin.blockSignals(True)
+        self.slider_vmax.blockSignals(True)
+        self.cmap_combo.setCurrentText(cmap)
+        self.slider_vmin.setValue(round(vmin))
+        self.slider_vmax.setValue(round(vmax))
+        self.cmap_combo.blockSignals(False)
+        self.slider_vmin.blockSignals(False)
+        self.slider_vmax.blockSignals(False)
+        self.lbl_vmin.setText(str(round(vmin)))
+        self.lbl_vmax.setText(str(round(vmax)))
 

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QInputDialog, QMessageBox
 from src.core.utils import squeeze_sv
 from src.gui.workers import (
     ComputeSvWorker,
+    BottomDetectionResult,
     DetectSchoolsWorker,
     DetectSeafloorWorker,
     IntegrationWorker,
@@ -53,14 +54,17 @@ class ProcessingMixin:
         self._noise_timer.start()
 
     def _on_bottom_params_changed(self, _params):
+        self._mark_results_stale("schools", "integration", "real_sed")
         if self._ds_Sv is not None:
             self._schedule_parameter_apply("bottom", self._detect_bottom)
 
     def _on_school_params_changed(self, _params):
+        self._mark_results_stale("integration", "real_sed")
         if self._ds_Sv is not None:
             self._schedule_parameter_apply("schools", self._detect_schools)
 
     def _on_integration_params_changed(self, _params):
+        self._mark_results_stale("integration")
         if self._ds_Sv is not None:
             self._schedule_parameter_apply("integration", self._run_integration)
 
@@ -153,29 +157,34 @@ class ProcessingMixin:
         self._connect_latest_worker(worker, self._on_bottom_detected)
         worker.progress.connect(self.statusbar.set_status)
         worker.start()
+    def _on_bottom_detected(self, bottom_result):
+        if isinstance(bottom_result, BottomDetectionResult):
+            bottom = bottom_result.indices
+            valid_count = bottom_result.valid_count
+            total_count = bottom_result.total_count
+        else:
+            # 兼容旧版 worker 返回的 ndarray。
+            bottom = bottom_result
+            valid_count = int(np.isfinite(bottom).sum())
+            total_count = int(np.asarray(bottom).size)
 
-    def _on_bottom_detected(self, bottom):
-        bottom = np.asarray(bottom, dtype=np.float32).reshape(-1)
+        self._bottom_line = np.asarray(bottom, dtype=np.float32).reshape(-1)
         expected = int(self._ds_Sv.sizes.get("ping_time", 0))
-        if expected and len(bottom) != expected:
+        if expected and len(self._bottom_line) != expected:
             self._on_worker_error(
-                f"底线检测结果长度异常：得到 {len(bottom)} 个点，期望 {expected} 个点"
+                f"底线检测结果长度异常：得到 {len(self._bottom_line)} 个点，期望 {expected} 个点"
             )
             return
-
-        self._stale_results.discard("bottom")
-        self._bottom_line = bottom
         self.echogram.set_bottom_line(self._bottom_line)
         self.statusbar.hide_progress()
 
-        valid_count = int(np.isfinite(bottom).sum())
         if valid_count == 0:
-            self.statusbar.set_status("底线检测完成，但没有有效底线点")
-            self._append_error_message(
-                "底线检测完成，但结果全部为空。请检查 Sv 数据、表线深度和底线检测参数。"
-            )
+            message = f"底线检测完成，但结果全部为空：有效点 0/{total_count}"
+            self.statusbar.set_status(message)
+            self._append_error_message(message)
             return
 
+        self._stale_results.discard("bottom")
         # 缓存底线到当前文件
         self._save_file_state()
 
@@ -323,6 +332,7 @@ class ProcessingMixin:
         # 将 mask 转换为 DataFrame
         schools_df = schools_to_dataframe(mask_da, self._ds_Sv)
         self._schools_df = schools_df
+        self._stale_results.discard("schools")
         self.stats_dialog.update_schools(schools_df)
         self.property_panel.stats.update_schools(schools_df)
         self.statusbar.hide_progress()
@@ -405,6 +415,7 @@ class ProcessingMixin:
         """回声积分完成 → 展示结果表格 + echogram 网格叠加"""
         self._stale_results.discard("integration")
         self._integration_result = result
+        self._stale_results.discard("integration")
         self.statusbar.hide_progress()
         df = result.to_dataframe()
         self._integration_df = df

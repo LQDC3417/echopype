@@ -56,6 +56,8 @@ class FileMixin:
             self.echogram.set_bottom_line(None)
             self.echogram.set_noise_mask(None)
             self.echogram.set_school_mask(None)
+        if hasattr(self, "_set_overlay_actions_enabled"):
+            self._set_overlay_actions_enabled(False)
 
     """文件操作：EP 项目新建/打开/保存、配置、变量列表"""
 
@@ -317,6 +319,7 @@ class FileMixin:
         sv = optimize_array_dtype(sv)
         self._ds_Sv = ds_Sv
         self._ds_Sv_analysis = None
+        self._set_overlay_actions_enabled(True)
         self._update_variable_list(ds_Sv, sv)
         self.echogram.set_data(sv)
         # 底部导航缩略图

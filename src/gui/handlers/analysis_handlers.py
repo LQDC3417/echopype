@@ -141,6 +141,7 @@ class AnalysisMixin:
             QMessageBox.information(self, T("msg_real_sed_done"), T("msg_real_sed_none"))
             return
         self._real_sed_df = targets_df
+        self._stale_results.discard("real_sed")
         self.stats_dialog.update_real_sed(grid_df)
         self.echogram.set_single_targets(targets_df)
         self.statusbar.set_status(T("msg_real_sed_done", n=n))

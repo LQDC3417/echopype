@@ -40,6 +40,14 @@ class MergeResult:
     failed_files: tuple[FileFailure, ...]
 
 
+@dataclass(frozen=True)
+class BottomDetectionResult:
+    """底线检测结果及有效点统计。"""
+
+    indices: object
+    valid_count: int
+    total_count: int
+    method: str
 def apply_manual_mask(ds, manual_mask):
     """将手动框选的噪声 mask 应用到数据集（写入 Sv_corrected，不覆盖原始 Sv）。"""
     if manual_mask is None:
@@ -278,12 +286,18 @@ class DetectSeafloorWorker(QThread):
             if er is None:
                 er = np.arange(self.ds_Sv.sizes["range_sample"], dtype=float)
 
-            bottom_indices = bottom_depth_to_sample_indices(bottom_depth_m, er)
-            valid_count = int(np.isfinite(bottom_indices).sum())
-            self.progress.emit(
-                f"底线检测完成：{valid_count}/{len(bottom_indices)} 个有效点"
+            bottom_indices = np.asarray(
+                bottom_depth_to_sample_indices(bottom_depth_m, er),
+                dtype=np.float32,
             )
-            self.finished.emit(bottom_indices)
+            self.finished.emit(
+                BottomDetectionResult(
+                    indices=bottom_indices,
+                    valid_count=int(np.isfinite(bottom_indices).sum()),
+                    total_count=int(bottom_indices.size),
+                    method=method,
+                )
+            )
         except Exception:
             self.error.emit(traceback.format_exc())
 
