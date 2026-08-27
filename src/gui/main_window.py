@@ -303,7 +303,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.std_toolbar = StandardToolBar(self)
         self.addToolBar(self.std_toolbar)
         self.echo_toolbar = EchogramToolBar(self)
-        self.addToolBarBreak()
         self.addToolBar(self.echo_toolbar)
 
         # ── 统计对话框 ──
@@ -317,6 +316,9 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.echogram = EchogramRenderer()
         self.nav_bar = EchogramNavBar()
         self.view_tabs = QTabWidget()
+        self.view_tabs.setDocumentMode(True)
+        self.view_tabs.setUsesScrollButtons(True)
+        self.view_tabs.setObjectName("documentTabs")
         central_widget = QWidget()
         central_layout = QVBoxLayout(central_widget)
         central_layout.setContentsMargins(0, 0, 0, 0)
@@ -337,6 +339,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.dock_left.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
         )
+        self._hide_dock_title(self.dock_left)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_left)
 
         # ── 右侧 Dock：属性面板 ──
@@ -347,6 +350,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.dock_right.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
         )
+        self._hide_dock_title(self.dock_right)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock_right)
 
         # ── 底部 Dock：区域浏览器 + 消息日志 tab ──
@@ -365,12 +369,20 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.dock_bottom.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable
         )
+        self._hide_dock_title(self.dock_bottom)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_bottom)
 
         # 默认尺寸：左 260px，右 300px，底部 160px
-        self.resizeDocks([self.dock_left], [260], Qt.Horizontal)
-        self.resizeDocks([self.dock_right], [300], Qt.Horizontal)
+        self.resizeDocks([self.dock_left], [240], Qt.Horizontal)
+        self.resizeDocks([self.dock_right], [360], Qt.Horizontal)
         self.resizeDocks([self.dock_bottom], [160], Qt.Vertical)
+
+    @staticmethod
+    def _hide_dock_title(dock: QDockWidget) -> None:
+        """去除传统 Dock 标题栏，保留停靠、缩放和菜单中的显示控制。"""
+        title_bar = QWidget(dock)
+        title_bar.setFixedHeight(0)
+        dock.setTitleBarWidget(title_bar)
 
     # ═══════════════════════════════════════════════════════
     # 消息日志（线程安全）
@@ -471,7 +483,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.property_panel.detect_bottom_clicked.connect(self._detect_bottom)
         self.property_panel.draw_bottom_clicked.connect(self._start_draw_bottom)
         self.property_panel.update_bottom_clicked.connect(self._on_update_bottom)
-        self.property_panel.apply_all_clicked.connect(self._apply_all_params)
+        self.property_panel.export_clicked.connect(self._export)
 
         # 变量列表
         self.variable_list.variable_selected.connect(self._on_variable_selected)

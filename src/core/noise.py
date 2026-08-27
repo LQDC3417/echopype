@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 import xarray as xr
 
-from src.core.utils import get_sv_array, get_vertical_coords
+from src.core.utils import get_vertical_coords
 
 logger = logging.getLogger("fish_acoustics")
 
@@ -69,11 +69,16 @@ def estimate_noise_de_robertis(
     """
     n_pings, n_samples = Sv.shape
 
+    if ping_num <= 0 or range_sample_num <= 0:
+        raise ValueError("ping_num and range_sample_num must be positive")
+    ping_num = min(int(ping_num), n_pings)
+    range_sample_num = min(int(range_sample_num), n_samples)
+
     # 1. 转换为线性域（功率）
     Sv_linear = 10 ** (Sv / 10)
     Sv_linear = np.nan_to_num(Sv_linear, nan=0.0, posinf=0.0, neginf=0.0)
 
-    # 2. 计算分块数
+    # 2. 计算分块数；窗口超过数据尺寸时使用整个有效轴
     n_ping_bins = max(1, n_pings // ping_num)
     n_range_bins = max(1, n_samples // range_sample_num)
 
@@ -170,7 +175,7 @@ def estimate_noise_passive(
     return noise_2d, noise_per_ping
 
 
-def apply_noise_reduction(
+def _legacy_apply_noise_reduction(
     ds_Sv: xr.Dataset,
     config: dict,
 ) -> xr.Dataset:
@@ -191,9 +196,21 @@ def apply_noise_reduction(
     noise_cfg = config.get("noise_removal", {})
     mode = noise_cfg.get("mode", "de_robertis")
 
-    # 获取数据
-    Sv = get_sv_array(ds_Sv)  # (n_pings, n_samples)
+    # 获取数据。多通道时沿 channel 逐通道估计，避免首通道结果广播污染其他通道。
+    sv_data = ds_Sv["Sv"]
+    sv_dims = sv_data.dims
+    has_channel = "channel" in sv_dims
+    channel_axis = sv_data.get_axis_num("channel") if has_channel else None
+    if has_channel:
+        channel_values = np.moveaxis(sv_data.values, channel_axis, 0)
+    else:
+        channel_values = sv_data.values[np.newaxis, ...]
+    channel_values = np.asarray(channel_values)
+    if channel_values.ndim != 3:
+        raise ValueError("Sv must have ping_time and range_sample dimensions")
     depth = get_vertical_coords(ds_Sv)  # (n_samples,)
+    snr_threshold = noise_cfg.get("snr_threshold", 3.0)
+    low_sv_db = noise_cfg.get("low_Sv_dB", -150.0)
 
     logger.info(f"噪声去除: mode={mode}")
 
@@ -202,39 +219,52 @@ def apply_noise_reduction(
         passive_indices = noise_cfg.get("passive_ping_indices", None)
         min_range = noise_cfg.get("min_range", 5.0)
 
-        noise_2d, noise_per_ping = estimate_noise_passive(
-            Sv, passive_indices, min_range, depth,
-        )
+        def estimate_noise(values):
+            return estimate_noise_passive(values, passive_indices, min_range, depth)
     else:
         # De Robertis 模式（默认）
         ping_num = noise_cfg.get("ping_num", 40)
         range_sample_num = noise_cfg.get("range_sample_num", 10)
         noise_max = noise_cfg.get("noise_max", -125.0)
-        low_Sv_dB = noise_cfg.get("low_Sv_dB", -150.0)
+        def estimate_noise(values):
+            return estimate_noise_de_robertis(
+                values, depth, ping_num, range_sample_num, noise_max, low_sv_db
+            )
 
-        noise_2d, noise_per_ping = estimate_noise_de_robertis(
-            Sv, depth, ping_num, range_sample_num, noise_max, low_Sv_dB,
-        )
+    noise_2d_list = []
+    noise_per_ping_list = []
+    corrected_list = []
+    snr_list = []
+    for channel_sv in channel_values:
+        noise_2d, noise_per_ping = estimate_noise(channel_sv)
+        SNR = channel_sv - noise_2d
+        Sv_corrected = channel_sv.copy()
+        Sv_corrected[SNR < snr_threshold] = np.nan
+        Sv_corrected[Sv_corrected < low_sv_db] = low_sv_db
+        noise_2d_list.append(noise_2d)
+        noise_per_ping_list.append(noise_per_ping)
+        corrected_list.append(Sv_corrected)
+        snr_list.append(SNR)
 
-    # 计算 SNR
-    SNR = Sv - noise_2d
-
-    # 应用 SNR 阈值
-    snr_threshold = noise_cfg.get("snr_threshold", 3.0)
-    Sv_corrected = Sv.copy()
-    Sv_corrected[SNR < snr_threshold] = np.nan
-
-    # 低 Sv 替换
-    low_Sv_dB = noise_cfg.get("low_Sv_dB", -150.0)
-    Sv_corrected[Sv_corrected < low_Sv_dB] = low_Sv_dB
+    noise_2d = np.stack(noise_2d_list, axis=0)
+    noise_per_ping = np.stack(noise_per_ping_list, axis=0)
+    Sv_corrected = np.stack(corrected_list, axis=0)
+    SNR = np.stack(snr_list, axis=0)
 
     # 保存结果到数据集（深拷贝避免污染原始数据）
     ds_out = ds_Sv.copy(deep=True)
     ds_out["Sv_corrected"] = ds_out["Sv"].copy()
-    ds_out["Sv_corrected"].values[:] = Sv_corrected
-    ds_out["noise_Sv"] = xr.DataArray(noise_2d, dims=["ping_time", "range_sample"])
-    ds_out["noise_per_ping"] = xr.DataArray(noise_per_ping, dims=["ping_time"])
-    ds_out["SNR"] = xr.DataArray(SNR, dims=["ping_time", "range_sample"])
+    corrected_values = np.moveaxis(Sv_corrected, 0, channel_axis) if has_channel else Sv_corrected[0]
+    ds_out["Sv_corrected"].values[:] = corrected_values
+    if has_channel:
+        aux_dims = ["channel", "ping_time", "range_sample"]
+        ds_out["noise_Sv"] = xr.DataArray(noise_2d, dims=aux_dims)
+        ds_out["noise_per_ping"] = xr.DataArray(noise_per_ping, dims=["channel", "ping_time"])
+        ds_out["SNR"] = xr.DataArray(SNR, dims=aux_dims)
+    else:
+        ds_out["noise_Sv"] = xr.DataArray(noise_2d[0], dims=["ping_time", "range_sample"])
+        ds_out["noise_per_ping"] = xr.DataArray(noise_per_ping[0], dims=["ping_time"])
+        ds_out["SNR"] = xr.DataArray(SNR[0], dims=["ping_time", "range_sample"])
 
     # 记录统计
     n_masked = int(np.sum(SNR < snr_threshold))
@@ -242,6 +272,98 @@ def apply_noise_reduction(
     logger.info(f"噪声去除完成: {n_masked}/{total} 个样本被掩码 ({100*n_masked/total:.1f}%)")
     logger.info(f"  噪声范围: [{np.nanmin(noise_per_ping):.1f}, {np.nanmax(noise_per_ping):.1f}] dB")
 
+    return ds_out
+
+
+def apply_noise_reduction(ds_Sv: xr.Dataset, config: dict) -> xr.Dataset:
+    """Apply noise reduction per channel without mutating raw Sv."""
+    noise_cfg = config.get("noise_removal", {})
+    mode = noise_cfg.get("mode", "de_robertis")
+    sv_data = ds_Sv["Sv"]
+    sv_dims = sv_data.dims
+    has_channel = "channel" in sv_dims
+    channel_axis = sv_data.get_axis_num("channel") if has_channel else None
+    channel_values = (
+        np.moveaxis(sv_data.values, channel_axis, 0)
+        if has_channel
+        else sv_data.values[np.newaxis, ...]
+    )
+    channel_values = np.asarray(channel_values)
+    if channel_values.ndim != 3:
+        raise ValueError("Sv must have ping_time and range_sample dimensions")
+
+    depth = get_vertical_coords(ds_Sv)
+    snr_threshold = noise_cfg.get("snr_threshold", 3.0)
+    low_sv_db = noise_cfg.get("low_Sv_dB", -150.0)
+
+    if mode == "passive":
+        passive_indices = noise_cfg.get("passive_ping_indices", None)
+        min_range = noise_cfg.get("min_range", 5.0)
+
+        def estimate(values):
+            return estimate_noise_passive(values, passive_indices, min_range, depth)
+    else:
+        ping_num = noise_cfg.get("ping_num", 40)
+        range_sample_num = noise_cfg.get("range_sample_num", 10)
+        noise_max = noise_cfg.get("noise_max", -125.0)
+
+        def estimate(values):
+            return estimate_noise_de_robertis(
+                values, depth, ping_num, range_sample_num, noise_max, low_sv_db
+            )
+
+    noise_list = []
+    noise_per_ping_list = []
+    corrected_list = []
+    snr_list = []
+    for channel_sv in channel_values:
+        noise_2d, noise_per_ping = estimate(channel_sv)
+        snr = channel_sv - noise_2d
+        corrected = channel_sv.copy()
+        corrected[snr < snr_threshold] = np.nan
+        corrected[corrected < low_sv_db] = low_sv_db
+        noise_list.append(noise_2d)
+        noise_per_ping_list.append(noise_per_ping)
+        corrected_list.append(corrected)
+        snr_list.append(snr)
+
+    noise_values = np.stack(noise_list, axis=0)
+    noise_per_ping_values = np.stack(noise_per_ping_list, axis=0)
+    corrected_values = np.stack(corrected_list, axis=0)
+    snr_values = np.stack(snr_list, axis=0)
+
+    ds_out = ds_Sv.copy(deep=True)
+    ds_out["Sv_corrected"] = ds_out["Sv"].copy()
+    output_corrected = (
+        np.moveaxis(corrected_values, 0, channel_axis)
+        if has_channel
+        else corrected_values[0]
+    )
+    ds_out["Sv_corrected"].values[:] = output_corrected
+    if has_channel:
+        aux_dims = ["channel", "ping_time", "range_sample"]
+        ds_out["noise_Sv"] = xr.DataArray(noise_values, dims=aux_dims)
+        ds_out["noise_per_ping"] = xr.DataArray(
+            noise_per_ping_values, dims=["channel", "ping_time"]
+        )
+        ds_out["SNR"] = xr.DataArray(snr_values, dims=aux_dims)
+    else:
+        ds_out["noise_Sv"] = xr.DataArray(
+            noise_values[0], dims=["ping_time", "range_sample"]
+        )
+        ds_out["noise_per_ping"] = xr.DataArray(
+            noise_per_ping_values[0], dims=["ping_time"]
+        )
+        ds_out["SNR"] = xr.DataArray(
+            snr_values[0], dims=["ping_time", "range_sample"]
+        )
+
+    n_masked = int(np.sum(snr_values < snr_threshold))
+    total = snr_values.size
+    logger.info(
+        f"Noise reduction complete: {n_masked}/{total} samples masked "
+        f"({100 * n_masked / total:.1f}%)"
+    )
     return ds_out
 
 

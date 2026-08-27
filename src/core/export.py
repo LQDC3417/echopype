@@ -42,7 +42,11 @@ def export_to_netcdf(ds_Sv: xr.Dataset, output_path: str | Path) -> Path:
     return output_path
 
 
-def export_to_zarr(ds_Sv: xr.Dataset, output_path: str | Path) -> Path:
+def export_to_zarr(
+    ds_Sv: xr.Dataset,
+    output_path: str | Path,
+    overwrite: bool = False,
+) -> Path:
     """将 Sv 数据集导出为 Zarr 格式（云优化）。
 
     Parameters
@@ -57,6 +61,8 @@ def export_to_zarr(ds_Sv: xr.Dataset, output_path: str | Path) -> Path:
     """
     output_path = Path(output_path)
     if output_path.exists():
+        if not overwrite:
+            raise FileExistsError(f"输出路径已存在：{output_path}")
         import shutil
         shutil.rmtree(output_path)
 
@@ -176,6 +182,7 @@ def export_all(
     density_df: pd.DataFrame | None,
     output_dir: str | Path,
     formats: list[str] | None = None,
+    overwrite: bool = False,
 ) -> list[Path]:
     """批量导出所有结果。
 
@@ -206,7 +213,7 @@ def export_all(
         exported.append(p)
 
     if "zarr" in formats:
-        p = export_to_zarr(ds_Sv, output_dir / "sv_data.zarr")
+        p = export_to_zarr(ds_Sv, output_dir / "sv_data.zarr", overwrite=overwrite)
         exported.append(p)
 
     if "csv" in formats:

@@ -351,6 +351,7 @@ class EchogramRenderer(QOpenGLWidget):
             self._bottom_draw_points.clear()
             self._bottom_editing = False
             self._bottom_drawing = False
+        self.setCursor(Qt.OpenHandCursor if mode == MouseMode.PAN else Qt.ArrowCursor)
 
     def set_overlay_visible(self, overlay: str, visible: bool) -> None:
         """只切换 overlay 的显示状态，保留已计算的结果缓存。"""
@@ -984,7 +985,7 @@ class EchogramRenderer(QOpenGLWidget):
         if event.button() == Qt.MiddleButton:
             self._panning = False
             self._pan_start = None
-            self.setCursor(Qt.ArrowCursor)
+            self.setCursor(Qt.OpenHandCursor if self._mouse_mode == MouseMode.PAN else Qt.ArrowCursor)
 
         elif event.button() == Qt.LeftButton:
             if self._panning and self._mouse_mode == MouseMode.PAN:

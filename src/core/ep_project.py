@@ -12,6 +12,7 @@
 import hashlib
 import io
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -61,11 +62,23 @@ class EpProject:
     # ═══════════════════════════════════════════════════════
 
     def save(self, path: Path) -> Path:
-        """保存到 .ep 文件（HDF5）"""
+        """Atomically save the project, preserving the previous file on failure."""
         path = Path(path)
         if path.suffix.lower() != ".ep":
             path = path.with_suffix(".ep")
 
+        temp_path = path.with_name(f".{path.name}.tmp")
+        try:
+            self._save_to_path(temp_path)
+            os.replace(temp_path, path)
+        except Exception:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
+        return path
+
+    def _save_to_path(self, path: Path) -> None:
+        """保存到 .ep 文件（HDF5）"""
         self.modified_at = _now()
 
         with h5py.File(path, "w") as f:
@@ -105,7 +118,6 @@ class EpProject:
             if self.sed_df is not None and not self.sed_df.empty:
                 rs.create_dataset("sed_df", data=self.sed_df.to_json(orient="records"))
 
-        return path
 
     # ═══════════════════════════════════════════════════════
     # 加载
