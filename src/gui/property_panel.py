@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -48,11 +47,11 @@ class _InfoRow(QWidget):
         layout.setSpacing(8)
 
         self.lbl_label = QLabel(label)
-        self.lbl_label.setStyleSheet("color: #4a5568; font-size: 11px;")
+        self.lbl_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
         self.lbl_label.setFixedWidth(70)
 
         self.lbl_value = QLabel(value)
-        self.lbl_value.setStyleSheet("color: #2c3e50; font-size: 11px;")
+        self.lbl_value.setStyleSheet("color: #e2e8f0; font-size: 11px;")
         self.lbl_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         layout.addWidget(self.lbl_label)
@@ -63,9 +62,9 @@ class _InfoRow(QWidget):
         self.lbl_value.setText(value)
         no_data_values = ["--", T("info_no_data"), ""]
         if value in no_data_values:
-            self.lbl_value.setStyleSheet("color: #a0aec0; font-size: 11px;")
+            self.lbl_value.setStyleSheet("color: #64748b; font-size: 11px;")
         else:
-            self.lbl_value.setStyleSheet("color: #2c3e50; font-size: 11px;")
+            self.lbl_value.setStyleSheet("color: #e2e8f0; font-size: 11px;")
 
 
 class FileInfoTab(QWidget):
@@ -110,6 +109,10 @@ class ProcessingTab(QWidget):
     """处理参数标签页"""
 
     noise_params_changed = Signal(dict)
+    bottom_params_changed = Signal(dict)
+    school_params_changed = Signal(dict)
+    integration_params_changed = Signal(dict)
+    real_sed_params_changed = Signal(dict)
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
     stats_clicked = Signal()
@@ -129,9 +132,6 @@ class ProcessingTab(QWidget):
         self._presets = self._load_presets()
         self._settings = QSettings("Echopype", "FishAcoustics")
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setSpacing(8)
@@ -550,14 +550,13 @@ class ProcessingTab(QWidget):
         layout.addWidget(self.btn_apply_all)
 
         layout.addStretch()
-        scroll.setWidget(container)
-
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(scroll)
+        main_layout.addWidget(container)
 
         # 恢复上次配置
         self._restore_settings()
+        self._connect_parameter_signals()
 
     def _load_presets(self) -> dict:
         """加载预设配置文件"""
@@ -626,6 +625,94 @@ class ProcessingTab(QWidget):
             "range_sample_num": self.spin_range_num.value(),
             "SNR_threshold": f"{self.spin_snr.value()}dB",
         })
+
+    def _connect_parameter_signals(self):
+        """将各功能参数控件连接到独立变更信号。"""
+        bottom_widgets = [
+            self.combo_bottom_method,
+            self.spin_bottom_thr,
+            self.spin_peak_thr,
+            self.spin_disc_thr,
+            self.spin_sat_thr,
+            self.spin_val_window,
+            self.spin_val_thr,
+            self.spin_smooth_window,
+            self.spin_search_min,
+            self.spin_window_len,
+            self.spin_backstep,
+        ]
+        for widget in bottom_widgets:
+            signal = (
+                widget.currentTextChanged
+                if isinstance(widget, QComboBox)
+                else widget.valueChanged
+            )
+            signal.connect(self._emit_bottom_params)
+
+        school_widgets = [
+            self.combo_school_method,
+            self.spin_school_thr,
+            self.spin_mincan_depth,
+            self.spin_mincan_ping,
+            self.spin_maxlink_depth,
+            self.spin_maxlink_ping,
+            self.spin_minsho_depth,
+            self.spin_minsho_ping,
+            self.spin_min_threshold,
+            self.spin_max_depth_dist,
+            self.spin_max_ping_dist,
+            self.spin_max_time_gap,
+            self.spin_min_shoal_pings,
+            self.spin_min_shoal_height,
+        ]
+        for widget in school_widgets:
+            signal = (
+                widget.currentTextChanged
+                if isinstance(widget, QComboBox)
+                else widget.valueChanged
+            )
+            signal.connect(self._emit_school_params)
+
+        integration_widgets = [
+            self.combo_integration_esu,
+            self.spin_integration_esu_size,
+            self.spin_integration_ts_default,
+            self.spin_integration_layer_width,
+            self.spin_integration_min_thr,
+            self.spin_integration_max_thr,
+        ]
+        for widget in integration_widgets:
+            signal = (
+                widget.currentTextChanged
+                if isinstance(widget, QComboBox)
+                else widget.valueChanged
+            )
+            signal.connect(self._emit_integration_params)
+
+        real_sed_widgets = [
+            self.spin_rs_threshold,
+            self.spin_rs_pldl,
+            self.spin_rs_min_pulse,
+            self.spin_rs_max_pulse,
+            self.spin_rs_angle_std,
+            self.spin_rs_beam_comp,
+            self.spin_rs_min_depth,
+            self.spin_rs_max_depth,
+        ]
+        for widget in real_sed_widgets:
+            widget.valueChanged.connect(self._emit_real_sed_params)
+
+    def _emit_bottom_params(self, *_args):
+        self.bottom_params_changed.emit(self.get_bottom_config())
+
+    def _emit_school_params(self, *_args):
+        self.school_params_changed.emit(self.get_school_config())
+
+    def _emit_integration_params(self, *_args):
+        self.integration_params_changed.emit(self.get_integration_config())
+
+    def _emit_real_sed_params(self, *_args):
+        self.real_sed_params_changed.emit(self.get_real_sed_config())
 
     def get_noise_config(self) -> dict:
         return {
@@ -872,10 +959,65 @@ class StatsTab(QWidget):
             self.table.setItem(i, 5, QTableWidgetItem(f"{row.get('centroid_depth', 0):.1f} m"))
 
 
-class PropertyPanel(QTabWidget):
+class DisplaySettingsPanel(QWidget):
+    """Echogram 显示设置，和处理参数分离，修改后立即更新画面。"""
+
+    display_params_changed = Signal(str, float, float)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QFormLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        self.combo_cmap = QComboBox()
+        self.combo_cmap.setObjectName("displayColorMap")
+        self.combo_cmap.addItems(["jet", "viridis", "inferno", "gray"])
+        layout.addRow(T("toolbar_color"), self.combo_cmap)
+
+        self.spin_vmin = QDoubleSpinBox()
+        self.spin_vmin.setObjectName("displayVmin")
+        self.spin_vmin.setRange(-100.0, 0.0)
+        self.spin_vmin.setValue(-70.0)
+        self.spin_vmin.setSuffix(" dB")
+        layout.addRow(T("toolbar_sv_min"), self.spin_vmin)
+
+        self.spin_vmax = QDoubleSpinBox()
+        self.spin_vmax.setObjectName("displayVmax")
+        self.spin_vmax.setRange(-100.0, 0.0)
+        self.spin_vmax.setValue(-20.0)
+        self.spin_vmax.setSuffix(" dB")
+        layout.addRow(T("toolbar_sv_max"), self.spin_vmax)
+
+        self.combo_cmap.currentTextChanged.connect(self._emit_changed)
+        self.spin_vmin.valueChanged.connect(self._emit_changed)
+        self.spin_vmax.valueChanged.connect(self._emit_changed)
+
+    def _emit_changed(self, *_args):
+        vmin = min(self.spin_vmin.value(), self.spin_vmax.value() - 0.1)
+        vmax = max(self.spin_vmax.value(), self.spin_vmin.value() + 0.1)
+        self.display_params_changed.emit(self.combo_cmap.currentText(), vmin, vmax)
+
+    def set_values(self, cmap: str, vmin: float, vmax: float) -> None:
+        """同步工具栏的显示设置，避免两处 UI 状态不一致。"""
+        self.combo_cmap.blockSignals(True)
+        self.spin_vmin.blockSignals(True)
+        self.spin_vmax.blockSignals(True)
+        self.combo_cmap.setCurrentText(cmap)
+        self.spin_vmin.setValue(vmin)
+        self.spin_vmax.setValue(vmax)
+        self.combo_cmap.blockSignals(False)
+        self.spin_vmin.blockSignals(False)
+        self.spin_vmax.blockSignals(False)
+
+
+class PropertyPanel(QWidget):
     """右侧属性面板 — 参照 Echoview Properties 面板"""
 
     noise_params_changed = Signal(dict)
+    bottom_params_changed = Signal(dict)
+    school_params_changed = Signal(dict)
+    integration_params_changed = Signal(dict)
+    real_sed_params_changed = Signal(dict)
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
     stats_clicked = Signal()
@@ -892,17 +1034,54 @@ class PropertyPanel(QTabWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("PropertyPanel")
 
         self.file_info = FileInfoTab()
+        self.display = DisplaySettingsPanel()
         self.processing = ProcessingTab()
         self.stats = StatsTab()
 
-        self.addTab(self.file_info, T("tab_file_info"))
-        self.addTab(self.processing, T("tab_processing"))
-        self.addTab(self.stats, T("tab_statistics"))
+        scroll = QScrollArea(self)
+        scroll.setObjectName("propertyScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        container = QWidget()
+        content_layout = QVBoxLayout(container)
+        content_layout.setContentsMargins(8, 8, 8, 8)
+        content_layout.setSpacing(8)
+
+        for title, widget, object_name in (
+            (T("tab_file_info"), self.file_info, "fileInfoSection"),
+            (T("toolbar_color"), self.display, "displaySection"),
+            (T("tab_processing"), self.processing, "processingSection"),
+            (T("tab_statistics"), self.stats, "statisticsSection"),
+        ):
+            section = QGroupBox(title)
+            section.setObjectName(object_name)
+            section_layout = QVBoxLayout(section)
+            section_layout.setContentsMargins(6, 12, 6, 6)
+            section_layout.addWidget(widget)
+            content_layout.addWidget(section)
+        content_layout.addStretch()
+        scroll.setWidget(container)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(scroll)
+        self.setStyleSheet(
+            "QGroupBox { color: #67e8f9; border: 1px solid #334155; "
+            "border-radius: 3px; margin-top: 6px; font-weight: 600; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }"
+            "QScrollArea { background: #1e1e22; border: none; }"
+        )
 
         # 转发信号
         self.processing.noise_params_changed.connect(self.noise_params_changed)
+        self.processing.bottom_params_changed.connect(self.bottom_params_changed)
+        self.processing.school_params_changed.connect(self.school_params_changed)
+        self.processing.integration_params_changed.connect(self.integration_params_changed)
+        self.processing.real_sed_params_changed.connect(self.real_sed_params_changed)
         self.processing.surface_line_changed.connect(self.surface_line_changed)
         self.processing.detect_schools_clicked.connect(self.detect_schools_clicked)
         self.processing.stats_clicked.connect(self.stats_clicked)

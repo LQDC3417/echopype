@@ -10,6 +10,7 @@
 
 import logging
 import traceback
+from dataclasses import dataclass
 from src.gui.i18n import T
 from pathlib import Path
 
@@ -20,22 +21,53 @@ from PySide6.QtCore import QThread, Signal
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class FileFailure:
+    """单个 raw 文件失败信息。"""
+
+    path: str
+    stage: str
+    error: str
+    traceback: str
+
+
+@dataclass(frozen=True)
+class MergeResult:
+    """多文件导入结果及部分失败报告。"""
+
+    dataset: object
+    loaded_files: tuple[str, ...]
+    failed_files: tuple[FileFailure, ...]
+
+
+@dataclass(frozen=True)
+class BottomDetectionResult:
+    """底线检测结果及有效点统计。"""
+
+    indices: object
+    valid_count: int
+    total_count: int
+    method: str
+
+
 def apply_manual_mask(ds, manual_mask):
     """将手动框选的噪声 mask 应用到数据集（写入 Sv_corrected，不覆盖原始 Sv）。"""
     if manual_mask is None:
         return ds
-    target = ds["Sv_corrected"] if "Sv_corrected" in ds else ds["Sv"]
+    if "Sv_corrected" not in ds:
+        ds["Sv_corrected"] = ds["Sv"].copy(deep=True)
+    target = ds["Sv_corrected"]
     sv_arr = target.values.copy()
     if sv_arr.ndim == 3:
-        sv_arr = sv_arr[0]
-    if manual_mask.shape == sv_arr.shape:
-        sv_arr[manual_mask] = np.nan
-        if target.ndim == 3:
-            target.values[0, :, :] = sv_arr
+        if manual_mask.shape == sv_arr.shape[1:]:
+            sv_arr[:, manual_mask] = np.nan
         else:
-            target.values[:] = sv_arr
-        if "Sv_corrected" not in ds:
-            ds["Sv_corrected"] = target
+            return ds
+    elif manual_mask.shape == sv_arr.shape:
+        sv_arr[manual_mask] = np.nan
+    else:
+        return ds
+    target.values[:] = sv_arr
     return ds
 
 
@@ -98,44 +130,75 @@ class MergeFilesWorker(QThread):
         super().__init__()
         self.raw_files = raw_files
         self.config = config
+        self.echodata = None
 
     def run(self):
         try:
             from src.core.acoustic import compute_sv, open_single_file
             from src.core.merge import merge_aligned
+        except Exception:
+            self.error.emit(traceback.format_exc())
+            return
 
-            ds_list = []
-            total = len(self.raw_files)
-            for i, path in enumerate(self.raw_files):
-                self.progress.emit(T("msg_loading_file", cur=i+1, total=total, name=path.name))
-                self.progress_num.emit(i, total)  # 开始前：已完成 i 个
+        ds_list = []
+        loaded_files = []
+        failed_files = []
+        single_echodata = None
+        total = len(self.raw_files)
 
-                # 加载
+        for i, path in enumerate(self.raw_files):
+            self.progress.emit(T("msg_loading_file", cur=i + 1, total=total, name=path.name))
+            self.progress_num.emit(i, total)
+            stage = "open_raw"
+            try:
                 echodata = open_single_file(path, self.config)
-
-                # 计算 Sv + depth + GPS
+                stage = "compute_sv"
                 ds = compute_sv(echodata, self.config)
-
-                # 只保留第一个 channel
                 if "channel" in ds.dims:
                     ds = ds.isel(channel=0)
+            except Exception as exc:
+                failed_files.append(
+                    FileFailure(
+                        path=path.name,
+                        stage=stage,
+                        error=str(exc),
+                        traceback=traceback.format_exc(),
+                    )
+                )
+                self.progress.emit(f"文件失败: {path.name} ({stage})")
+                self.progress_num.emit(i + 1, total)
+                continue
 
-                ds_list.append(ds)
-                self.progress_num.emit(i + 1, total)  # 完成：已处理 i+1 个
-                # 边加载边显示：每个文件就绪即通知 UI（临时视图）
-                self.file_ready.emit(ds, i + 1, total)
+            ds_list.append(ds)
+            loaded_files.append(path.name)
+            single_echodata = echodata
+            self.progress_num.emit(i + 1, total)
+            # 只发送轻量进度，不把完整 Dataset 交给主线程做增量 vstack。
+            self.progress.emit(f"文件完成: {path.name} [{i + 1}/{total}]")
 
-            # 对齐合并（时间排序 + 深度重采样 + 去重）
+        if not ds_list:
+            details = "\n".join(f"{item.path}: {item.error}" for item in failed_files)
+            self.error.emit(f"所有 raw 文件均处理失败\n{details}")
+            return
+
+        try:
             if len(ds_list) == 1:
                 merged = ds_list[0]
             else:
                 self.progress.emit(T("msg_merging_files", n=len(ds_list)))
                 merged = merge_aligned(ds_list, dedup=True)
-
-            self.finished.emit(merged)
-
         except Exception:
             self.error.emit(traceback.format_exc())
+            return
+
+        self.echodata = single_echodata if len(ds_list) == 1 else None
+        self.finished.emit(
+            MergeResult(
+                dataset=merged,
+                loaded_files=tuple(loaded_files),
+                failed_files=tuple(failed_files),
+            )
+        )
 
 
 class NoiseRemovalWorker(QThread):
@@ -222,8 +285,18 @@ class DetectSeafloorWorker(QThread):
             if er is None:
                 er = np.arange(self.ds_Sv.sizes["range_sample"], dtype=float)
 
-            bottom_indices = bottom_depth_to_sample_indices(bottom_depth_m, er)
-            self.finished.emit(bottom_indices)
+            bottom_indices = np.asarray(
+                bottom_depth_to_sample_indices(bottom_depth_m, er),
+                dtype=np.float32,
+            )
+            self.finished.emit(
+                BottomDetectionResult(
+                    indices=bottom_indices,
+                    valid_count=int(np.isfinite(bottom_indices).sum()),
+                    total_count=int(bottom_indices.size),
+                    method=method,
+                )
+            )
         except Exception:
             self.error.emit(traceback.format_exc())
 

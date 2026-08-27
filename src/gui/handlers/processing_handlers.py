@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QInputDialog, QMessageBox
 from src.core.utils import squeeze_sv
 from src.gui.workers import (
     ComputeSvWorker,
+    BottomDetectionResult,
     DetectSchoolsWorker,
     DetectSeafloorWorker,
     IntegrationWorker,
@@ -28,10 +29,10 @@ class ProcessingMixin:
         self.pipeline_step.emit(T("pipeline_sv"))
         self.statusbar.show_progress(T("msg_computing_sv"))
         self._current_worker = ComputeSvWorker(self._echodata, self._config)
-        self._current_worker.finished.connect(self._on_sv_computed)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_sv_computed)
+        worker.progress.connect(self.statusbar.set_status)
+        worker.start()
 
     def _on_sv_computed(self, ds_Sv):
         self._ds_Sv = ds_Sv
@@ -48,7 +49,24 @@ class ProcessingMixin:
             QTimer.singleShot(200, self._apply_noise_params)
 
     def _on_noise_params_changed(self, params):
+        # 噪声变化只自动更新当前结果，下游结果标记为过期。
+        self._mark_results_stale("bottom", "schools", "integration")
         self._noise_timer.start()
+
+    def _on_bottom_params_changed(self, _params):
+        self._mark_results_stale("schools", "integration", "real_sed")
+        if self._ds_Sv is not None:
+            self._schedule_parameter_apply("bottom", self._detect_bottom)
+
+    def _on_school_params_changed(self, _params):
+        self._mark_results_stale("integration", "real_sed")
+        if self._ds_Sv is not None:
+            self._schedule_parameter_apply("schools", self._detect_schools)
+
+    def _on_integration_params_changed(self, _params):
+        self._mark_results_stale("integration")
+        if self._ds_Sv is not None:
+            self._schedule_parameter_apply("integration", self._run_integration)
 
     def _apply_all_params(self):
         """应用全部参数：保存配置 → 更新config → 触发处理"""
@@ -81,9 +99,9 @@ class ProcessingMixin:
         self._current_worker = NoiseRemovalWorker(
             self._ds_Sv, self._config, self._noise_mask_manual
         )
-        self._current_worker.finished.connect(self._on_noise_removed)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_noise_removed)
+        worker.start()
 
     def _on_noise_removed(self, ds_Sv):
         self._ds_Sv = ds_Sv
@@ -135,15 +153,33 @@ class ProcessingMixin:
         self.pipeline_step.emit(T("pipeline_bottom"))
         self.statusbar.show_progress(T("msg_detecting_bottom"))
         self._current_worker = DetectSeafloorWorker(self._ds_Sv, self._config)
-        self._current_worker.finished.connect(self._on_bottom_detected)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_bottom_detected)
+        worker.progress.connect(self.statusbar.set_status)
+        worker.start()
 
-    def _on_bottom_detected(self, bottom):
+    def _on_bottom_detected(self, bottom_result):
+        if isinstance(bottom_result, BottomDetectionResult):
+            bottom = bottom_result.indices
+            valid_count = bottom_result.valid_count
+            total_count = bottom_result.total_count
+        else:
+            # 兼容旧版 worker 返回的 ndarray。
+            bottom = bottom_result
+            valid_count = int(np.isfinite(bottom).sum())
+            total_count = int(np.asarray(bottom).size)
+
         self._bottom_line = np.asarray(bottom, dtype=np.float32)
         self.echogram.set_bottom_line(self._bottom_line)
         self.statusbar.hide_progress()
+
+        if valid_count == 0:
+            message = f"未检测到底线：有效点 0/{total_count}"
+            self.statusbar.set_status(message)
+            self._append_error_message(message)
+            return
+
+        self._stale_results.discard("bottom")
 
         # 缓存底线到当前文件
         self._save_file_state()
@@ -209,6 +245,10 @@ class ProcessingMixin:
             self._ds_Sv_analysis = None
             return
 
+        if not self._analysis_region_enabled:
+            self._ds_Sv_analysis = self._ds_Sv
+            return
+
         from src.core.region import crop_sv_by_region
         self._ds_Sv_analysis = crop_sv_by_region(
             self._ds_Sv,
@@ -270,9 +310,9 @@ class ProcessingMixin:
         self.statusbar.show_progress(T("msg_detecting_schools"))
         ds_for_detect = self._get_analysis_ds()
         self._current_worker = DetectSchoolsWorker(ds_for_detect, self._config)
-        self._current_worker.finished.connect(self._on_schools_detected)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_schools_detected)
+        worker.start()
 
     def _on_schools_detected(self, mask):
         # 将 mask 转换为 xr.DataArray
@@ -287,6 +327,7 @@ class ProcessingMixin:
         # 将 mask 转换为 DataFrame
         schools_df = schools_to_dataframe(mask_da, self._ds_Sv)
         self._schools_df = schools_df
+        self._stale_results.discard("schools")
         self.stats_dialog.update_schools(schools_df)
         self.property_panel.stats.update_schools(schools_df)
         self.statusbar.hide_progress()
@@ -360,14 +401,15 @@ class ProcessingMixin:
             surface_depth_m=self._surface_depth_m,
             max_depth_m=max_depth_m,
         )
-        self._current_worker.finished.connect(self._on_integration_done)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_integration_done)
+        worker.progress.connect(self.statusbar.set_status)
+        worker.start()
 
     def _on_integration_done(self, result):
         """回声积分完成 → 展示结果表格 + echogram 网格叠加"""
         self._integration_result = result
+        self._stale_results.discard("integration")
         self.statusbar.hide_progress()
         df = result.to_dataframe()
         self._integration_df = df

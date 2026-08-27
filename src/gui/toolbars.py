@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QStyle,
     QToolBar,
+    QToolButton,
 )
 
 from src.gui.i18n import T
@@ -28,6 +29,7 @@ class MouseMode(Enum):
     SELECT_NOISE = 1
     DRAW_BOTTOM = 2
     INSPECT = 3
+    PAN = 4
 
 
 class StandardToolBar(QToolBar):
@@ -112,10 +114,16 @@ class EchogramToolBar(QToolBar):
         self.mode_combo = QComboBox()
         self._update_mode_items()
         self.mode_combo.setMinimumWidth(100)
-        self.mode_combo.currentIndexChanged.connect(
-            lambda idx: self.mode_changed.emit(MouseMode(idx))
-        )
         self.addWidget(self.mode_combo)
+
+        self.pan_button = QToolButton(self)
+        self.pan_button.setText("✋")
+        self.pan_button.setToolTip(T("mode_pan"))
+        self.pan_button.setAccessibleName(T("mode_pan"))
+        self.pan_button.setCheckable(True)
+        self.pan_button.clicked.connect(self._activate_pan)
+        self.addWidget(self.pan_button)
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_index_changed)
 
         self.addSeparator()
 
@@ -186,9 +194,22 @@ class EchogramToolBar(QToolBar):
             T("mode_select_noise"),
             T("mode_draw_bottom"),
             T("mode_inspect"),
+            T("mode_pan"),
         ])
         self.mode_combo.setCurrentIndex(current if current >= 0 else 0)
+        if hasattr(self, "pan_button"):
+            self.pan_button.setChecked(self.mode_combo.currentIndex() == MouseMode.PAN.value)
         self.mode_combo.blockSignals(False)
+
+    def _on_mode_index_changed(self, index: int):
+        self.pan_button.setChecked(index == MouseMode.PAN.value)
+        self.mode_changed.emit(MouseMode(index))
+
+    def _activate_pan(self):
+        """点击手爪按钮时保持选中状态，即使当前已经是手爪模式。"""
+        self.pan_button.setChecked(True)
+        if self.mode_combo.currentIndex() != MouseMode.PAN.value:
+            self.mode_combo.setCurrentIndex(MouseMode.PAN.value)
 
     def retranslate_ui(self):
         """重新翻译界面文本（语言切换时调用）"""
@@ -220,4 +241,18 @@ class EchogramToolBar(QToolBar):
         self.lbl_vmax.setText(str(vmax))
         cmap = self.cmap_combo.currentText()
         self.colormap_changed.emit(cmap, vmin, vmax)
+
+    def set_display_values(self, cmap: str, vmin: float, vmax: float) -> None:
+        """同步右侧显示设置，避免工具栏和属性面板各自维护一份状态。"""
+        self.cmap_combo.blockSignals(True)
+        self.slider_vmin.blockSignals(True)
+        self.slider_vmax.blockSignals(True)
+        self.cmap_combo.setCurrentText(cmap)
+        self.slider_vmin.setValue(round(vmin))
+        self.slider_vmax.setValue(round(vmax))
+        self.cmap_combo.blockSignals(False)
+        self.slider_vmin.blockSignals(False)
+        self.slider_vmax.blockSignals(False)
+        self.lbl_vmin.setText(str(round(vmin)))
+        self.lbl_vmax.setText(str(round(vmax)))
 

@@ -103,6 +103,11 @@ class EchogramRenderer(QOpenGLWidget):
         self._surface_line = None  # float — 表线深度(in sample index units)
         self._school_mask = None
         self._single_targets = None  # np.ndarray (N, 2) — ping_idx, sample_idx
+        self._overlay_visibility = {
+            "noise": True,
+            "bottom": True,
+            "school": True,
+        }
 
         # 网格叠加
         self._grid_cells = None   # list[dict] — ping_start/end, depth_lo/hi (sample index)
@@ -347,6 +352,13 @@ class EchogramRenderer(QOpenGLWidget):
             self._bottom_editing = False
             self._bottom_drawing = False
 
+    def set_overlay_visible(self, overlay: str, visible: bool) -> None:
+        """只切换 overlay 的显示状态，保留已计算的结果缓存。"""
+        if overlay not in self._overlay_visibility:
+            raise ValueError(f"unknown overlay: {overlay}")
+        self._overlay_visibility[overlay] = bool(visible)
+        self.update()
+
     def set_analysis_region_enabled(self, enabled: bool) -> None:
         """设置分析区域限定标志"""
         self._analysis_region_enabled = enabled
@@ -387,13 +399,13 @@ class EchogramRenderer(QOpenGLWidget):
         # 网格叠加在 echogram 之上、底线/鱼群之下
         if self._grid_cells is not None:
             self._draw_grid_overlay()
-        if self._noise_mask is not None:
+        if self._noise_mask is not None and self._overlay_visibility["noise"]:
             self._draw_noise_overlay()
-        if self._bottom_line is not None:
+        if self._bottom_line is not None and self._overlay_visibility["bottom"]:
             self._draw_bottom_line()
         if self._surface_line is not None:
             self._draw_surface_line()
-        if self._school_mask is not None:
+        if self._school_mask is not None and self._overlay_visibility["school"]:
             self._draw_school_overlay()
         if self._single_targets is not None:
             self._draw_single_targets()
@@ -562,10 +574,11 @@ class EchogramRenderer(QOpenGLWidget):
         glColor4f(0.8, 0.6, 0.0, 1.0)
         glLineWidth(line_width)
 
-        # ??GL_LINE_STRIP??????
+        indices = self._decimate_bottom_line(bl)
         glBegin(GL_LINE_STRIP)
-        for i, val in enumerate(bl):
-            if np.isnan(val):
+        for i in indices:
+            val = bl[i]
+            if not np.isfinite(val):
                 # ??NaN???????????????
                 glEnd()
                 glBegin(GL_LINE_STRIP)
@@ -574,6 +587,29 @@ class EchogramRenderer(QOpenGLWidget):
             y = self._offset_y + val * self._zoom_y
             glVertex2f(x, y)
         glEnd()
+
+    @staticmethod
+    def _decimate_bottom_line(bottom: np.ndarray, max_points: int = 20_000) -> np.ndarray:
+        """为显示抽样超长底线，保留端点和 NaN 断线边界。"""
+        values = np.asarray(bottom)
+        n = values.size
+        if n <= max_points:
+            return np.arange(n, dtype=np.int64)
+
+        finite = np.isfinite(values)
+        boundaries = np.flatnonzero(finite[1:] != finite[:-1]) + 1
+        mandatory = np.unique(
+            np.concatenate((np.array([0, n - 1], dtype=np.int64), boundaries, boundaries - 1))
+        )
+        if len(mandatory) >= max_points:
+            selected = np.linspace(0, len(mandatory) - 1, max_points, dtype=np.int64)
+            result = mandatory[selected]
+            result[-1] = n - 1
+            return np.unique(result)
+
+        remaining = max_points - len(mandatory)
+        sampled = np.linspace(0, n - 1, remaining, dtype=np.int64)
+        return np.unique(np.concatenate((mandatory, sampled)))
 
     def _draw_surface_line(self) -> None:
         """???? ? ???????????????"""
@@ -890,7 +926,11 @@ class EchogramRenderer(QOpenGLWidget):
             return
 
         if event.button() == Qt.LeftButton:
-            if self._mouse_mode == MouseMode.NAVIGATE or self._mouse_mode == MouseMode.SELECT_NOISE or self._mouse_mode == MouseMode.INSPECT:
+            if self._mouse_mode == MouseMode.PAN:
+                self._panning = True
+                self._pan_start = (sx, sy)
+                self.setCursor(Qt.ClosedHandCursor)
+            elif self._mouse_mode == MouseMode.NAVIGATE or self._mouse_mode == MouseMode.SELECT_NOISE or self._mouse_mode == MouseMode.INSPECT:
                 self._selecting = True
                 self._select_start = (sx, sy)
                 self._select_end = (sx, sy)
@@ -947,6 +987,12 @@ class EchogramRenderer(QOpenGLWidget):
             self.setCursor(Qt.ArrowCursor)
 
         elif event.button() == Qt.LeftButton:
+            if self._panning and self._mouse_mode == MouseMode.PAN:
+                self._panning = False
+                self._pan_start = None
+                self.setCursor(Qt.OpenHandCursor)
+                return
+
             # 自由手绘结束 — 应用绘制结果
             if self._bottom_drawing and self._mouse_mode == MouseMode.DRAW_BOTTOM:
                 self._bottom_drawing = False

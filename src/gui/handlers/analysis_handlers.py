@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 class AnalysisMixin:
     """高级分析：质量检查、多频分析、单体目标检测、Sv统计、Transect分段"""
 
+    def _on_real_sed_params_changed(self, _params):
+        if self._echodata is not None and self._ds_Sv is not None:
+            self._schedule_parameter_apply("real_sed", self._run_real_sed)
+
     def _run_quality_check(self):
         """运行数据质量检查"""
         if self._ds_Sv is None:
@@ -121,10 +125,10 @@ class AnalysisMixin:
         self._config.setdefault("single_target_real", {}).update(rs_cfg)
         self.statusbar.show_progress(T("msg_real_sed_running"))
         self._current_worker = RealSedWorker(self._echodata, self._ds_Sv, self._config)
-        self._current_worker.finished.connect(self._on_real_sed_done)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_real_sed_done)
+        worker.progress.connect(self.statusbar.set_status)
+        worker.start()
 
     def _on_real_sed_done(self, result):
         """真实 SED 完成 → 展示网格聚合表 + echogram 叠加（逐目标）"""
@@ -136,6 +140,7 @@ class AnalysisMixin:
             QMessageBox.information(self, T("msg_real_sed_done"), T("msg_real_sed_none"))
             return
         self._real_sed_df = targets_df
+        self._stale_results.discard("real_sed")
         self.stats_dialog.update_real_sed(grid_df)
         self.echogram.set_single_targets(targets_df)
         self.statusbar.set_status(T("msg_real_sed_done", n=n))

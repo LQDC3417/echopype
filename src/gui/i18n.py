@@ -125,6 +125,7 @@ _TEXTS = {
     "mode_select_noise": {"zh": "选择噪声", "en": "Select Noise"},
     "mode_draw_bottom": {"zh": "绘制底线", "en": "Draw Bottom"},
     "mode_inspect": {"zh": "检查", "en": "Inspect"},
+    "mode_pan": {"zh": "手爪平移", "en": "Pan"},
     "toolbar_reset": {"zh": "重置", "en": "Reset"},
     "toolbar_fit": {"zh": "适应", "en": "Fit"},
     "toolbar_prev": {"zh": "< 上一个", "en": "< Prev"},
