@@ -66,7 +66,7 @@ from OpenGL.GL import (
     glViewport,
 )
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QRect, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QMenu
@@ -81,12 +81,19 @@ class EchogramRenderer(QOpenGLWidget):
 
     mouse_moved = Signal(float, float)  # (ping_index, sample_index)
     region_selected = Signal(float, float, float, float)
+    line_edited = Signal(str, object)  # line_id, sample-index values
     bottom_line_edited = Signal(object)  # np.ndarray — 编辑后的底线
     sv_at_cursor = Signal(float, float, float)  # (ping, depth, sv_value)
     surface_line_requested = Signal()  # 右键请求设置表线
+    analysis_region_requested = Signal()
     analysis_region_toggle = Signal(bool)  # 分析区域限定开关
     re_detect_bottom = Signal()  # 重新检测底部
     update_bottom_requested = Signal()  # 手动更新/保存当前底线
+    display_settings_requested = Signal()
+    noise_removal_requested = Signal()
+    school_detection_requested = Signal()
+    integration_requested = Signal()
+    real_sed_requested = Signal()
     file_page_requested = Signal(int)  # delta: -1=上一页, +1=下一页
     zoom_changed = Signal(float, float)  # (zoom_x, zoom_y)
 
@@ -101,6 +108,8 @@ class EchogramRenderer(QOpenGLWidget):
         self._noise_mask = None
         self._bottom_line = None  # (n_pings,) sample indices
         self._surface_line = None  # float — 表线深度(in sample index units)
+        self._named_lines: dict[str, np.ndarray] = {}
+        self._active_line_id = "bottom"
         self._school_mask = None
         self._single_targets = None  # np.ndarray (N, 2) — ping_idx, sample_idx
         self._overlay_visibility = {
@@ -108,6 +117,7 @@ class EchogramRenderer(QOpenGLWidget):
             "bottom": True,
             "school": True,
         }
+        self._colorbar_rect = None
 
         # 网格叠加
         self._grid_cells = None   # list[dict] — ping_start/end, depth_lo/hi (sample index)
@@ -142,6 +152,8 @@ class EchogramRenderer(QOpenGLWidget):
         self._bottom_draw_points = []  # 手绘模式收集的点 [(ping, sample), ...]
         self._bottom_undo_stack = []  # ????????????
         self._bottom_redo_stack = []  # ?????????????
+        self._line_undo_stacks: dict[str, list[np.ndarray]] = {}
+        self._line_redo_stacks: dict[str, list[np.ndarray]] = {}
         self._max_undo_steps = 50  # ??????
 
 
@@ -211,9 +223,33 @@ class EchogramRenderer(QOpenGLWidget):
     def set_bottom_line(self, bottom: np.ndarray | None) -> None:
         if bottom is None:
             self._bottom_line = None
+            self._named_lines.pop("bottom", None)
         else:
-            self._bottom_line = np.asarray(bottom, dtype=np.float32)
+            self._bottom_line = np.asarray(bottom, dtype=np.float32).copy()
+            self._named_lines["bottom"] = self._bottom_line.copy()
         self.update()
+
+    def set_lines(self, lines: dict[str, np.ndarray]) -> None:
+        """设置所有可见线段；保留 surface/bottom 旧接口的同步行为。"""
+        self._named_lines = {key: np.asarray(value, dtype=np.float32).copy() for key, value in lines.items()}
+        self._bottom_line = self._named_lines.get("bottom")
+        surface = self._named_lines.get("surface")
+        self._surface_line = float(surface[0]) if surface is not None and len(surface) else None
+        current_ids = set(self._named_lines)
+        self._line_undo_stacks = {
+            key: value for key, value in self._line_undo_stacks.items() if key in current_ids
+        }
+        self._line_redo_stacks = {
+            key: value for key, value in self._line_redo_stacks.items() if key in current_ids
+        }
+        self.update()
+
+    def get_lines(self) -> dict[str, np.ndarray]:
+        return {key: value.copy() for key, value in self._named_lines.items()}
+
+    def set_active_line(self, line_id: str) -> None:
+        """选择绘制目标；选择本身不会修改线段。"""
+        self._active_line_id = str(line_id)
 
     def get_bottom_line(self) -> np.ndarray | None:
         """获取当前底线数据（只读副本）"""
@@ -224,6 +260,11 @@ class EchogramRenderer(QOpenGLWidget):
     def set_surface_line(self, depth_samples: float) -> None:
         """设置表线深度（sample index 单位），None 表示关闭"""
         self._surface_line = depth_samples
+        if depth_samples is None:
+            self._named_lines.pop("surface", None)
+        else:
+            count = max(1, self._n_pings)
+            self._named_lines["surface"] = np.full(count, depth_samples, dtype=np.float32)
         self.update()
 
     def set_school_mask(self, mask) -> None:
@@ -402,10 +443,8 @@ class EchogramRenderer(QOpenGLWidget):
             self._draw_grid_overlay()
         if self._noise_mask is not None and self._overlay_visibility["noise"]:
             self._draw_noise_overlay()
-        if self._bottom_line is not None and self._overlay_visibility["bottom"]:
-            self._draw_bottom_line()
-        if self._surface_line is not None:
-            self._draw_surface_line()
+        if self._named_lines:
+            self._draw_named_lines()
         if self._school_mask is not None and self._overlay_visibility["school"]:
             self._draw_school_overlay()
         if self._single_targets is not None:
@@ -560,27 +599,42 @@ class EchogramRenderer(QOpenGLWidget):
                 glVertex2f(v[0], v[1])
             glEnd()
 
-    def _draw_bottom_line(self) -> None:
-        """???? ? ???????????????"""
-        bl = self._bottom_line
-        if bl is None or bl.ndim == 0:
-            return
+    def _draw_named_lines(self) -> None:
+        """绘制当前可见命名线；颜色按稳定插入顺序分配。"""
+        palette = (
+            (0.2, 1.0, 0.4, 0.9),
+            (0.8, 0.6, 0.0, 1.0),
+            (1.0, 0.35, 0.35, 0.95),
+            (0.7, 0.5, 1.0, 0.95),
+            (0.3, 0.7, 1.0, 0.95),
+        )
+        for index, (line_id, values) in enumerate(self._named_lines.items()):
+            if line_id == "bottom" and not self._overlay_visibility["bottom"]:
+                continue
+            color = palette[index % len(palette)]
+            self._draw_named_line(values, color, dashed=line_id == "surface")
 
-        # ?????????????????????
+    def _draw_named_line(self, values: np.ndarray, color: tuple, *, dashed: bool = False) -> None:
+        line = np.asarray(values, dtype=np.float32).reshape(-1)
+        if line.size == 0:
+            return
         base_width = 2.0
         zoom_factor = min(self._zoom_x, self._zoom_y)
         line_width = base_width * min(2.0, max(0.5, zoom_factor * 0.5))
-
-        # ?????????Echoview ??
-        glColor4f(0.8, 0.6, 0.0, 1.0)
+        if dashed:
+            glEnable(GL_LINE_STIPPLE)
+            glLineStipple(4, 0x0F0F)
+        glColor4f(*color)
         glLineWidth(line_width)
-
-        indices = self._decimate_bottom_line(bl)
+        if line.size == 1:
+            indices = np.array([0, max(0, self._n_pings - 1)], dtype=np.int64)
+            line = np.repeat(line, max(1, self._n_pings))
+        else:
+            indices = self._decimate_bottom_line(line)
         glBegin(GL_LINE_STRIP)
         for i in indices:
-            val = bl[i]
+            val = line[i]
             if not np.isfinite(val):
-                # 无效点用于断开底线，避免把无穷值送入 OpenGL。
                 glEnd()
                 glBegin(GL_LINE_STRIP)
                 continue
@@ -588,6 +642,14 @@ class EchogramRenderer(QOpenGLWidget):
             y = self._offset_y + val * self._zoom_y
             glVertex2f(x, y)
         glEnd()
+        if dashed:
+            glDisable(GL_LINE_STIPPLE)
+
+    def _draw_bottom_line(self) -> None:
+        """兼容旧调用方绘制 Bottom。"""
+        if self._bottom_line is None:
+            return
+        self._draw_named_line(self._bottom_line, self._bottom_line_color)
 
     @staticmethod
     def _decimate_bottom_line(bottom: np.ndarray, max_points: int = 20_000) -> np.ndarray:
@@ -941,7 +1003,7 @@ class EchogramRenderer(QOpenGLWidget):
                 self._bottom_drawing = True
                 self._bottom_editing = True
                 # 保存当前底线状态到撤销栈
-                self._save_bottom_undo()
+                self._save_line_undo()
                 # 添加第一个绘制点
                 px, py = self._screen_to_data(sx, sy)
                 self._bottom_draw_points.append((px, py))
@@ -1029,10 +1091,10 @@ class EchogramRenderer(QOpenGLWidget):
             self.update()
         elif event.key() == Qt.Key_Z and event.modifiers() & Qt.ControlModifier:
             # Ctrl+Z ??????
-            self._undo_bottom()
+            self._undo_line()
         elif event.key() == Qt.Key_Y and event.modifiers() & Qt.ControlModifier:
             # Ctrl+Y ??????
-            self._redo_bottom()
+            self._redo_line()
 
     def contextMenuEvent(self, event) -> None:
         """Qt 右键事件 → 显示上下文菜单"""
@@ -1041,6 +1103,10 @@ class EchogramRenderer(QOpenGLWidget):
     def _show_context_menu(self, pos) -> None:
         """显示右键菜单"""
         menu = QMenu(self)
+        if self._colorbar_rect is not None and self._colorbar_rect.contains(pos):
+            menu.addAction("显示设置...", self.display_settings_requested.emit)
+            menu.exec_(self.mapToGlobal(pos))
+            return
         menu.addAction("🔄 重置视图", self.reset_view)
         menu.addAction("⬜ 适应窗口", self._fit_to_view_and_update)
         menu.addSeparator()
@@ -1064,12 +1130,20 @@ class EchogramRenderer(QOpenGLWidget):
 
         # ── 表线 / 分析区域 ──
         menu.addAction("📏 设置表线深度...", lambda: self.surface_line_requested.emit())
+        menu.addAction("📐 分析区域...", self.analysis_region_requested.emit)
         act_analysis = menu.addAction("📐 限定分析区域（表线~底线）")
         act_analysis.setCheckable(True)
         act_analysis.setChecked(self._analysis_region_enabled)
         act_analysis.triggered.connect(
             lambda checked: self.analysis_region_toggle.emit(checked)
         )
+        menu.addSeparator()
+
+        data_menu = menu.addMenu("数据")
+        data_menu.addAction("噪声去除...", self.noise_removal_requested.emit)
+        data_menu.addAction("鱼群检测...", self.school_detection_requested.emit)
+        data_menu.addAction("回声积分...", self.integration_requested.emit)
+        data_menu.addAction("SED 单体目标检测...", self.real_sed_requested.emit)
         menu.addSeparator()
 
         menu.addAction("🔍 重新检测底部", lambda: self.re_detect_bottom.emit())
@@ -1084,57 +1158,72 @@ class EchogramRenderer(QOpenGLWidget):
             if self._bottom_draw_points:
                 menu.addAction("✅ 完成绘制", self._finish_bottom_drawing)
                 menu.addAction("🗑 清除绘制点", self._clear_bottom_drawing)
-            if self._bottom_undo_stack:
-                menu.addAction("↩ 撤销 (Ctrl+Z)", self._undo_bottom)
+            if self._line_undo_stacks.get(self._active_line_id):
+                menu.addAction("↩ 撤销 (Ctrl+Z)", self._undo_line)
 
         menu.exec_(self.mapToGlobal(pos))
 
     # ── 底线编辑 ──────────────────────────────────────────────
 
-    def _save_bottom_undo(self):
-        """???????????????????"""
-        if self._bottom_line is not None:
-            # ??????????
-            self._bottom_undo_stack.append(self._bottom_line.copy())
-
-            # ???????
-            if len(self._bottom_undo_stack) > self._max_undo_steps:
-                self._bottom_undo_stack.pop(0)
-
-            # ????????????????????
-            self._bottom_redo_stack.clear()
-
-    def _undo_bottom(self):
-        """??????????????????"""
-        if not self._bottom_undo_stack:
+    def _save_line_undo(self) -> None:
+        line = self._named_lines.get(self._active_line_id)
+        if line is None:
             return
+        undo = self._line_undo_stacks.setdefault(self._active_line_id, [])
+        undo.append(line.copy())
+        if len(undo) > self._max_undo_steps:
+            undo.pop(0)
+        self._line_redo_stacks.setdefault(self._active_line_id, []).clear()
 
-        # ??????????
-        if self._bottom_line is not None:
-            self._bottom_redo_stack.append(self._bottom_line.copy())
-
-        # ????????
-        self._bottom_line = self._bottom_undo_stack.pop()
+    def _undo_line(self) -> None:
+        undo = self._line_undo_stacks.get(self._active_line_id, [])
+        if not undo:
+            return
+        current = self._named_lines.get(self._active_line_id)
+        if current is not None:
+            self._line_redo_stacks.setdefault(self._active_line_id, []).append(current.copy())
+        self._set_active_line_values(undo.pop())
         self._bottom_draw_points.clear()
         self._bottom_editing = False
-        self.bottom_line_edited.emit(self._bottom_line.copy())
+        self._emit_active_line_edited()
         self.update()
 
-    def _redo_bottom(self):
-        """???????????????"""
-        if not self._bottom_redo_stack:
+    def _redo_line(self) -> None:
+        redo = self._line_redo_stacks.get(self._active_line_id, [])
+        if not redo:
             return
-
-        # ??????????
-        if self._bottom_line is not None:
-            self._bottom_undo_stack.append(self._bottom_line.copy())
-
-        # ????????
-        self._bottom_line = self._bottom_redo_stack.pop()
+        current = self._named_lines.get(self._active_line_id)
+        if current is not None:
+            self._line_undo_stacks.setdefault(self._active_line_id, []).append(current.copy())
+        self._set_active_line_values(redo.pop())
         self._bottom_draw_points.clear()
         self._bottom_editing = False
-        self.bottom_line_edited.emit(self._bottom_line.copy())
+        self._emit_active_line_edited()
         self.update()
+
+    def _set_active_line_values(self, values: np.ndarray) -> None:
+        copied = np.asarray(values, dtype=np.float32).copy()
+        self._named_lines[self._active_line_id] = copied
+        if self._active_line_id == "bottom":
+            self._bottom_line = copied
+        elif self._active_line_id == "surface" and len(copied):
+            self._surface_line = float(copied[0])
+
+    def _emit_active_line_edited(self) -> None:
+        values = self._named_lines[self._active_line_id].copy()
+        self.line_edited.emit(self._active_line_id, values)
+        if self._active_line_id == "bottom":
+            self.bottom_line_edited.emit(values)
+
+    def _save_bottom_undo(self) -> None:
+        """兼容旧 Bottom 编辑 API。"""
+        self._save_line_undo()
+
+    def _undo_bottom(self) -> None:
+        self._undo_line()
+
+    def _redo_bottom(self) -> None:
+        self._redo_line()
 
     def _smooth_draw_points(self, points, window_size=None):
         """???????????????"""
@@ -1188,8 +1277,10 @@ class EchogramRenderer(QOpenGLWidget):
             return
 
         # ????????????
-        if self._bottom_line is None:
-            self._bottom_line = np.full(self._n_pings, np.nan, dtype=np.float32)
+        active_values = self._named_lines.get(self._active_line_id)
+        if active_values is None or len(active_values) != self._n_pings:
+            active_values = np.full(self._n_pings, np.nan, dtype=np.float32)
+            self._set_active_line_values(active_values)
 
         # ????? ping ??
         sorted_points = sorted(points, key=lambda p: p[0])
@@ -1208,22 +1299,23 @@ class EchogramRenderer(QOpenGLWidget):
             if left is not None and right is not None:
                 if left[2] == right[2]:
                     # ????
-                    self._bottom_line[ping_idx] = left[1]
+                    active_values[ping_idx] = left[1]
                 else:
                     # ????
                     t = (ping_idx - left[0]) / max(1e-6, right[0] - left[0])
-                    self._bottom_line[ping_idx] = left[1] + t * (right[1] - left[1])
+                    active_values[ping_idx] = left[1] + t * (right[1] - left[1])
             elif left is not None:
-                self._bottom_line[ping_idx] = left[1]
+                active_values[ping_idx] = left[1]
             elif right is not None:
-                self._bottom_line[ping_idx] = right[1]
+                active_values[ping_idx] = right[1]
 
         # ?????
         self._bottom_draw_points.clear()
         self._bottom_editing = False
 
         # ??????
-        self.bottom_line_edited.emit(self._bottom_line.copy())
+        self._set_active_line_values(active_values)
+        self._emit_active_line_edited()
         self.update()
 
     def _finish_bottom_drawing(self):
@@ -1267,19 +1359,14 @@ class EchogramRenderer(QOpenGLWidget):
         # ── 布局参数 ──
         margin_right = 55   # 色条右侧留给刻度文字的宽度
         bar_width = 20      # 色条宽度（像素）
-        bar_margin = 8      # 色条与 echogram 右边缘的间距
 
         w = self.width()
 
-        # 色条位置：紧贴 echogram 右侧
-        bar_x = self._offset_x + self._n_pings * self._zoom_x + bar_margin
-        bar_y = self._offset_y
-        bar_h = self._n_samples * self._zoom_y
-
-        # 安全裁剪：确保色条不超出窗口
-        bar_x = max(bar_x, 0)
-        if bar_x + bar_width > w - margin_right:
-            return  # 空间不足，跳过绘制
+        # 固定到窗口右侧，平移/缩放 Echogram 时保持可见。
+        bar_x = w - margin_right - bar_width
+        bar_y = 28
+        bar_h = max(40, self.height() - 56)
+        self._colorbar_rect = QRect(int(bar_x), int(bar_y), bar_width, int(bar_h))
 
         # ── 获取 colormap ──
         try:

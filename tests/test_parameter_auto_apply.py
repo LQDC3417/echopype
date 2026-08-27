@@ -39,8 +39,8 @@ def test_processing_tab_exposes_independent_parameter_groups(qapp):
     assert school_spy.count() == 0
 
 
-def test_bottom_parameter_change_is_debounced_and_applied(qapp, monkeypatch):
-    """底线参数变更应在防抖后自动触发底线处理。"""
+def test_bottom_parameter_change_does_not_start_processing(qapp, monkeypatch):
+    """底线参数变更仅更新状态，必须由 Apply/确定启动处理。"""
     from src.gui.main_window import MainWindow
 
     window = MainWindow()
@@ -50,7 +50,7 @@ def test_bottom_parameter_change_is_debounced_and_applied(qapp, monkeypatch):
     try:
         window._on_bottom_params_changed({"threshold": -41.0})
         QTest.qWait(650)
-        assert calls == ["bottom"]
+        assert calls == []
     finally:
         window.close()
 

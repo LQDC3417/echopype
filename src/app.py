@@ -6,7 +6,7 @@ import sys
 # 修复 Windows 中文环境
 os.environ["PYTHONUTF8"] = "1"
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QApplication
 
 from src.gui.main_window import MainWindow
@@ -26,6 +26,18 @@ def main():
 
     window = MainWindow()
     window.show()
+    from src.gui.handlers.file_handlers import _load_recent
+    from src.gui.welcome_dialog import WelcomeDialog
+
+    def show_welcome():
+        dialog = WelcomeDialog(_load_recent(), window)
+        dialog.new_project_requested.connect(window._new_project)
+        dialog.open_project_requested.connect(window._open_project)
+        dialog.recent_project_requested.connect(window._open_recent)
+        dialog.show()
+        window._welcome_dialog = dialog
+
+    QTimer.singleShot(0, show_welcome)
     sys.exit(app.exec())
 
 

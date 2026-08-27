@@ -66,7 +66,7 @@ def test_property_panel_exposes_reference_ordered_accordion(qapp):
             "annotations",
             "advanced",
         )
-        assert panel.processing.btn_apply_all.isHidden()
+        assert not hasattr(panel.processing, "btn_apply_all")
     finally:
         panel.close()
 

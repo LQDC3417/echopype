@@ -164,7 +164,7 @@ class ProcessingTab(QWidget):
         layout.addWidget(preset_group)
 
         # ── 噪声去除参数 ──
-        noise_group = self.noise_group = QGroupBox(T("noise_group"))
+        self.noise_group = QGroupBox(T("noise_group"))
         noise_layout = QFormLayout()
         noise_layout.setSpacing(6)
         noise_layout.setContentsMargins(8, 12, 8, 8)
@@ -185,8 +185,8 @@ class ProcessingTab(QWidget):
         noise_layout.addRow(T("noise_ping_num"), self.spin_ping_num)
         noise_layout.addRow(T("noise_range_num"), self.spin_range_num)
         noise_layout.addRow(T("noise_snr_threshold"), self.spin_snr)
-        noise_group.setLayout(noise_layout)
-        layout.addWidget(noise_group)
+        self.noise_group.setLayout(noise_layout)
+        layout.addWidget(self.noise_group)
 
         self.spin_ping_num.valueChanged.connect(self._emit_noise_params)
         self.spin_range_num.valueChanged.connect(self._emit_noise_params)
@@ -305,7 +305,7 @@ class ProcessingTab(QWidget):
         self._on_bottom_method_changed(self.combo_bottom_method.currentText())
 
         # ── 鱼群检测参数 ──
-        school_group = self.school_group = QGroupBox(T("school_group"))
+        self.school_group = QGroupBox(T("school_group"))
         self.school_layout = QFormLayout()
         self.school_layout.setSpacing(6)
         self.school_layout.setContentsMargins(8, 12, 8, 8)
@@ -397,8 +397,8 @@ class ProcessingTab(QWidget):
         self.btn_detect_schools.setProperty("cssClass", "primary")
         self.school_layout.addRow(self.btn_detect_schools)
 
-        school_group.setLayout(self.school_layout)
-        layout.addWidget(school_group)
+        self.school_group.setLayout(self.school_layout)
+        layout.addWidget(self.school_group)
 
         self.btn_detect_schools.clicked.connect(self.detect_schools_clicked)
 
@@ -406,7 +406,7 @@ class ProcessingTab(QWidget):
         self._on_school_method_changed(self.combo_school_method.currentText())
 
         # ── 回声积分 ──
-        integration_group = self.integration_group = QGroupBox(T("integration_group"))
+        self.integration_group = QGroupBox(T("integration_group"))
         integration_layout = QFormLayout()
         integration_layout.setSpacing(6)
         integration_layout.setContentsMargins(8, 12, 8, 8)
@@ -455,8 +455,8 @@ class ProcessingTab(QWidget):
         self.btn_integration.clicked.connect(self.integration_clicked)
         integration_layout.addRow(self.btn_integration)
 
-        integration_group.setLayout(integration_layout)
-        layout.addWidget(integration_group)
+        self.integration_group.setLayout(integration_layout)
+        layout.addWidget(self.integration_group)
 
         # ── 质量检查 ──
         self.btn_quality = QPushButton(T("btn_quality_check"))
@@ -472,7 +472,7 @@ class ProcessingTab(QWidget):
         layout.addLayout(btn_layout2)
 
         # ── 真实 SED（分裂波束）──
-        real_sed_group = self.real_sed_group = QGroupBox(T("single_target_real_group"))
+        self.real_sed_group = QGroupBox(T("single_target_real_group"))
         real_sed_layout = QFormLayout()
         real_sed_layout.setSpacing(6)
         real_sed_layout.setContentsMargins(8, 12, 8, 8)
@@ -531,8 +531,8 @@ class ProcessingTab(QWidget):
         self.btn_real_sed.clicked.connect(self.real_sed_clicked)
         real_sed_layout.addRow(self.btn_real_sed)
 
-        real_sed_group.setLayout(real_sed_layout)
-        layout.addWidget(real_sed_group)
+        self.real_sed_group.setLayout(real_sed_layout)
+        layout.addWidget(self.real_sed_group)
 
         # ── Sv 统计摘要 ──
         self.btn_sv_stats = QPushButton(T("btn_sv_stats"))
@@ -546,12 +546,6 @@ class ProcessingTab(QWidget):
         btn_layout4.addWidget(self.btn_sv_stats)
         btn_layout4.addWidget(self.btn_transect)
         layout.addLayout(btn_layout4)
-
-        # ── 应用全部参数按钮 ──
-        self.btn_apply_all = QPushButton(T("btn_apply_all"))
-        self.btn_apply_all.setProperty("cssClass", "primary")
-        self.btn_apply_all.clicked.connect(self.apply_all_clicked)
-        layout.addWidget(self.btn_apply_all)
 
         layout.addStretch()
         main_layout = QVBoxLayout(self)
@@ -1083,7 +1077,6 @@ class PropertyPanel(QWidget):
         self.display = DisplaySettingsPanel()
         self.processing = ProcessingTab()
         self.stats = StatsTab()
-        self.processing.btn_apply_all.hide()
 
         scroll = QScrollArea(self)
         scroll.setObjectName("propertyScroll")

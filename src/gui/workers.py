@@ -15,6 +15,7 @@ from src.gui.i18n import T
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from PySide6.QtCore import QThread, Signal
 
 
@@ -48,6 +49,15 @@ class BottomDetectionResult:
     valid_count: int
     total_count: int
     method: str
+
+
+@dataclass(frozen=True)
+class MultiFileSedResult:
+    """逐 raw SED 的合并结果及单文件失败信息。"""
+
+    targets_df: object
+    grid_df: object
+    failed_files: tuple[FileFailure, ...]
 def apply_manual_mask(ds, manual_mask):
     """将手动框选的噪声 mask 应用到数据集（写入 Sv_corrected，不覆盖原始 Sv）。"""
     if manual_mask is None:
@@ -67,6 +77,17 @@ def apply_manual_mask(ds, manual_mask):
         return ds
     target.values[:] = sv_arr
     return ds
+
+
+def merge_region_noise_result(original_ds, analysis_ds, processed_ds):
+    """将区域内去噪结果写回完整数据，区域外保持原始 Sv。"""
+    import xarray as xr
+
+    result = original_ds.copy(deep=True)
+    corrected = processed_ds.get("Sv_corrected", analysis_ds["Sv"])
+    region_mask = analysis_ds["Sv"].notnull()
+    result["Sv_corrected"] = xr.where(region_mask, corrected, original_ds["Sv"])
+    return result
 
 
 class LoadFileWorker(QThread):
@@ -208,11 +229,12 @@ class NoiseRemovalWorker(QThread):
     error = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, ds_Sv, config: dict, manual_mask=None):
+    def __init__(self, ds_Sv, config: dict, manual_mask=None, analysis_ds=None):
         super().__init__()
         self.ds_Sv = ds_Sv
         self.config = config
         self.manual_mask = manual_mask
+        self.analysis_ds = analysis_ds
 
     def run(self):
         try:
@@ -221,15 +243,18 @@ class NoiseRemovalWorker(QThread):
             self.progress.emit(T("msg_removing_noise"))
             # echopype 0.11.1: remove_background_noise 装饰器 @add_processing_level("L*B")
             # 要求输入带 input_processing_level 属性，缺失时抛 RuntimeError
-            if "input_processing_level" not in self.ds_Sv.attrs:
-                self.ds_Sv.attrs["input_processing_level"] = "L2A"
+            processing_ds = self.analysis_ds if self.analysis_ds is not None else self.ds_Sv
+            if "input_processing_level" not in processing_ds.attrs:
+                processing_ds.attrs["input_processing_level"] = "L2A"
             ds = remove_background_noise(
-                self.ds_Sv,
+                processing_ds,
                 ping_num=noise_cfg.get("ping_num", 5),
                 range_sample_num=noise_cfg.get("range_sample_num", 10),
                 SNR_threshold=noise_cfg.get("SNR_threshold", "3.0dB"),
             )
             ds = apply_manual_mask(ds, self.manual_mask)
+            if self.analysis_ds is not None:
+                ds = merge_region_noise_result(self.ds_Sv, self.analysis_ds, ds)
             self.finished.emit(ds)
         except Exception:
             self.error.emit(traceback.format_exc())
@@ -420,22 +445,38 @@ class RealSedWorker(QThread):
     error = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, echodata, ds_Sv, config):
+    def __init__(
+        self,
+        echodata,
+        ds_Sv,
+        config,
+        upper_depth_m=None,
+        lower_depth_m=None,
+    ):
         super().__init__()
         self.echodata = echodata
         self.ds_Sv = ds_Sv
         self.config = config
+        self.upper_depth_m = upper_depth_m
+        self.lower_depth_m = lower_depth_m
 
     def run(self):
         try:
             from src.core.acoustic import _detect_waveform_mode
             from echopype.calibrate import compute_TS
-            from src.core.sed import aggregate_targets_to_grid, detect_single_targets_real
+            from src.core.sed import (
+                aggregate_targets_to_grid,
+                detect_single_targets_real,
+                filter_targets_by_region,
+            )
 
             self.progress.emit(T("msg_real_sed_running"))
             wm, em = _detect_waveform_mode(self.echodata)
             ds_TS = compute_TS(self.echodata, waveform_mode=wm, encode_mode=em)
             targets_df = detect_single_targets_real(self.echodata, ds_TS, self.config)
+            targets_df = filter_targets_by_region(
+                targets_df, self.upper_depth_m, self.lower_depth_m
+            )
 
             # 按积分网格聚合（即使 targets_df 为空也输出全 NaN 网格）
             grid_df = aggregate_targets_to_grid(targets_df, self.ds_Sv, self.config)
@@ -443,6 +484,167 @@ class RealSedWorker(QThread):
 
         except Exception:
             self.error.emit(traceback.format_exc())
+
+
+class MultiFileRealSedWorker(QThread):
+    """逐个 raw 执行 SED，再按 ping_time 映射并统一聚合。"""
+
+    finished = Signal(object)
+    error = Signal(str)
+    progress = Signal(str)
+
+    def __init__(
+        self,
+        raw_files,
+        ds_Sv,
+        config,
+        upper_depth_m=None,
+        lower_depth_m=None,
+    ):
+        super().__init__()
+        self.raw_files = [Path(path) for path in raw_files]
+        self.ds_Sv = ds_Sv
+        self.config = config
+        self.upper_depth_m = upper_depth_m
+        self.lower_depth_m = lower_depth_m
+
+    @staticmethod
+    def _ping_time_ns(dataset) -> np.ndarray:
+        if "ping_time" not in dataset:
+            raise ValueError("SED dataset has no ping_time coordinate")
+        return np.asarray(dataset["ping_time"].values).reshape(-1).astype("datetime64[ns]")
+
+    @staticmethod
+    def _map_targets(targets_df, local_times, global_lookup, source_file):
+        mapped = targets_df.copy()
+        if mapped.empty:
+            mapped["source_file"] = pd.Series(dtype=str)
+            mapped["local_ping_index"] = pd.Series(dtype=np.int64)
+            return mapped
+        if "ping_idx" not in mapped:
+            raise ValueError("SED targets have no ping_idx column")
+
+        local_values = pd.to_numeric(mapped["ping_idx"], errors="coerce").to_numpy()
+        integer_local = np.isfinite(local_values) & (local_values == np.floor(local_values))
+        local_indices = np.zeros(len(mapped), dtype=np.int64)
+        local_indices[integer_local] = local_values[integer_local].astype(np.int64)
+        valid_local = integer_local & (local_indices >= 0) & (local_indices < len(local_times))
+
+        global_indices = np.full(len(mapped), -1, dtype=np.int64)
+        local_time_ns = local_times.astype("datetime64[ns]").astype(np.int64)
+        for row_index in np.flatnonzero(valid_local):
+            global_indices[row_index] = global_lookup.get(
+                int(local_time_ns[local_indices[row_index]]), -1
+            )
+        keep = valid_local & (global_indices >= 0)
+        mapped = mapped.loc[keep].copy()
+        mapped["local_ping_index"] = local_indices[keep]
+        mapped["ping_idx"] = global_indices[keep]
+        mapped["source_file"] = source_file
+        return mapped.reset_index(drop=True)
+
+    def run(self):
+        try:
+            from echopype.calibrate import compute_TS
+            from src.core.acoustic import _detect_waveform_mode, open_single_file
+            from src.core.sed import (
+                aggregate_targets_to_grid,
+                detect_single_targets_real,
+                filter_targets_by_region,
+            )
+        except Exception:
+            self.error.emit(traceback.format_exc())
+            return
+
+        try:
+            global_times = self._ping_time_ns(self.ds_Sv)
+            global_lookup = {
+                int(value): index
+                for index, value in enumerate(global_times.astype(np.int64))
+                if not np.isnat(global_times[index])
+            }
+        except Exception:
+            self.error.emit(traceback.format_exc())
+            return
+
+        frames = []
+        failures = []
+        successful_files = 0
+        total = len(self.raw_files)
+        for index, path in enumerate(self.raw_files):
+            if self.isInterruptionRequested():
+                self.progress.emit("SED 已取消")
+                return
+            self.progress.emit(f"SED: {path.name} [{index + 1}/{total}]")
+            stage = "open_raw"
+            try:
+                echodata = open_single_file(path, self.config)
+                stage = "compute_ts"
+                waveform_mode, encode_mode = _detect_waveform_mode(echodata)
+                ds_TS = compute_TS(
+                    echodata,
+                    waveform_mode=waveform_mode,
+                    encode_mode=encode_mode,
+                )
+                stage = "detect_targets"
+                targets_df = detect_single_targets_real(echodata, ds_TS, self.config)
+                local_times = self._ping_time_ns(ds_TS)
+                frames.append(
+                    self._map_targets(
+                        targets_df, local_times, global_lookup, path.name
+                    )
+                )
+                successful_files += 1
+            except Exception as exc:
+                failures.append(
+                    FileFailure(
+                        path=path.name,
+                        stage=stage,
+                        error=str(exc),
+                        traceback=traceback.format_exc(),
+                    )
+                )
+                self.progress.emit(f"SED 文件失败: {path.name} ({stage})")
+
+            if self.isInterruptionRequested():
+                self.progress.emit("SED 已取消")
+                return
+
+        if successful_files == 0:
+            details = "\n".join(
+                f"{failure.path} [{failure.stage}]: {failure.error}"
+                for failure in failures
+            )
+            self.error.emit(f"所有 raw 文件的 SED 均处理失败\n{details}")
+            return
+
+        try:
+            if frames:
+                targets_df = pd.concat(frames, ignore_index=True, sort=False)
+            else:
+                targets_df = pd.DataFrame()
+            for column in ("target_id", "ping_idx", "range_m", "ts_db"):
+                if column not in targets_df:
+                    targets_df[column] = pd.Series(dtype=float)
+            targets_df = filter_targets_by_region(
+                targets_df, self.upper_depth_m, self.lower_depth_m
+            )
+            targets_df = targets_df.sort_values(
+                ["ping_idx", "local_ping_index"], kind="stable"
+            ).reset_index(drop=True)
+            targets_df["target_id"] = np.arange(1, len(targets_df) + 1)
+            grid_df = aggregate_targets_to_grid(targets_df, self.ds_Sv, self.config)
+        except Exception:
+            self.error.emit(traceback.format_exc())
+            return
+
+        self.finished.emit(
+            MultiFileSedResult(
+                targets_df=targets_df,
+                grid_df=grid_df,
+                failed_files=tuple(failures),
+            )
+        )
 
 
 class SvStatsWorker(QThread):
