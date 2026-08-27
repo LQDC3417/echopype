@@ -71,3 +71,14 @@ def test_pan_mode_uses_left_drag_to_move_echogram(qapp):
         assert after != before
     finally:
         renderer.close()
+
+
+def test_renderer_accepts_multiple_named_lines(qapp):
+    from src.viz.opengl_renderer import EchogramRenderer
+
+    renderer = EchogramRenderer()
+    try:
+        renderer.set_lines({"surface": [2.0, 2.0], "bottom": [20.0, 21.0]})
+        assert set(renderer.get_lines()) == {"surface", "bottom"}
+    finally:
+        renderer.close()

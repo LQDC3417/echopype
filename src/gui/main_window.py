@@ -22,6 +22,7 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
+    QInputDialog,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -40,6 +41,8 @@ from src.gui.status_bar import MainStatusBar
 from src.gui.toolbars import EchogramToolBar, MouseMode, StandardToolBar
 from src.gui.workers import MergeFilesWorker
 from src.viz.opengl_renderer import EchogramRenderer
+from src.core.lines import LineManager
+from src.core.region import AnalysisRegion
 
 from src.gui.handlers import (
     FileMixin,
@@ -96,6 +99,10 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._bottom_line = None
         self._bottom_manually_edited = False  # 底线是否被手动编辑过
         self._surface_depth_m = 2.0  # 表线深度（米）
+        self.line_manager = LineManager()
+        self.analysis_region: AnalysisRegion | None = None
+        self.display_settings = {"colormap": "jet", "vmin": -90.0, "vmax": -30.0}
+        self._active_line_id = LineManager.SURFACE_ID
         self._analysis_region_enabled = False  # 分析区域限定（仅控制 UI 渲染，不影响分析裁剪）
         self._schools_mask = None
         self._schools_df = None
@@ -192,19 +199,22 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         act_en.triggered.connect(lambda: self._switch_language("en"))
         lang_menu.addAction(act_en)
 
-        # ── 处理 ──
-        pm = mb.addMenu(T("menu_process"))
-        pm.addAction(self._act(T("run_all"), self._run_all, "F5"))
-        pm.addSeparator()
-        pm.addAction(self._act(T("compute_sv"), self._compute_sv, "Ctrl+1"))
-        pm.addAction(self._act(T("noise_removal"), self._apply_noise_params, "Ctrl+2"))
-        pm.addAction(self._act(T("detect_bottom"), self._detect_bottom, "Ctrl+3"))
-        pm.addAction(self._act(T("detect_schools"), self._detect_schools, "Ctrl+4"))
+        lines_menu = mb.addMenu("线段设置")
+        lines_menu.addAction(self._act("线段管理...", self._show_line_manager))
+        lines_menu.addAction(self._act("底线检测...", self._detect_bottom))
+
+        data_menu = mb.addMenu("数据")
+        data_menu.addAction(self._act("噪声去除...", self._apply_noise_params))
+        data_menu.addAction(self._act("鱼群检测...", self._detect_schools))
+        data_menu.addAction(self._act("回声积分...", self._run_integration))
+        data_menu.addAction(self._act("SED 单体目标检测...", self._run_real_sed))
 
         # ── 分析 ──
         am = mb.addMenu(T("menu_analysis"))
-        am.addAction(self._act(T("menu_integration"), self._run_integration))
-        am.addAction(self._act(T("btn_real_sed"), self._run_real_sed))
+        am.addAction(self._act("质量检查", self._run_quality_check))
+        am.addAction(self._act("多频分析", self._run_multifreq_analysis))
+        am.addAction(self._act("Sv 统计", self._run_sv_stats))
+        am.addAction(self._act("Transect 分段", self._run_transect_split))
         am.addSeparator()
         am.addAction(self._act(T("menu_export_schools"), self._export_schools))
 
@@ -293,6 +303,43 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         a.setChecked(default)
         return a
 
+    def _refresh_line_toolbar(self):
+        if hasattr(self, "echo_toolbar"):
+            self.echo_toolbar.set_editable_lines(self.line_manager.editable_lines())
+
+    def _select_active_line(self, line_id: str):
+        if line_id:
+            self._active_line_id = line_id
+
+    def _start_draw_active_line(self):
+        if self._active_line_id == LineManager.ZERO_ID:
+            return
+        self._current_mode = MouseMode.DRAW_LINE
+        self.echogram.set_mouse_mode(MouseMode.DRAW_LINE.value)
+        self.statusbar.set_status(f"绘制线段: {self.line_manager.get(self._active_line_id).name}")
+
+    def _show_line_manager(self):
+        """最小线段管理入口：新增引用偏移线，完整编辑仍保留现有底线工作流。"""
+        name, accepted = QInputDialog.getText(self, "新增线段", "线段名称")
+        if not accepted:
+            return
+        references = [line for line in self.line_manager if line.id != self._active_line_id]
+        labels = [line.name for line in references]
+        reference_name, accepted = QInputDialog.getItem(self, "线段基准", "参考线", labels, 0, False)
+        if not accepted:
+            return
+        offset, accepted = QInputDialog.getDouble(self, "线段偏移", "偏移 (m；正数向下)", 0.0, -10000, 10000, 2)
+        if not accepted:
+            return
+        reference = next(line for line in references if line.name == reference_name)
+        line_id = f"line_{len(list(self.line_manager))}"
+        try:
+            self.line_manager.add_line(line_id, name, reference_id=reference.id, offset_m=offset)
+        except ValueError as exc:
+            QMessageBox.warning(self, "线段设置", str(exc))
+            return
+        self._refresh_line_toolbar()
+
     # ═══════════════════════════════════════════════════════
     # UI 布局
     # ═══════════════════════════════════════════════════════
@@ -340,7 +387,8 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
 
         # ── 右侧 Dock：属性面板 ──
         self.property_panel = PropertyPanel()
-        self.dock_right = QDockWidget(T("tab_processing"), self)
+        self.property_panel.removeTab(self.property_panel.indexOf(self.property_panel.processing))
+        self.dock_right = QDockWidget("属性", self)
         self.dock_right.setObjectName("dockProperties")
         self.dock_right.setWidget(self.property_panel)
         self.dock_right.setFeatures(
@@ -410,7 +458,6 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.std_toolbar.open_clicked.connect(self._new_project)
         self.std_toolbar.open_config_clicked.connect(self._open_config)
         self.std_toolbar.save_config_clicked.connect(self._save_config)
-        self.std_toolbar.run_clicked.connect(self._run_all)
         self.std_toolbar.undo_clicked.connect(self._undo)
         self.std_toolbar.redo_clicked.connect(self._redo)
         self.std_toolbar.export_clicked.connect(self._export)
@@ -418,7 +465,8 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         # Echogram 工具栏
         self.echo_toolbar.mode_changed.connect(self._on_mode_changed)
         self.echo_toolbar.mode_changed.connect(lambda m: self.echogram.set_mouse_mode(m.value))
-        self.echo_toolbar.colormap_changed.connect(self.echogram.set_colormap)
+        self.echo_toolbar.line_selected.connect(self._select_active_line)
+        self.echo_toolbar.draw_line_requested.connect(self._start_draw_active_line)
         self.echo_toolbar.reset_view_clicked.connect(self._reset_view)
         self.echo_toolbar.fit_view_clicked.connect(self._fit_view)
 
@@ -441,14 +489,9 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.echogram.update_bottom_requested.connect(self._on_update_bottom)
 
         # 属性面板（处理参数）
-        self.property_panel.surface_line_changed.connect(self._on_surface_line_changed)
+        # 参数控件仅作为内部配置来源，修改控件本身不再自动启动 Worker。
         self.property_panel.detect_schools_clicked.connect(self._detect_schools)
         self.property_panel.stats_clicked.connect(self._show_stats)
-        self.property_panel.noise_params_changed.connect(self._on_noise_params_changed)
-        self.property_panel.bottom_params_changed.connect(self._on_bottom_params_changed)
-        self.property_panel.school_params_changed.connect(self._on_school_params_changed)
-        self.property_panel.integration_params_changed.connect(self._on_integration_params_changed)
-        self.property_panel.real_sed_params_changed.connect(self._on_real_sed_params_changed)
         self.property_panel.quality_check_clicked.connect(self._run_quality_check)
         self.property_panel.multifreq_clicked.connect(self._run_multifreq_analysis)
         self.property_panel.sv_stats_clicked.connect(self._run_sv_stats)
@@ -458,7 +501,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.property_panel.detect_bottom_clicked.connect(self._detect_bottom)
         self.property_panel.draw_bottom_clicked.connect(self._start_draw_bottom)
         self.property_panel.update_bottom_clicked.connect(self._on_update_bottom)
-        self.property_panel.apply_all_clicked.connect(self._apply_all_params)
+        self._refresh_line_toolbar()
 
         # 变量列表
         self.variable_list.variable_selected.connect(self._on_variable_selected)

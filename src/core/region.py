@@ -8,11 +8,55 @@
 """
 
 import logging
+from dataclasses import dataclass
 
 import numpy as np
 import xarray as xr
 
 logger = logging.getLogger("fish_acoustics")
+
+
+@dataclass(frozen=True)
+class AnalysisRegion:
+    """活动分析区域引用的上下边界线。"""
+
+    upper_line_id: str
+    lower_line_id: str
+
+    def validate(self, available_line_ids: set[str]) -> None:
+        if self.upper_line_id == self.lower_line_id:
+            raise ValueError("Analysis region boundaries must be different")
+        missing = {self.upper_line_id, self.lower_line_id} - available_line_ids
+        if missing:
+            raise ValueError(f"Analysis region references missing lines: {sorted(missing)}")
+
+
+def build_line_region_mask(
+    echo_range_m: np.ndarray,
+    upper_depth_m: np.ndarray,
+    lower_depth_m: np.ndarray,
+) -> tuple[np.ndarray, int]:
+    """构建任意两条深度线之间的 mask，并整条排除无效 ping。"""
+    depths = np.asarray(echo_range_m, dtype=np.float32).reshape(-1)
+    upper = np.asarray(upper_depth_m, dtype=np.float32).reshape(-1)
+    lower = np.asarray(lower_depth_m, dtype=np.float32).reshape(-1)
+    if len(upper) != len(lower):
+        raise ValueError("Region boundaries must have equal ping counts")
+    if depths.size == 0:
+        return np.zeros((len(upper), 0), dtype=bool), len(upper)
+
+    valid = (
+        np.isfinite(upper)
+        & np.isfinite(lower)
+        & (upper < lower)
+        & (upper >= depths[0])
+        & (lower <= depths[-1])
+    )
+    mask = (depths[np.newaxis, :] >= upper[:, np.newaxis]) & (
+        depths[np.newaxis, :] <= lower[:, np.newaxis]
+    )
+    mask[~valid, :] = False
+    return mask, int((~valid).sum())
 
 
 # ── 坐标转换 ──────────────────────────────────────────────

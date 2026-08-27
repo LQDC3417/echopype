@@ -87,6 +87,7 @@ class EchogramRenderer(QOpenGLWidget):
     analysis_region_toggle = Signal(bool)  # 分析区域限定开关
     re_detect_bottom = Signal()  # 重新检测底部
     update_bottom_requested = Signal()  # 手动更新/保存当前底线
+    display_settings_requested = Signal()
     file_page_requested = Signal(int)  # delta: -1=上一页, +1=下一页
     zoom_changed = Signal(float, float)  # (zoom_x, zoom_y)
 
@@ -101,6 +102,7 @@ class EchogramRenderer(QOpenGLWidget):
         self._noise_mask = None
         self._bottom_line = None  # (n_pings,) sample indices
         self._surface_line = None  # float — 表线深度(in sample index units)
+        self._named_lines: dict[str, np.ndarray] = {}
         self._school_mask = None
         self._single_targets = None  # np.ndarray (N, 2) — ping_idx, sample_idx
 
@@ -209,6 +211,18 @@ class EchogramRenderer(QOpenGLWidget):
         else:
             self._bottom_line = np.asarray(bottom, dtype=np.float32)
         self.update()
+
+    def set_lines(self, lines: dict[str, np.ndarray]) -> None:
+        """设置所有可见线段；保留 surface/bottom 旧接口的同步行为。"""
+        self._named_lines = {key: np.asarray(value, dtype=np.float32).copy() for key, value in lines.items()}
+        if "bottom" in self._named_lines:
+            self._bottom_line = self._named_lines["bottom"]
+        if "surface" in self._named_lines and len(self._named_lines["surface"]):
+            self._surface_line = float(self._named_lines["surface"][0])
+        self.update()
+
+    def get_lines(self) -> dict[str, np.ndarray]:
+        return {key: value.copy() for key, value in self._named_lines.items()}
 
     def get_bottom_line(self) -> np.ndarray | None:
         """获取当前底线数据（只读副本）"""
