@@ -92,8 +92,9 @@ class ProcessingMixin:
         )
         self.pipeline_step.emit(T("pipeline_noise"))
         self.statusbar.show_progress(T("msg_removing_noise"))
+        analysis_ds = self._get_analysis_ds() if self._analysis_region_enabled else None
         self._current_worker = NoiseRemovalWorker(
-            self._ds_Sv, self._config, self._noise_mask_manual
+            self._ds_Sv, self._config, self._noise_mask_manual, analysis_ds=analysis_ds
         )
         worker = self._current_worker
         self._connect_latest_worker(worker, self._on_noise_removed)
@@ -122,7 +123,9 @@ class ProcessingMixin:
             self.statusbar.set_status(T("msg_noise_removed"))
 
         # 恢复手动编辑的底线（set_data 不清除底线，但重新渲染可能需要恢复）
-        if self._bottom_line is not None:
+        if hasattr(self, "line_manager"):
+            self._sync_lines_to_renderer()
+        elif self._bottom_line is not None:
             self.echogram.set_bottom_line(self._bottom_line)
 
         # 同步更新缓存中当前文件的 ds
@@ -165,22 +168,44 @@ class ProcessingMixin:
 
         self._stale_results.discard("bottom")
         self._bottom_line = bottom
-        self.echogram.set_bottom_line(self._bottom_line)
-        self.statusbar.hide_progress()
-
         valid_count = int(np.isfinite(bottom).sum())
         if valid_count == 0:
+            self.echogram.set_bottom_line(self._bottom_line)
+            self.statusbar.hide_progress()
             self.statusbar.set_status("底线检测完成，但没有有效底线点")
             self._append_error_message(
                 "底线检测完成，但结果全部为空。请检查 Sv 数据、表线深度和底线检测参数。"
             )
             return
+        if hasattr(self, "line_manager"):
+            from src.core.region import _echo_range_2d, sample_indices_to_depths
+
+            ping_times = np.asarray(self._ds_Sv["ping_time"].values)
+            echo_range = _echo_range_2d(self._ds_Sv, len(ping_times))
+            bottom_depth_m = sample_indices_to_depths(echo_range, bottom)
+            self.line_manager.set_line_data(
+                self.line_manager.BOTTOM_ID,
+                bottom_depth_m,
+                ping_times,
+                kind="detected",
+            )
+            self._sync_lines_to_renderer()
+        else:
+            self.echogram.set_bottom_line(self._bottom_line)
+        self.statusbar.hide_progress()
 
         # 缓存底线到当前文件
         self._save_file_state()
 
         # 自动启用分析区域（表线~底线）
         self._analysis_region_enabled = True
+        if hasattr(self, "line_manager") and getattr(self, "analysis_region", None) is None:
+            from src.core.region import AnalysisRegion
+
+            self.analysis_region = AnalysisRegion(
+                self.line_manager.SURFACE_ID,
+                self.line_manager.BOTTOM_ID,
+            )
         self.echogram.set_analysis_region_enabled(True)
         self._apply_analysis_region_to_ds()
 
@@ -193,13 +218,56 @@ class ProcessingMixin:
         if getattr(self, "_run_all_chain", False):
             QTimer.singleShot(200, self._detect_schools)
 
-    def _on_bottom_line_edited(self, bottom):
-        self._bottom_line = bottom
-        self._bottom_manually_edited = True  # 标记手动编辑
-        self.echogram.set_bottom_line(bottom)
+    def _on_line_edited(self, line_id: str, sample_values):
+        """将 Renderer 的 sample-index 线写回以米为单位的通用线模型。"""
+        if self._ds_Sv is None or not hasattr(self, "line_manager"):
+            return
+        from src.core.region import _echo_range_2d, sample_indices_to_depths
+
+        samples = np.asarray(sample_values, dtype=np.float32).reshape(-1)
+        ping_times = np.asarray(self._ds_Sv["ping_time"].values)
+        if len(samples) != len(ping_times):
+            self._append_error_message(
+                f"线段 {line_id} 点数异常：得到 {len(samples)}，预期 {len(ping_times)}"
+            )
+            return
+        echo_range = _echo_range_2d(self._ds_Sv, len(ping_times))
+        depths_m = sample_indices_to_depths(echo_range, samples)
+        self.line_manager.set_line_data(line_id, depths_m, ping_times, kind="manual")
+        if line_id == self.line_manager.BOTTOM_ID:
+            self._bottom_line = samples.copy()
+            self._bottom_manually_edited = True
+        self._invalidate_analysis_region_cache()
+        self._sync_lines_to_renderer()
         self._save_file_state()
-        self._apply_analysis_region_to_ds()
-        self.statusbar.set_status(T("msg_bottom_line_updated"))
+        self.statusbar.set_status(f"线段已更新: {self.line_manager.get(line_id).name}")
+
+    def _on_bottom_line_edited(self, bottom):
+        """兼容旧 Bottom signal；新代码应连接 ``line_edited``。"""
+        self._on_line_edited(self.line_manager.BOTTOM_ID, bottom)
+
+    def _invalidate_analysis_region_cache(self) -> None:
+        self._ds_Sv_analysis = None
+        self._analysis_region_cache_key = None
+
+    def _sync_lines_to_renderer(self) -> None:
+        """解析可见米深线，并转换为 Renderer 使用的 sample index。"""
+        if self._ds_Sv is None or not hasattr(self, "line_manager"):
+            return
+        from src.core.region import _echo_range_2d, depths_to_sample_indices
+
+        ping_times = np.asarray(self._ds_Sv["ping_time"].values)
+        echo_range = _echo_range_2d(self._ds_Sv, len(ping_times))
+        visible_lines = {}
+        for line in self.line_manager:
+            if not line.visible:
+                continue
+            depths_m = self.line_manager.resolve_for_pings(line.id, ping_times)
+            visible_lines[line.id] = depths_to_sample_indices(echo_range, depths_m)
+        self.echogram.set_lines(visible_lines)
+        active_line_id = getattr(self, "_active_line_id", None)
+        if active_line_id and hasattr(self.echogram, "set_active_line"):
+            self.echogram.set_active_line(active_line_id)
 
     def _start_draw_bottom(self):
         """切换到绘制底线模式"""
@@ -219,6 +287,10 @@ class ProcessingMixin:
     def _on_surface_line_changed(self, depth_m: float):
         """表线深度变更"""
         self._surface_depth_m = depth_m
+        if hasattr(self, "line_manager"):
+            self.line_manager.set_reference(self.line_manager.SURFACE_ID, self.line_manager.ZERO_ID)
+            self.line_manager.set_offset(self.line_manager.SURFACE_ID, depth_m)
+            self._invalidate_analysis_region_cache()
         self._update_surface_line_render()
         self._save_file_state()
         self._apply_analysis_region_to_ds()
@@ -242,6 +314,23 @@ class ProcessingMixin:
 
         if not self._analysis_region_enabled:
             self._ds_Sv_analysis = self._ds_Sv
+            self._analysis_region_cache_key = (id(self._ds_Sv), False)
+            return
+
+        line_manager = getattr(self, "line_manager", None)
+        region = getattr(self, "analysis_region", None)
+        if line_manager is not None and region is not None:
+            from src.core.region import crop_sv_by_line_region
+
+            self._ds_Sv_analysis, excluded = crop_sv_by_line_region(
+                self._ds_Sv, line_manager, region
+            )
+            self._analysis_region_cache_key = self._current_analysis_region_cache_key()
+            if excluded:
+                message = f"分析区域排除 {excluded} 个边界缺失、交叉或越界的 ping"
+                if hasattr(self, "_append_error_message"):
+                    self._append_error_message(message)
+                self.statusbar.set_status(message)
             return
 
         from src.core.region import crop_sv_by_region
@@ -249,6 +338,18 @@ class ProcessingMixin:
             self._ds_Sv,
             surface_depth_m=self._surface_depth_m if self._surface_depth_m > 0 else None,
             bottom_sample_indices=self._bottom_line,
+        )
+        self._analysis_region_cache_key = self._current_analysis_region_cache_key()
+
+    def _current_analysis_region_cache_key(self):
+        line_manager = getattr(self, "line_manager", None)
+        region = getattr(self, "analysis_region", None)
+        region_key = None if region is None else (region.upper_line_id, region.lower_line_id)
+        return (
+            id(self._ds_Sv),
+            bool(self._analysis_region_enabled),
+            None if line_manager is None else line_manager.revision,
+            region_key,
         )
 
     def _get_analysis_ds(self):
@@ -259,12 +360,16 @@ class ProcessingMixin:
         """
         if self._ds_Sv is None:
             return None
-        if self._ds_Sv_analysis is None:
+        cache_key = self._current_analysis_region_cache_key()
+        if self._ds_Sv_analysis is None or self._analysis_region_cache_key != cache_key:
             self._apply_analysis_region_to_ds()
         return self._ds_Sv_analysis if self._ds_Sv_analysis is not None else self._ds_Sv
 
     def _update_surface_line_render(self):
         """将表线深度(m)转为 sample index 并传给渲染器"""
+        if hasattr(self, "line_manager"):
+            self._sync_lines_to_renderer()
+            return
         idx = self._surface_depth_to_sample()
         if idx is not None:
             self.echogram.set_surface_line(float(idx))

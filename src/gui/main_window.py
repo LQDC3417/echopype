@@ -107,6 +107,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._schools_mask = None
         self._schools_df = None
         self._current_worker = None
+        self._close_pending = False
         self._current_channel = ""
         self._undo_stack = []
         self._redo_stack = []
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._stale_results: set[str] = set()
         self._parameter_timers: dict[str, QTimer] = {}
         self._parameter_callbacks = {}
+        self._processing_dialogs = {}
         self._file_cache: dict[str, dict] = {}  # {path_str: {"sv": array, "ds": Dataset, "bottom": array}}
 
         # 变量缓存
@@ -137,11 +139,36 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.pipeline_step.connect(self.statusbar.set_step)
 
     def closeEvent(self, event):
-        """窗口关闭：等待/停止后台 worker，避免 QThread destroyed 崩溃"""
+        """后台任务运行时延迟关闭，避免阻塞 UI 或销毁活跃 QThread。"""
         worker = self._current_worker
         if worker is not None and worker.isRunning():
-            worker.wait(5000)  # 最多等 5 秒
+            if hasattr(worker, "requestInterruption"):
+                worker.requestInterruption()
+            if not self._close_pending:
+                self._close_pending = True
+                worker.finished.connect(
+                    lambda *_args, active=worker: self._complete_deferred_close(active)
+                )
+                worker.error.connect(
+                    lambda *_args, active=worker: self._complete_deferred_close(active)
+                )
+                # 多数 Worker 为 ``finished = Signal(object)``，覆盖了 QThread
+                # 原生无参 finished 信号；因此必须轮询运行状态作为关闭兜底。
+                QTimer.singleShot(50, lambda active=worker: self._complete_deferred_close(active))
+            event.ignore()
+            self.statusbar.set_status("后台任务结束后将自动关闭")
+            return
         super().closeEvent(event)
+
+    def _complete_deferred_close(self, worker):
+        if not self._close_pending or worker is not self._current_worker:
+            return
+        if worker.isRunning():
+            QTimer.singleShot(50, lambda active=worker: self._complete_deferred_close(active))
+            return
+        self._current_worker = None
+        self._close_pending = False
+        QTimer.singleShot(0, self.close)
 
     # ═══════════════════════════════════════════════════════
     # 菜单栏
@@ -204,10 +231,14 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         lines_menu.addAction(self._act("底线检测...", self._detect_bottom))
 
         data_menu = mb.addMenu("数据")
-        data_menu.addAction(self._act("噪声去除...", self._apply_noise_params))
-        data_menu.addAction(self._act("鱼群检测...", self._detect_schools))
-        data_menu.addAction(self._act("回声积分...", self._run_integration))
-        data_menu.addAction(self._act("SED 单体目标检测...", self._run_real_sed))
+        self._data_menu_actions = {
+            "noise": self._act("噪声去除...", lambda: self._show_processing_dialog("noise")),
+            "schools": self._act("鱼群检测...", lambda: self._show_processing_dialog("schools")),
+            "integration": self._act("回声积分...", lambda: self._show_processing_dialog("integration")),
+            "sed": self._act("SED 单体目标检测...", lambda: self._show_processing_dialog("sed")),
+        }
+        for action in self._data_menu_actions.values():
+            data_menu.addAction(action)
 
         # ── 分析 ──
         am = mb.addMenu(T("menu_analysis"))
@@ -242,9 +273,10 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
 
     def _open_recent(self, path: str):
         """打开最近列表中的项目"""
-        # 等待旧 worker 完成，避免线程引用丢失
+        # 当前任务仍运行时拒绝切换，不能阻塞 UI 或丢弃 QThread 引用。
         if self._current_worker is not None and self._current_worker.isRunning():
-            self._current_worker.wait(5000)
+            self.statusbar.set_status("请等待当前后台任务完成后再切换项目")
+            return
         self._current_worker = None
         try:
             from src.gui.handlers.file_handlers import _save_recent
@@ -310,6 +342,8 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
     def _select_active_line(self, line_id: str):
         if line_id:
             self._active_line_id = line_id
+            if hasattr(self, "echogram"):
+                self.echogram.set_active_line(line_id)
 
     def _start_draw_active_line(self):
         if self._active_line_id == LineManager.ZERO_ID:
@@ -339,6 +373,91 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
             QMessageBox.warning(self, "线段设置", str(exc))
             return
         self._refresh_line_toolbar()
+
+    def _show_display_settings(self):
+        from src.gui.display_settings_dialog import DisplaySettingsDialog
+
+        dialog = DisplaySettingsDialog(
+            self.display_settings["colormap"],
+            self.display_settings["vmin"],
+            self.display_settings["vmax"],
+            self,
+        )
+        dialog.settings_applied.connect(self._apply_display_settings)
+        dialog.show()
+        self._display_settings_dialog = dialog
+
+    def _show_analysis_region_dialog(self):
+        """选择分析区域的上下边界，并使后续分析立即使用新范围。"""
+        from src.gui.analysis_region_dialog import AnalysisRegionDialog
+
+        lines = [(line.id, line.name) for line in self.line_manager if line.visible]
+        if len(lines) < 2:
+            QMessageBox.warning(self, T("dialog_warning"), "请先创建或检测至少两条线段。")
+            return
+        region = self.analysis_region
+        dialog = AnalysisRegionDialog(
+            lines,
+            upper_line_id=(region.upper_line_id if region else LineManager.SURFACE_ID),
+            lower_line_id=(region.lower_line_id if region else LineManager.BOTTOM_ID),
+            parent=self,
+        )
+        dialog.region_applied.connect(self._apply_analysis_region)
+        dialog.show()
+        self._analysis_region_dialog = dialog
+
+    def _apply_analysis_region(self, upper_line_id: str, lower_line_id: str):
+        self.analysis_region = AnalysisRegion(upper_line_id, lower_line_id)
+        self._analysis_region_enabled = True
+        self.echogram.set_analysis_region_enabled(True)
+        self._invalidate_analysis_region_cache()
+        self._apply_analysis_region_to_ds()
+
+    def _apply_display_settings(self, colormap: str, vmin: float, vmax: float):
+        self.display_settings = {
+            "colormap": colormap,
+            "vmin": float(vmin),
+            "vmax": float(vmax),
+        }
+        self.echogram.set_colormap(colormap, float(vmin), float(vmax))
+
+    def _show_processing_dialog(self, kind: str):
+        """显示单一功能参数窗口；只有 Apply/确定才启动对应 Worker。"""
+        if self._ds_Sv is None:
+            QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
+            return
+        if self._current_worker is not None and self._current_worker.isRunning():
+            self.statusbar.set_status("请等待当前后台任务完成后再执行新的数据处理")
+            return
+
+        dialog = self._processing_dialogs.get(kind)
+        if dialog is None:
+            from src.gui.processing_dialogs import ProcessingParametersDialog
+
+            processing = self.property_panel.processing
+            specs = {
+                "noise": (processing.noise_group, processing.get_noise_config, "噪声去除参数", self._apply_noise_params),
+                "schools": (processing.school_group, processing.get_school_config, "鱼群检测参数", self._detect_schools),
+                "integration": (processing.integration_group, processing.get_integration_config, "回声积分参数", self._run_integration),
+                "sed": (processing.real_sed_group, processing.get_real_sed_config, "SED 单体目标检测参数", self._run_real_sed),
+            }
+            parameter_widget, getter, title, callback = specs[kind]
+            # 旧参数页已从 Dock 移除；原有功能按钮会绕过 Apply/确定语义。
+            button_name = {
+                "schools": "btn_detect_schools",
+                "integration": "btn_integration",
+                "sed": "btn_real_sed",
+            }.get(kind)
+            if button_name:
+                getattr(processing, button_name).hide()
+            dialog = ProcessingParametersDialog(
+                parameter_widget, getter, title=title, parent=self
+            )
+            dialog.apply_requested.connect(lambda _config, cb=callback: cb())
+            self._processing_dialogs[kind] = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     # ═══════════════════════════════════════════════════════
     # UI 布局
@@ -474,7 +593,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.echogram.mouse_moved.connect(self.statusbar.set_coords)
         self.echogram.mouse_moved.connect(self._update_depth_at_cursor)
         self.echogram.region_selected.connect(self._on_region_selected)
-        self.echogram.bottom_line_edited.connect(self._on_bottom_line_edited)
+        self.echogram.line_edited.connect(self._on_line_edited)
         self.echogram.sv_at_cursor.connect(self.statusbar.set_sv)
         self.echogram.zoom_changed.connect(self.statusbar.set_zoom_info)
         self.echogram.zoom_changed.connect(self._update_nav_bar)
@@ -484,7 +603,13 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
 
         # 右键菜单信号
         self.echogram.surface_line_requested.connect(self._on_surface_line_dialog)
+        self.echogram.analysis_region_requested.connect(self._show_analysis_region_dialog)
         self.echogram.analysis_region_toggle.connect(self._on_analysis_region_toggle)
+        self.echogram.display_settings_requested.connect(self._show_display_settings)
+        self.echogram.noise_removal_requested.connect(lambda: self._show_processing_dialog("noise"))
+        self.echogram.school_detection_requested.connect(lambda: self._show_processing_dialog("schools"))
+        self.echogram.integration_requested.connect(lambda: self._show_processing_dialog("integration"))
+        self.echogram.real_sed_requested.connect(lambda: self._show_processing_dialog("sed"))
         self.echogram.re_detect_bottom.connect(self._detect_bottom)
         self.echogram.update_bottom_requested.connect(self._on_update_bottom)
 

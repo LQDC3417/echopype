@@ -221,7 +221,9 @@ class EpProject:
         """将旧表线/底线字段与通用线模型保持双向兼容。"""
         surface = self.line_manager.get(LineManager.SURFACE_ID)
         if surface.kind == "derived":
-            surface.offset_m = float(self.surface_depth)
+            # 新线模型为主状态；仅当它仍为默认值时接纳旧调用方写入的 legacy 值。
+            if np.isclose(surface.offset_m, 2.0) and not np.isclose(self.surface_depth, 2.0):
+                surface.offset_m = float(self.surface_depth)
         bottom = self.line_manager._lines.get(LineManager.BOTTOM_ID)
         if self.bottom_line is not None and (bottom is None or bottom.values is None):
             self.line_manager.set_line_data(LineManager.BOTTOM_ID, self.bottom_line, kind="detected")

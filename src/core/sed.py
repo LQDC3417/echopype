@@ -322,6 +322,53 @@ def detect_single_targets_real(
     ])
 
 
+def filter_targets_by_region(
+    targets_df: pd.DataFrame,
+    upper_depth_m: np.ndarray | None,
+    lower_depth_m: np.ndarray | None,
+) -> pd.DataFrame:
+    """按全局 ping 的上下边界过滤 SED 目标。
+
+    边界缺失、交叉、目标 ping 无法映射或深度越界时均排除目标。
+    两个边界均为 ``None`` 时保持原结果。
+    """
+    if upper_depth_m is None and lower_depth_m is None:
+        return targets_df.copy()
+    if upper_depth_m is None or lower_depth_m is None:
+        raise ValueError("SED region requires both upper and lower boundaries")
+
+    upper = np.asarray(upper_depth_m, dtype=float).reshape(-1)
+    lower = np.asarray(lower_depth_m, dtype=float).reshape(-1)
+    if len(upper) != len(lower):
+        raise ValueError("SED region boundaries must have equal ping counts")
+    if targets_df.empty:
+        return targets_df.copy()
+    if "ping_idx" not in targets_df or "range_m" not in targets_df:
+        raise ValueError("SED targets require ping_idx and range_m columns")
+
+    ping_values = pd.to_numeric(targets_df["ping_idx"], errors="coerce").to_numpy()
+    depth_values = pd.to_numeric(targets_df["range_m"], errors="coerce").to_numpy()
+    integer_ping = np.isfinite(ping_values) & (ping_values == np.floor(ping_values))
+    ping_indices = np.zeros(len(targets_df), dtype=np.int64)
+    ping_indices[integer_ping] = ping_values[integer_ping].astype(np.int64)
+    valid_ping = integer_ping & (ping_indices >= 0) & (ping_indices < len(upper))
+
+    selected_upper = np.full(len(targets_df), np.nan, dtype=float)
+    selected_lower = np.full(len(targets_df), np.nan, dtype=float)
+    selected_upper[valid_ping] = upper[ping_indices[valid_ping]]
+    selected_lower[valid_ping] = lower[ping_indices[valid_ping]]
+    keep = (
+        valid_ping
+        & np.isfinite(depth_values)
+        & np.isfinite(selected_upper)
+        & np.isfinite(selected_lower)
+        & (selected_upper < selected_lower)
+        & (depth_values >= selected_upper)
+        & (depth_values <= selected_lower)
+    )
+    return targets_df.loc[keep].copy().reset_index(drop=True)
+
+
 def aggregate_targets_to_grid(
     targets_df: pd.DataFrame,
     ds_Sv: xr.Dataset,

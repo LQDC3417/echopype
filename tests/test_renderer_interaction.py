@@ -82,3 +82,49 @@ def test_renderer_accepts_multiple_named_lines(qapp):
         assert set(renderer.get_lines()) == {"surface", "bottom"}
     finally:
         renderer.close()
+
+
+def test_replacing_named_lines_removes_legacy_line_residue(qapp):
+    from src.viz.opengl_renderer import EchogramRenderer
+
+    renderer = EchogramRenderer()
+    try:
+        renderer.set_lines({"surface": [2.0, 2.0], "bottom": [20.0, 21.0]})
+        renderer.set_lines({"custom": [7.0, 8.0]})
+
+        assert set(renderer.get_lines()) == {"custom"}
+        assert renderer.get_bottom_line() is None
+        assert renderer._surface_line is None
+    finally:
+        renderer.close()
+
+
+def test_active_line_edit_and_undo_are_isolated_per_line(qapp):
+    from src.viz.opengl_renderer import EchogramRenderer
+
+    renderer = EchogramRenderer()
+    emitted = []
+    renderer.line_edited.connect(lambda line_id, values: emitted.append((line_id, values.copy())))
+    try:
+        renderer.set_data(np.zeros((6, 20), dtype=np.float32))
+        renderer.set_lines({"first": np.full(6, 5.0), "second": np.full(6, 10.0)})
+        renderer.set_active_line("first")
+        renderer._enable_smoothing = False
+        renderer._save_line_undo()
+        renderer._bottom_draw_points = [(1.0, 7.0), (3.0, 9.0)]
+        renderer._apply_drawn_segment()
+        edited_first = renderer.get_lines()["first"].copy()
+
+        renderer.set_active_line("second")
+        renderer._save_line_undo()
+        renderer._bottom_draw_points = [(1.0, 12.0), (3.0, 14.0)]
+        renderer._apply_drawn_segment()
+        renderer._undo_line()
+
+        assert emitted[0][0] == "first"
+        assert emitted[1][0] == "second"
+        assert emitted[-1][0] == "second"
+        np.testing.assert_allclose(renderer.get_lines()["first"], edited_first, equal_nan=True)
+        np.testing.assert_allclose(renderer.get_lines()["second"], np.full(6, 10.0))
+    finally:
+        renderer.close()

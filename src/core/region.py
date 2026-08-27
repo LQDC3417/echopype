@@ -13,6 +13,8 @@ from dataclasses import dataclass
 import numpy as np
 import xarray as xr
 
+from src.core.lines import LineManager
+
 logger = logging.getLogger("fish_acoustics")
 
 
@@ -37,26 +39,126 @@ def build_line_region_mask(
     lower_depth_m: np.ndarray,
 ) -> tuple[np.ndarray, int]:
     """构建任意两条深度线之间的 mask，并整条排除无效 ping。"""
-    depths = np.asarray(echo_range_m, dtype=np.float32).reshape(-1)
+    depths = np.asarray(echo_range_m, dtype=np.float32)
     upper = np.asarray(upper_depth_m, dtype=np.float32).reshape(-1)
     lower = np.asarray(lower_depth_m, dtype=np.float32).reshape(-1)
     if len(upper) != len(lower):
         raise ValueError("Region boundaries must have equal ping counts")
-    if depths.size == 0:
+    if depths.ndim == 1:
+        depths = np.broadcast_to(depths, (len(upper), depths.size))
+    elif depths.ndim != 2 or depths.shape[0] != len(upper):
+        raise ValueError("echo_range must have one row per ping")
+    if depths.shape[1] == 0:
         return np.zeros((len(upper), 0), dtype=bool), len(upper)
 
+    finite_depth = np.isfinite(depths)
+    row_has_depth = finite_depth.any(axis=1)
+    depth_min = np.min(np.where(finite_depth, depths, np.inf), axis=1)
+    depth_max = np.max(np.where(finite_depth, depths, -np.inf), axis=1)
     valid = (
         np.isfinite(upper)
         & np.isfinite(lower)
         & (upper < lower)
-        & (upper >= depths[0])
-        & (lower <= depths[-1])
+        & row_has_depth
+        & (upper >= depth_min)
+        & (lower <= depth_max)
     )
-    mask = (depths[np.newaxis, :] >= upper[:, np.newaxis]) & (
-        depths[np.newaxis, :] <= lower[:, np.newaxis]
-    )
+    mask = finite_depth & (depths >= upper[:, np.newaxis]) & (depths <= lower[:, np.newaxis])
     mask[~valid, :] = False
     return mask, int((~valid).sum())
+
+
+def _echo_range_2d(ds_Sv: xr.Dataset, n_pings: int) -> np.ndarray:
+    """提取以米为单位的 ``ping × sample`` 深度坐标。"""
+    if "echo_range" not in ds_Sv:
+        raise ValueError("Dataset has no echo_range in metres")
+    echo_range = ds_Sv["echo_range"]
+    if "channel" in echo_range.dims:
+        echo_range = echo_range.isel(channel=0)
+    if "ping_time" in echo_range.dims:
+        echo_range = echo_range.transpose("ping_time", "range_sample")
+    values = np.asarray(echo_range.values, dtype=np.float64)
+    values = np.squeeze(values)
+    if values.ndim == 1:
+        return np.broadcast_to(values, (n_pings, values.size))
+    if values.ndim != 2 or values.shape[0] != n_pings:
+        raise ValueError("echo_range ping count does not match Sv")
+    return values
+
+
+def depths_to_sample_indices(echo_range_m: np.ndarray, depths_m: np.ndarray) -> np.ndarray:
+    """逐 ping 将米深转换为 sample index；无效或越界深度返回 NaN。"""
+    depths = np.asarray(depths_m, dtype=np.float64).reshape(-1)
+    ranges = np.asarray(echo_range_m, dtype=np.float64)
+    if ranges.ndim == 1:
+        ranges = np.broadcast_to(ranges, (len(depths), ranges.size))
+    if ranges.ndim != 2 or ranges.shape[0] != len(depths):
+        raise ValueError("echo_range ping count does not match depth ping count")
+    result = np.full(len(depths), np.nan, dtype=np.float32)
+    for ping, depth in enumerate(depths):
+        row = ranges[ping]
+        finite = np.isfinite(row)
+        if not np.isfinite(depth) or not finite.any():
+            continue
+        valid_row = row[finite]
+        if depth < valid_row.min() or depth > valid_row.max():
+            continue
+        finite_indices = np.flatnonzero(finite)
+        if valid_row[0] <= valid_row[-1]:
+            pos = int(np.searchsorted(valid_row, depth))
+        else:
+            pos = int(np.searchsorted(-valid_row, -depth))
+        pos = min(pos, len(valid_row) - 1)
+        result[ping] = finite_indices[pos]
+    return result
+
+
+def sample_indices_to_depths(echo_range_m: np.ndarray, sample_indices: np.ndarray) -> np.ndarray:
+    """逐 ping 将 Renderer 的 sample index 转换为米深，支持小数 index 插值。"""
+    samples = np.asarray(sample_indices, dtype=np.float64).reshape(-1)
+    ranges = np.asarray(echo_range_m, dtype=np.float64)
+    if ranges.ndim == 1:
+        ranges = np.broadcast_to(ranges, (len(samples), ranges.size))
+    if ranges.ndim != 2 or ranges.shape[0] != len(samples):
+        raise ValueError("echo_range ping count does not match sample ping count")
+    result = np.full(len(samples), np.nan, dtype=np.float32)
+    for ping, sample in enumerate(samples):
+        row = ranges[ping]
+        if not np.isfinite(sample) or sample < 0 or sample > len(row) - 1:
+            continue
+        left = int(np.floor(sample))
+        right = int(np.ceil(sample))
+        if not np.isfinite(row[left]) or not np.isfinite(row[right]):
+            continue
+        fraction = sample - left
+        result[ping] = row[left] + fraction * (row[right] - row[left])
+    return result
+
+
+def crop_sv_by_line_region(
+    ds_Sv: xr.Dataset,
+    line_manager: LineManager,
+    region: AnalysisRegion,
+) -> tuple[xr.Dataset, int]:
+    """按 ping_time 解析任意上下边界线，并以米深构建分析区域。"""
+    line_ids = {line.id for line in line_manager}
+    region.validate(line_ids)
+    ping_times = np.asarray(ds_Sv["ping_time"].values)
+    upper = line_manager.resolve_for_pings(region.upper_line_id, ping_times)
+    lower = line_manager.resolve_for_pings(region.lower_line_id, ping_times)
+    echo_range = _echo_range_2d(ds_Sv, len(ping_times))
+    mask, excluded = build_line_region_mask(echo_range, upper, lower)
+
+    ds_out = ds_Sv.copy(deep=True)
+    mask_da = xr.DataArray(
+        mask,
+        dims=("ping_time", "range_sample"),
+        coords={"ping_time": ds_Sv["ping_time"], "range_sample": ds_Sv["range_sample"]},
+    )
+    for variable in ("Sv", "Sv_corrected"):
+        if variable in ds_out:
+            ds_out[variable] = ds_out[variable].where(mask_da)
+    return ds_out, excluded
 
 
 # ── 坐标转换 ──────────────────────────────────────────────

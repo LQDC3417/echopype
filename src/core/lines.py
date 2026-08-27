@@ -48,6 +48,7 @@ class LineManager:
 
     def __init__(self, lines: Iterable[LineDefinition] | None = None):
         self._lines: dict[str, LineDefinition] = {}
+        self._revision = 0
         if lines is None:
             self._install_defaults()
         else:
@@ -70,6 +71,14 @@ class LineManager:
 
     def __iter__(self):
         return iter(self._lines.values())
+
+    @property
+    def revision(self) -> int:
+        """返回模型修订号，供依赖线段解析结果的缓存判定失效。"""
+        return self._revision
+
+    def _touch(self) -> None:
+        self._revision += 1
 
     def get(self, line_id: str) -> LineDefinition:
         try:
@@ -103,6 +112,7 @@ class LineManager:
             color=color or DEFAULT_LINE_COLORS[len(self._lines) % len(DEFAULT_LINE_COLORS)],
         )
         self._lines[line_id] = line
+        self._touch()
         return line
 
     def rename_line(self, line_id: str, name: str) -> None:
@@ -110,6 +120,7 @@ class LineManager:
             raise ValueError("Zero line is protected")
         self._validate_name(name, except_id=line_id)
         self.get(line_id).name = name.strip()
+        self._touch()
 
     def delete_line(self, line_id: str, *, protected_ids: set[str] | None = None) -> None:
         if line_id == self.ZERO_ID:
@@ -120,6 +131,7 @@ class LineManager:
             raise ValueError("Line is referenced by another line")
         self.get(line_id)
         del self._lines[line_id]
+        self._touch()
 
     def set_reference(self, line_id: str, reference_id: str) -> None:
         line = self.get(line_id)
@@ -132,15 +144,18 @@ class LineManager:
         line.kind = "derived"
         line.values = None
         line.ping_times = None
+        self._touch()
 
     def set_offset(self, line_id: str, offset_m: float) -> None:
         line = self.get(line_id)
         if line.kind == "zero":
             raise ValueError("Zero line is protected")
         line.offset_m = float(offset_m)
+        self._touch()
 
     def set_visible(self, line_id: str, visible: bool) -> None:
         self.get(line_id).visible = bool(visible)
+        self._touch()
 
     def set_line_data(
         self,
@@ -167,6 +182,7 @@ class LineManager:
         line.offset_m = 0.0
         line.values = arr
         line.ping_times = times
+        self._touch()
 
     def resolve_for_pings(self, line_id: str, ping_times: Iterable) -> np.ndarray:
         target_times = np.asarray(ping_times).reshape(-1)

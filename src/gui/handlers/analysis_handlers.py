@@ -6,6 +6,7 @@ from src.gui.i18n import T
 from PySide6.QtWidgets import QMessageBox
 
 from src.gui.workers import (
+    MultiFileRealSedWorker,
     MultifreqAnalysisWorker,
     QualityCheckWorker,
     RealSedWorker,
@@ -20,7 +21,9 @@ class AnalysisMixin:
     """高级分析：质量检查、多频分析、单体目标检测、Sv统计、Transect分段"""
 
     def _on_real_sed_params_changed(self, _params):
-        if self._echodata is not None and self._ds_Sv is not None:
+        if self._ds_Sv is not None and (
+            self._echodata is not None or getattr(self, "_current_raw_files", None)
+        ):
             self._schedule_parameter_apply("real_sed", self._run_real_sed)
 
     def _run_quality_check(self):
@@ -115,16 +118,51 @@ class AnalysisMixin:
     # 单体目标检测
     # ═══════════════════════════════════════════════════════
 
+    def _get_sed_region_boundaries(self):
+        """解析当前活动区域在合并 Echogram 全局 ping 上的深度边界。"""
+        region = getattr(self, "analysis_region", None)
+        line_manager = getattr(self, "line_manager", None)
+        if region is None or line_manager is None or self._ds_Sv is None:
+            return None, None
+        if "ping_time" not in self._ds_Sv:
+            raise ValueError("SED analysis dataset has no ping_time coordinate")
+        ping_times = self._ds_Sv["ping_time"].values
+        return (
+            line_manager.resolve_for_pings(region.upper_line_id, ping_times),
+            line_manager.resolve_for_pings(region.lower_line_id, ping_times),
+        )
+
     def _run_real_sed(self):
         """运行真实单体目标检测（分裂波束 SED）"""
-        if self._echodata is None:
+        raw_files = list(getattr(self, "_current_raw_files", None) or [])
+        if self._ds_Sv is None or (self._echodata is None and not raw_files):
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return
         # 从 UI 同步配置
         rs_cfg = self.property_panel.processing.get_real_sed_config()
         self._config.setdefault("single_target_real", {}).update(rs_cfg)
+        try:
+            upper_depth_m, lower_depth_m = self._get_sed_region_boundaries()
+        except Exception as exc:
+            self._on_worker_error(str(exc))
+            return
         self.statusbar.show_progress(T("msg_real_sed_running"))
-        self._current_worker = RealSedWorker(self._echodata, self._ds_Sv, self._config)
+        if len(raw_files) > 1:
+            self._current_worker = MultiFileRealSedWorker(
+                raw_files,
+                self._ds_Sv,
+                self._config,
+                upper_depth_m=upper_depth_m,
+                lower_depth_m=lower_depth_m,
+            )
+        else:
+            self._current_worker = RealSedWorker(
+                self._echodata,
+                self._ds_Sv,
+                self._config,
+                upper_depth_m=upper_depth_m,
+                lower_depth_m=lower_depth_m,
+            )
         worker = self._current_worker
         self._connect_latest_worker(worker, self._on_real_sed_done)
         worker.progress.connect(self.statusbar.set_status)
@@ -134,7 +172,17 @@ class AnalysisMixin:
         """真实 SED 完成 → 展示网格聚合表 + echogram 叠加（逐目标）"""
         self._stale_results.discard("real_sed")
         self.statusbar.hide_progress()
-        targets_df, grid_df = result
+        failures = getattr(result, "failed_files", ())
+        if hasattr(result, "targets_df"):
+            targets_df, grid_df = result.targets_df, result.grid_df
+        else:
+            targets_df, grid_df = result
+        if failures:
+            details = "\n".join(
+                f"SED 文件失败: {failure.path} [{failure.stage}]: {failure.error}"
+                for failure in failures
+            )
+            self._append_error_message(details)
         n = len(targets_df) if targets_df is not None and not targets_df.empty else 0
         if n == 0:
             self.echogram.clear_single_targets()

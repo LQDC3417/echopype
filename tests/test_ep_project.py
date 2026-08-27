@@ -41,3 +41,26 @@ def test_ep_project_migrates_legacy_surface_and_bottom_fields(tmp_path):
     assert loaded.get_line_manager().get("surface").offset_m == 4.5
     assert loaded.get_line_manager().get("bottom").kind == "detected"
     np.testing.assert_allclose(loaded.get_line_manager().get("bottom").values, [18.0, 19.0])
+
+
+def test_line_model_surface_offset_is_authoritative_when_saving(tmp_path):
+    project = EpProject()
+    project.line_manager.set_offset("surface", 7.5)
+
+    path = project.save(tmp_path / "surface.ep")
+    loaded = EpProject.load(path)
+
+    assert loaded.surface_depth == 7.5
+    assert loaded.line_manager.get("surface").offset_m == 7.5
+    with h5py.File(path, "r") as handle:
+        assert float(handle["analysis/surface_depth"][()]) == 7.5
+
+
+def test_new_project_keeps_writing_legacy_bottom_field_from_line_model(tmp_path):
+    project = EpProject()
+    project.line_manager.set_line_data("bottom", [30.0, 31.0], kind="manual")
+
+    path = project.save(tmp_path / "bottom.ep")
+
+    with h5py.File(path, "r") as handle:
+        np.testing.assert_allclose(handle["analysis/bottom_line"][()], [30.0, 31.0])

@@ -58,3 +58,15 @@ def test_reindexes_line_values_by_ping_time_and_excludes_missing_values():
     actual = manager.resolve_for_pings("bottom", np.array([10, 20, 30]))
 
     np.testing.assert_allclose(actual, [20.0, np.nan, 22.0], equal_nan=True)
+
+
+def test_revision_changes_when_line_definition_or_data_changes():
+    manager = LineManager()
+    initial = manager.revision
+
+    manager.set_offset("surface", 3.0)
+    after_offset = manager.revision
+    manager.set_line_data("bottom", [10.0], [1], kind="detected")
+
+    assert after_offset > initial
+    assert manager.revision > after_offset
