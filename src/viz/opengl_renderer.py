@@ -346,6 +346,7 @@ class EchogramRenderer(QOpenGLWidget):
             self._bottom_draw_points.clear()
             self._bottom_editing = False
             self._bottom_drawing = False
+        self.setCursor(Qt.OpenHandCursor if mode == MouseMode.PAN else Qt.ArrowCursor)
 
     def set_analysis_region_enabled(self, enabled: bool) -> None:
         """设置分析区域限定标志"""
@@ -562,11 +563,12 @@ class EchogramRenderer(QOpenGLWidget):
         glColor4f(0.8, 0.6, 0.0, 1.0)
         glLineWidth(line_width)
 
-        # ??GL_LINE_STRIP??????
+        indices = self._decimate_bottom_line(bl)
         glBegin(GL_LINE_STRIP)
-        for i, val in enumerate(bl):
-            if np.isnan(val):
-                # ??NaN???????????????
+        for i in indices:
+            val = bl[i]
+            if not np.isfinite(val):
+                # 无效点用于断开底线，避免把无穷值送入 OpenGL。
                 glEnd()
                 glBegin(GL_LINE_STRIP)
                 continue
@@ -574,6 +576,29 @@ class EchogramRenderer(QOpenGLWidget):
             y = self._offset_y + val * self._zoom_y
             glVertex2f(x, y)
         glEnd()
+
+    @staticmethod
+    def _decimate_bottom_line(bottom: np.ndarray, max_points: int = 20_000) -> np.ndarray:
+        """为显示抽样超长底线，保留端点和 NaN 断线边界。"""
+        values = np.asarray(bottom)
+        n = values.size
+        if n <= max_points:
+            return np.arange(n, dtype=np.int64)
+
+        finite = np.isfinite(values)
+        boundaries = np.flatnonzero(finite[1:] != finite[:-1]) + 1
+        mandatory = np.unique(
+            np.concatenate((np.array([0, n - 1], dtype=np.int64), boundaries, boundaries - 1))
+        )
+        if len(mandatory) >= max_points:
+            selected = np.linspace(0, len(mandatory) - 1, max_points, dtype=np.int64)
+            result = mandatory[selected]
+            result[-1] = n - 1
+            return np.unique(result)
+
+        remaining = max_points - len(mandatory)
+        sampled = np.linspace(0, n - 1, remaining, dtype=np.int64)
+        return np.unique(np.concatenate((mandatory, sampled)))
 
     def _draw_surface_line(self) -> None:
         """???? ? ???????????????"""
@@ -890,7 +915,11 @@ class EchogramRenderer(QOpenGLWidget):
             return
 
         if event.button() == Qt.LeftButton:
-            if self._mouse_mode == MouseMode.NAVIGATE or self._mouse_mode == MouseMode.SELECT_NOISE or self._mouse_mode == MouseMode.INSPECT:
+            if self._mouse_mode == MouseMode.PAN:
+                self._panning = True
+                self._pan_start = (sx, sy)
+                self.setCursor(Qt.ClosedHandCursor)
+            elif self._mouse_mode == MouseMode.NAVIGATE or self._mouse_mode == MouseMode.SELECT_NOISE or self._mouse_mode == MouseMode.INSPECT:
                 self._selecting = True
                 self._select_start = (sx, sy)
                 self._select_end = (sx, sy)
@@ -944,9 +973,15 @@ class EchogramRenderer(QOpenGLWidget):
         if event.button() == Qt.MiddleButton:
             self._panning = False
             self._pan_start = None
-            self.setCursor(Qt.ArrowCursor)
+            self.setCursor(Qt.OpenHandCursor if self._mouse_mode == MouseMode.PAN else Qt.ArrowCursor)
 
         elif event.button() == Qt.LeftButton:
+            if self._panning and self._mouse_mode == MouseMode.PAN:
+                self._panning = False
+                self._pan_start = None
+                self.setCursor(Qt.OpenHandCursor)
+                return
+
             # 自由手绘结束 — 应用绘制结果
             if self._bottom_drawing and self._mouse_mode == MouseMode.DRAW_BOTTOM:
                 self._bottom_drawing = False

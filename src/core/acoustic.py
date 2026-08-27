@@ -277,13 +277,19 @@ def process_all_files(config: dict) -> xr.Dataset:
 
     # 1. 打开所有 raw 文件，得到 EchoData 列表
     echodata_list = []
+    failed_files = []
     for raw_file in raw_files:
         try:
             ed = open_single_file(raw_file, config)
             echodata_list.append(ed)
         except Exception as e:
             logger.error(f"打开文件失败 {raw_file.name}: {e}")
+            failed_files.append((raw_file, e))
             continue
+
+    if failed_files:
+        names = ", ".join(path.name for path, _error in failed_files)
+        raise RuntimeError(f"部分 raw 文件打开失败：{names}") from failed_files[0][1]
 
     if not echodata_list:
         raise RuntimeError("所有文件打开失败")

@@ -28,6 +28,7 @@ class MouseMode(Enum):
     SELECT_NOISE = 1
     DRAW_BOTTOM = 2
     INSPECT = 3
+    PAN = 4
 
 
 class StandardToolBar(QToolBar):
@@ -186,6 +187,7 @@ class EchogramToolBar(QToolBar):
             T("mode_select_noise"),
             T("mode_draw_bottom"),
             T("mode_inspect"),
+            T("mode_pan"),
         ])
         self.mode_combo.setCurrentIndex(current if current >= 0 else 0)
         self.mode_combo.blockSignals(False)

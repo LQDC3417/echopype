@@ -28,10 +28,10 @@ class ProcessingMixin:
         self.pipeline_step.emit(T("pipeline_sv"))
         self.statusbar.show_progress(T("msg_computing_sv"))
         self._current_worker = ComputeSvWorker(self._echodata, self._config)
-        self._current_worker.finished.connect(self._on_sv_computed)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_sv_computed)
+        worker.progress.connect(self.statusbar.set_status)
+        worker.start()
 
     def _on_sv_computed(self, ds_Sv):
         self._ds_Sv = ds_Sv
@@ -48,7 +48,21 @@ class ProcessingMixin:
             QTimer.singleShot(200, self._apply_noise_params)
 
     def _on_noise_params_changed(self, params):
+        # 噪声变化只自动更新当前结果，下游结果标记为过期。
+        self._mark_results_stale("bottom", "schools", "integration")
         self._noise_timer.start()
+
+    def _on_bottom_params_changed(self, _params):
+        if self._ds_Sv is not None:
+            self._schedule_parameter_apply("bottom", self._detect_bottom)
+
+    def _on_school_params_changed(self, _params):
+        if self._ds_Sv is not None:
+            self._schedule_parameter_apply("schools", self._detect_schools)
+
+    def _on_integration_params_changed(self, _params):
+        if self._ds_Sv is not None:
+            self._schedule_parameter_apply("integration", self._run_integration)
 
     def _apply_all_params(self):
         """应用全部参数：保存配置 → 更新config → 触发处理"""
@@ -81,9 +95,9 @@ class ProcessingMixin:
         self._current_worker = NoiseRemovalWorker(
             self._ds_Sv, self._config, self._noise_mask_manual
         )
-        self._current_worker.finished.connect(self._on_noise_removed)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_noise_removed)
+        worker.start()
 
     def _on_noise_removed(self, ds_Sv):
         self._ds_Sv = ds_Sv
@@ -135,15 +149,32 @@ class ProcessingMixin:
         self.pipeline_step.emit(T("pipeline_bottom"))
         self.statusbar.show_progress(T("msg_detecting_bottom"))
         self._current_worker = DetectSeafloorWorker(self._ds_Sv, self._config)
-        self._current_worker.finished.connect(self._on_bottom_detected)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_bottom_detected)
+        worker.progress.connect(self.statusbar.set_status)
+        worker.start()
 
     def _on_bottom_detected(self, bottom):
-        self._bottom_line = np.asarray(bottom, dtype=np.float32)
+        bottom = np.asarray(bottom, dtype=np.float32).reshape(-1)
+        expected = int(self._ds_Sv.sizes.get("ping_time", 0))
+        if expected and len(bottom) != expected:
+            self._on_worker_error(
+                f"底线检测结果长度异常：得到 {len(bottom)} 个点，期望 {expected} 个点"
+            )
+            return
+
+        self._stale_results.discard("bottom")
+        self._bottom_line = bottom
         self.echogram.set_bottom_line(self._bottom_line)
         self.statusbar.hide_progress()
+
+        valid_count = int(np.isfinite(bottom).sum())
+        if valid_count == 0:
+            self.statusbar.set_status("底线检测完成，但没有有效底线点")
+            self._append_error_message(
+                "底线检测完成，但结果全部为空。请检查 Sv 数据、表线深度和底线检测参数。"
+            )
+            return
 
         # 缓存底线到当前文件
         self._save_file_state()
@@ -209,6 +240,10 @@ class ProcessingMixin:
             self._ds_Sv_analysis = None
             return
 
+        if not self._analysis_region_enabled:
+            self._ds_Sv_analysis = self._ds_Sv
+            return
+
         from src.core.region import crop_sv_by_region
         self._ds_Sv_analysis = crop_sv_by_region(
             self._ds_Sv,
@@ -270,9 +305,9 @@ class ProcessingMixin:
         self.statusbar.show_progress(T("msg_detecting_schools"))
         ds_for_detect = self._get_analysis_ds()
         self._current_worker = DetectSchoolsWorker(ds_for_detect, self._config)
-        self._current_worker.finished.connect(self._on_schools_detected)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_schools_detected)
+        worker.start()
 
     def _on_schools_detected(self, mask):
         # 将 mask 转换为 xr.DataArray
@@ -280,6 +315,7 @@ class ProcessingMixin:
 
         from src.core.school import schools_to_dataframe
         mask_da = xr.DataArray(mask) if not isinstance(mask, xr.DataArray) else mask
+        self._stale_results.discard("schools")
         self._schools_mask = mask_da.values if hasattr(mask_da, "values") else mask_da
         self.echogram.set_school_mask(self._schools_mask)
         n_pixels = int(np.sum(self._schools_mask)) if self._schools_mask.dtype == bool else 0
@@ -360,13 +396,14 @@ class ProcessingMixin:
             surface_depth_m=self._surface_depth_m,
             max_depth_m=max_depth_m,
         )
-        self._current_worker.finished.connect(self._on_integration_done)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_integration_done)
+        worker.progress.connect(self.statusbar.set_status)
+        worker.start()
 
     def _on_integration_done(self, result):
         """回声积分完成 → 展示结果表格 + echogram 网格叠加"""
+        self._stale_results.discard("integration")
         self._integration_result = result
         self.statusbar.hide_progress()
         df = result.to_dataframe()

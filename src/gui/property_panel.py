@@ -110,6 +110,10 @@ class ProcessingTab(QWidget):
     """处理参数标签页"""
 
     noise_params_changed = Signal(dict)
+    bottom_params_changed = Signal(dict)
+    school_params_changed = Signal(dict)
+    integration_params_changed = Signal(dict)
+    real_sed_params_changed = Signal(dict)
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
     stats_clicked = Signal()
@@ -558,6 +562,7 @@ class ProcessingTab(QWidget):
 
         # 恢复上次配置
         self._restore_settings()
+        self._connect_parameter_signals()
 
     def _load_presets(self) -> dict:
         """加载预设配置文件"""
@@ -626,6 +631,94 @@ class ProcessingTab(QWidget):
             "range_sample_num": self.spin_range_num.value(),
             "SNR_threshold": f"{self.spin_snr.value()}dB",
         })
+
+    def _connect_parameter_signals(self):
+        """将各功能参数控件连接到独立变更信号。"""
+        bottom_widgets = [
+            self.combo_bottom_method,
+            self.spin_bottom_thr,
+            self.spin_peak_thr,
+            self.spin_disc_thr,
+            self.spin_sat_thr,
+            self.spin_val_window,
+            self.spin_val_thr,
+            self.spin_smooth_window,
+            self.spin_search_min,
+            self.spin_window_len,
+            self.spin_backstep,
+        ]
+        for widget in bottom_widgets:
+            signal = (
+                widget.currentTextChanged
+                if isinstance(widget, QComboBox)
+                else widget.valueChanged
+            )
+            signal.connect(self._emit_bottom_params)
+
+        school_widgets = [
+            self.combo_school_method,
+            self.spin_school_thr,
+            self.spin_mincan_depth,
+            self.spin_mincan_ping,
+            self.spin_maxlink_depth,
+            self.spin_maxlink_ping,
+            self.spin_minsho_depth,
+            self.spin_minsho_ping,
+            self.spin_min_threshold,
+            self.spin_max_depth_dist,
+            self.spin_max_ping_dist,
+            self.spin_max_time_gap,
+            self.spin_min_shoal_pings,
+            self.spin_min_shoal_height,
+        ]
+        for widget in school_widgets:
+            signal = (
+                widget.currentTextChanged
+                if isinstance(widget, QComboBox)
+                else widget.valueChanged
+            )
+            signal.connect(self._emit_school_params)
+
+        integration_widgets = [
+            self.combo_integration_esu,
+            self.spin_integration_esu_size,
+            self.spin_integration_ts_default,
+            self.spin_integration_layer_width,
+            self.spin_integration_min_thr,
+            self.spin_integration_max_thr,
+        ]
+        for widget in integration_widgets:
+            signal = (
+                widget.currentTextChanged
+                if isinstance(widget, QComboBox)
+                else widget.valueChanged
+            )
+            signal.connect(self._emit_integration_params)
+
+        real_sed_widgets = [
+            self.spin_rs_threshold,
+            self.spin_rs_pldl,
+            self.spin_rs_min_pulse,
+            self.spin_rs_max_pulse,
+            self.spin_rs_angle_std,
+            self.spin_rs_beam_comp,
+            self.spin_rs_min_depth,
+            self.spin_rs_max_depth,
+        ]
+        for widget in real_sed_widgets:
+            widget.valueChanged.connect(self._emit_real_sed_params)
+
+    def _emit_bottom_params(self, *_args):
+        self.bottom_params_changed.emit(self.get_bottom_config())
+
+    def _emit_school_params(self, *_args):
+        self.school_params_changed.emit(self.get_school_config())
+
+    def _emit_integration_params(self, *_args):
+        self.integration_params_changed.emit(self.get_integration_config())
+
+    def _emit_real_sed_params(self, *_args):
+        self.real_sed_params_changed.emit(self.get_real_sed_config())
 
     def get_noise_config(self) -> dict:
         return {
@@ -876,6 +969,10 @@ class PropertyPanel(QTabWidget):
     """右侧属性面板 — 参照 Echoview Properties 面板"""
 
     noise_params_changed = Signal(dict)
+    bottom_params_changed = Signal(dict)
+    school_params_changed = Signal(dict)
+    integration_params_changed = Signal(dict)
+    real_sed_params_changed = Signal(dict)
     surface_line_changed = Signal(float)
     detect_schools_clicked = Signal()
     stats_clicked = Signal()
@@ -903,6 +1000,10 @@ class PropertyPanel(QTabWidget):
 
         # 转发信号
         self.processing.noise_params_changed.connect(self.noise_params_changed)
+        self.processing.bottom_params_changed.connect(self.bottom_params_changed)
+        self.processing.school_params_changed.connect(self.school_params_changed)
+        self.processing.integration_params_changed.connect(self.integration_params_changed)
+        self.processing.real_sed_params_changed.connect(self.real_sed_params_changed)
         self.processing.surface_line_changed.connect(self.surface_line_changed)
         self.processing.detect_schools_clicked.connect(self.detect_schools_clicked)
         self.processing.stats_clicked.connect(self.stats_clicked)

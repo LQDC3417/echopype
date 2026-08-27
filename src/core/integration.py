@@ -412,7 +412,10 @@ def integrate(
                     mean_Sv[i, j] = float(np.mean(sv_valid))
                     min_Sv[i, j] = float(np.min(sv_valid))
                     max_Sv[i, j] = float(np.max(sv_valid))
-                    abc[i, j], density_ind_ha[i, j] = _compute_abc_density(sv_layer, dr_layer, ts_default_db)
+                    sv_filtered = np.where(valid_mask, sv_layer, np.nan)
+                    abc[i, j], density_ind_ha[i, j] = _compute_abc_density(
+                        sv_filtered, dr_layer, ts_default_db
+                    )
 
                 cell_count += 1
                 if progress_callback:
@@ -446,7 +449,10 @@ def integrate(
                     mean_Sv[i, j] = float(np.mean(sv_valid))
                     min_Sv[i, j] = float(np.min(sv_valid))
                     max_Sv[i, j] = float(np.max(sv_valid))
-                    abc[i, j], density_ind_ha[i, j] = _compute_abc_density(sv_layer, dr_layer, ts_default_db)
+                    sv_filtered = np.where(valid_mask, sv_layer, np.nan)
+                    abc[i, j], density_ind_ha[i, j] = _compute_abc_density(
+                        sv_filtered, dr_layer, ts_default_db
+                    )
 
                 cell_count += 1
                 if progress_callback:

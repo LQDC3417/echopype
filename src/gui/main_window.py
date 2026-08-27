@@ -105,6 +105,9 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._redo_stack = []
         self._current_mode = MouseMode.NAVIGATE
         self._run_all_chain = False
+        self._stale_results: set[str] = set()
+        self._parameter_timers: dict[str, QTimer] = {}
+        self._parameter_callbacks = {}
         self._file_cache: dict[str, dict] = {}  # {path_str: {"sv": array, "ds": Dataset, "bottom": array}}
 
         # 变量缓存
@@ -247,21 +250,20 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
                 )
                 return
 
+            self._reset_analysis_state()
             self._current_raw_files = proj.raw_files
             self._current_project_path = Path(path)
             self._config = proj.config
-            self._incremental_sv = None
 
             self.statusbar.show_progress(T("msg_loading_files", n=len(proj.raw_files)))
             self._current_worker = MergeFilesWorker(proj.raw_files, proj.config)
-            self._current_worker.finished.connect(
-                lambda ds: self._on_project_loaded(ds, proj)
+            worker = self._current_worker
+            self._connect_latest_worker(
+                worker, lambda ds: self._on_project_loaded(ds, proj)
             )
-            self._current_worker.error.connect(self._on_worker_error)
-            self._current_worker.progress.connect(self.statusbar.set_status)
-            self._current_worker.progress_num.connect(self.statusbar.set_progress_value)
-            self._current_worker.file_ready.connect(self._on_file_ready)
-            self._current_worker.start()
+            worker.progress.connect(self.statusbar.set_status)
+            worker.progress_num.connect(self.statusbar.set_progress_value)
+            worker.start()
             _save_recent(str(path))
         except Exception as e:
             QMessageBox.critical(self, T("dialog_error"), f"{e}")
@@ -354,6 +356,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         bottom_tabs = QTabWidget()
         bottom_tabs.addTab(self.region_browser, T("bottom_region_tab"))
         bottom_tabs.addTab(self._message_panel, T("bottom_messages_tab"))
+        self._bottom_tabs = bottom_tabs
 
         self.dock_bottom = QDockWidget(T("region_school"), self)
         self.dock_bottom.setObjectName("dockRegions")
@@ -385,6 +388,8 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
 
         self._message_text = QPlainTextEdit()
         self._message_text.setReadOnly(True)
+        self._message_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self._message_text.setMaximumBlockCount(5000)
         msg_layout.addWidget(self._message_text, 1)
 
         # 线程安全：通过 Qt 信号桥接后台线程的日志
@@ -440,6 +445,10 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.property_panel.detect_schools_clicked.connect(self._detect_schools)
         self.property_panel.stats_clicked.connect(self._show_stats)
         self.property_panel.noise_params_changed.connect(self._on_noise_params_changed)
+        self.property_panel.bottom_params_changed.connect(self._on_bottom_params_changed)
+        self.property_panel.school_params_changed.connect(self._on_school_params_changed)
+        self.property_panel.integration_params_changed.connect(self._on_integration_params_changed)
+        self.property_panel.real_sed_params_changed.connect(self._on_real_sed_params_changed)
         self.property_panel.quality_check_clicked.connect(self._run_quality_check)
         self.property_panel.multifreq_clicked.connect(self._run_multifreq_analysis)
         self.property_panel.sv_stats_clicked.connect(self._run_sv_stats)
@@ -491,6 +500,10 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
                 "layer_width": 5.0, "min_threshold": -70.0,
                 "max_threshold": 0.0, "ts_default": -30.0,
             },
+            "output": {
+                "dir": "outputs",
+                "formats": ["netcdf", "csv"],
+            },
         }
 
     # ═══════════════════════════════════════════════════════
@@ -509,7 +522,53 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._run_all_chain = False
         self.statusbar.hide_progress()
         self.statusbar.set_status(f"{T('dialog_error')}: {msg}")
-        QMessageBox.critical(self, T("dialog_processing_error"), msg)
+        self._append_error_message(msg)
+
+    def _connect_latest_worker(self, worker, finished=None):
+        """只接受当前 Worker 的结果，避免旧参数任务覆盖新结果。"""
+        if finished is not None:
+            worker.finished.connect(
+                lambda result, w=worker: (
+                    finished(result) if w is self._current_worker else None
+                )
+            )
+        worker.error.connect(
+            lambda msg, w=worker: (
+                self._on_worker_error(msg) if w is self._current_worker else None
+            )
+        )
+
+    def _schedule_parameter_apply(self, name: str, callback, interval_ms: int = 500) -> None:
+        """防抖调度单个功能参数，避免连续拖动启动多个 Worker。"""
+        timer = self._parameter_timers.get(name)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            self._parameter_timers[name] = timer
+            timer.timeout.connect(lambda n=name: self._run_scheduled_parameter(n))
+        timer.setInterval(interval_ms)
+        self._parameter_callbacks[name] = callback
+        timer.start()
+
+    def _run_scheduled_parameter(self, name: str) -> None:
+        callback = self._parameter_callbacks.get(name)
+        if callback is not None:
+            callback()
+
+    def _mark_results_stale(self, *names: str) -> None:
+        self._stale_results.update(names)
+        labels = {"bottom": "底线", "schools": "鱼群", "integration": "积分", "real_sed": "SED"}
+        text = "、".join(labels.get(name, name) for name in names)
+        if text:
+            self.statusbar.set_status(f"参数已变更：{text}结果需要重新计算")
+
+    def _append_error_message(self, msg: str) -> None:
+        """将后台错误写入可滚动消息面板，不阻塞主窗口。"""
+        if not hasattr(self, "_message_text"):
+            return
+        self._message_text.appendPlainText(msg.rstrip())
+        self._bottom_tabs.setCurrentIndex(1)
+        self.dock_bottom.show()
 
     # ═══════════════════════════════════════════════════════
     # 文件操作 — 批量导入

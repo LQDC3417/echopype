@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from src.core.ep_project import EpProject
 from src.core.utils import load_config, squeeze_sv
-from src.gui.workers import MergeFilesWorker
+from src.gui.workers import MergeFilesWorker, MergeResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,22 @@ def _save_recent(path: str) -> None:
 
 
 class FileMixin:
+    def _reset_analysis_state(self):
+        """Reset transient analysis results when switching projects."""
+        self._noise_mask_manual = None
+        self._bottom_line = None
+        self._bottom_manually_edited = False
+        self._schools_mask = None
+        self._schools_df = None
+        self._integration_df = None
+        self._real_sed_df = None
+        self._ds_Sv_analysis = None
+        self._analysis_region_enabled = False
+        if hasattr(self, "echogram"):
+            self.echogram.set_bottom_line(None)
+            self.echogram.set_noise_mask(None)
+            self.echogram.set_school_mask(None)
+
     """文件操作：EP 项目新建/打开/保存、配置、变量列表"""
 
     # ═══════════════════════════════════════════════════════
@@ -56,6 +72,8 @@ class FileMixin:
         if not paths:
             return
 
+        self._reset_analysis_state()
+
         # 按文件名排序
         raw_files = sorted([Path(p) for p in paths])
 
@@ -65,48 +83,36 @@ class FileMixin:
 
         # 记录原始文件（供 .ep 保存）
         self._current_raw_files = raw_files
-        self._incremental_sv = None  # 增量拼接缓存（边加载边显示）
 
         # 启动合并加载（边加载边显示）
         self.statusbar.show_progress(T("msg_loading_files", n=len(raw_files)))
         self._current_worker = MergeFilesWorker(raw_files, self._config)
-        self._current_worker.finished.connect(self._on_merge_finished)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.progress_num.connect(self.statusbar.set_progress_value)
-        self._current_worker.file_ready.connect(self._on_file_ready)
-        self._current_worker.start()
+        worker = self._current_worker
+        self._connect_latest_worker(worker, self._on_merge_finished)
+        worker.progress.connect(self.statusbar.set_status)
+        worker.progress_num.connect(self.statusbar.set_progress_value)
+        worker.start()
 
     def _on_file_ready(self, ds_Sv, cur: int, total: int):
-        """单个文件加载完成 → 立即增量显示"""
-        sv = squeeze_sv(ds_Sv["Sv"].values)
-        sv = sv.astype(np.float32)
+        """兼容旧信号：只更新轻量状态，不复制完整 Sv。"""
+        n_pings = ds_Sv.sizes.get("ping_time", 0)
+        self.statusbar.set_status(T("msg_files_merged", n=n_pings) + f"  [{cur}/{total}]")
 
-        # 增量拼接：沿 ping 行方向拼接（水平延伸，深度列不变）
-        if self._incremental_sv is None:
-            self._incremental_sv = sv
+    def _on_merge_finished(self, merge_result):
+        if self._current_worker is not None:
+            self._echodata = getattr(self._current_worker, "echodata", None)
+        if isinstance(merge_result, MergeResult):
+            ds_Sv = merge_result.dataset
+            if merge_result.failed_files:
+                details = "\n".join(
+                    f"{item.path} [{item.stage}]: {item.error}\n{item.traceback}"
+                    for item in merge_result.failed_files
+                )
+                self._append_error_message(
+                    f"部分 raw 文件处理失败，已继续合并成功文件：\n{details}"
+                )
         else:
-            # 深度方向不一致时裁剪到最小（增量阶段临时视图，最终以 merge_aligned 为准）
-            n_cols = self._incremental_sv.shape[1]
-            if sv.shape[1] == n_cols:
-                self._incremental_sv = np.vstack([self._incremental_sv, sv])
-            else:
-                min_cols = min(n_cols, sv.shape[1])
-                self._incremental_sv = np.vstack([
-                    self._incremental_sv[:, :min_cols],
-                    sv[:, :min_cols],
-                ])
-
-        # 更新显示（不重置 zoom，保持当前视图）
-        self.echogram.set_data(self._incremental_sv)
-        if hasattr(self, "nav_bar"):
-            self.nav_bar.set_thumbnail(self._incremental_sv)
-        n_pings = self._incremental_sv.shape[0]
-        self.statusbar.set_status(
-            T("msg_files_merged", n=n_pings) + f"  [{cur}/{total}]"
-        )
-
-    def _on_merge_finished(self, ds_Sv):
+            ds_Sv = merge_result
         """合并加载完成 → 缓存 + 显示"""
         self.statusbar.hide_progress()
 
@@ -196,22 +202,21 @@ class FileMixin:
                 return
 
             # 记录项目信息
+            self._reset_analysis_state()
             self._current_raw_files = proj.raw_files
             self._current_project_path = Path(path)
             self._config = proj.config
-            self._incremental_sv = None
 
-            # 从 .raw 重新计算 Sv（边加载边显示）
+            # 从 .raw 重新计算 Sv
             self.statusbar.show_progress(T("msg_loading_files", n=len(proj.raw_files)))
             self._current_worker = MergeFilesWorker(proj.raw_files, proj.config)
-            self._current_worker.finished.connect(
-                lambda ds: self._on_project_loaded(ds, proj)
+            worker = self._current_worker
+            self._connect_latest_worker(
+                worker, lambda ds: self._on_project_loaded(ds, proj)
             )
-            self._current_worker.error.connect(self._on_worker_error)
-            self._current_worker.progress.connect(self.statusbar.set_status)
-            self._current_worker.progress_num.connect(self.statusbar.set_progress_value)
-            self._current_worker.file_ready.connect(self._on_file_ready)
-            self._current_worker.start()
+            worker.progress.connect(self.statusbar.set_status)
+            worker.progress_num.connect(self.statusbar.set_progress_value)
+            worker.start()
 
             _save_recent(str(path))
         except Exception as e:
@@ -219,6 +224,18 @@ class FileMixin:
 
     def _on_project_loaded(self, ds_Sv, proj: EpProject):
         """项目加载完成 → 显示 + 恢复分析结果"""
+        if self._current_worker is not None:
+            self._echodata = getattr(self._current_worker, "echodata", None)
+        if isinstance(ds_Sv, MergeResult):
+            if ds_Sv.failed_files:
+                details = "\n".join(
+                    f"{item.path} [{item.stage}]: {item.error}\n{item.traceback}"
+                    for item in ds_Sv.failed_files
+                )
+                self._append_error_message(
+                    f"部分 raw 文件处理失败，已继续合并成功文件：\n{details}"
+                )
+            ds_Sv = ds_Sv.dataset
         self.statusbar.hide_progress()
 
         # 缓存并显示 Sv
