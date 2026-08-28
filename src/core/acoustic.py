@@ -270,6 +270,7 @@ def process_all_files(config: dict) -> xr.Dataset:
     """处理所有 raw 文件并合并。
 
     流程：open_raw → combine_echodata → compute_Sv + noise + depth + seafloor
+    单个文件打开失败时，保留可处理的文件，并在结果 attrs 中记录失败文件名。
     """
     import echopype as ep
 
@@ -287,10 +288,6 @@ def process_all_files(config: dict) -> xr.Dataset:
             failed_files.append((raw_file, e))
             continue
 
-    if failed_files:
-        names = ", ".join(path.name for path, _error in failed_files)
-        raise RuntimeError(f"部分 raw 文件打开失败：{names}") from failed_files[0][1]
-
     if not echodata_list:
         raise RuntimeError("所有文件打开失败")
 
@@ -303,4 +300,8 @@ def process_all_files(config: dict) -> xr.Dataset:
 
     # 3. 校准 + 噪声去除 + 深度 + 底部检测
     ds_Sv = process_single_file(combined_ed, config)
+    if failed_files:
+        failed_names = [path.name for path, _error in failed_files]
+        ds_Sv.attrs["failed_raw_files"] = failed_names
+        logger.warning("跳过 %d 个无法打开的 raw 文件: %s", len(failed_names), ", ".join(failed_names))
     return ds_Sv

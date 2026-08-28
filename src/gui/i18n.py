@@ -156,6 +156,21 @@ _TEXTS = {
     "tab_file_info": {"zh": "文件信息", "en": "File Info"},
     "tab_processing": {"zh": "处理参数", "en": "Parameters"},
     "tab_statistics": {"zh": "统计结果", "en": "Statistics"},
+    "panel_display_settings": {"zh": "显示设置", "en": "Display Settings"},
+    "panel_annotations": {"zh": "标注与测量", "en": "Annotations & Measurements"},
+    "panel_advanced_analysis": {"zh": "高级分析", "en": "Advanced Analysis"},
+    "panel_export_hint": {
+        "zh": "导出将使用当前 Echogram 与处理结果。",
+        "en": "Export uses the current Echogram and processed results.",
+    },
+    "panel_annotation_tools_hint": {
+        "zh": "选择、手爪平移和底线绘制工具位于上方工具栏。",
+        "en": "Selection, hand panning, and bottom drawing tools are in the toolbar above.",
+    },
+    "panel_annotation_result_hint": {
+        "zh": "检测结果会同步显示在下方区域浏览器。",
+        "en": "Detection results are also shown in the region browser below.",
+    },
 
     # 文件信息
     "info_sonar_model": {"zh": "声呐型号", "en": "Sonar Model"},

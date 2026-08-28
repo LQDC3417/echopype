@@ -9,6 +9,8 @@ from src.gui.i18n import T
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from src.core.ep_project import EpProject
+from src.core.lines import LineManager
+from src.core.region import AnalysisRegion
 from src.core.utils import load_config, squeeze_sv
 from src.gui.workers import MergeFilesWorker, MergeResult
 
@@ -52,10 +54,81 @@ class FileMixin:
         self._real_sed_df = None
         self._ds_Sv_analysis = None
         self._analysis_region_enabled = False
+        self.line_manager = LineManager()
+        self.analysis_region = None
+        self.display_settings = {"colormap": "jet", "vmin": -90.0, "vmax": -30.0}
+        self._active_line_id = LineManager.SURFACE_ID
+        self._surface_depth_m = 2.0
+        self._current_project_path = None
         if hasattr(self, "echogram"):
             self.echogram.set_bottom_line(None)
             self.echogram.set_noise_mask(None)
             self.echogram.set_school_mask(None)
+        if hasattr(self, "_set_overlay_actions_enabled"):
+            self._set_overlay_actions_enabled(False)
+        if hasattr(self, "echogram") and hasattr(self.echogram, "set_lines"):
+            self.echogram.set_lines({})
+        if hasattr(self, "echogram") and hasattr(self.echogram, "set_colormap"):
+            self.echogram.set_colormap("jet", -90.0, -30.0)
+        if hasattr(self, "echo_toolbar"):
+            self.echo_toolbar.set_editable_lines(self.line_manager.editable_lines())
+
+    def _copy_gui_state_to_project(self, proj: EpProject) -> None:
+        """将当前 GUI 的项目级状态复制到持久化模型。"""
+        proj.line_manager = LineManager.from_records(self.line_manager.to_records())
+        if self.analysis_region is None:
+            proj.analysis_region = None
+        else:
+            proj.analysis_region = AnalysisRegion(
+                self.analysis_region.upper_line_id,
+                self.analysis_region.lower_line_id,
+            )
+        proj.display_settings = dict(self.display_settings)
+
+        surface = proj.line_manager.get(LineManager.SURFACE_ID)
+        proj.surface_depth = float(surface.offset_m)
+        bottom = proj.line_manager._lines.get(LineManager.BOTTOM_ID)
+        if bottom is not None and bottom.values is not None:
+            proj.bottom_line = bottom.values.copy()
+        elif self._bottom_line is not None:
+            proj.bottom_line = np.asarray(self._bottom_line, dtype=np.float32).copy()
+
+    def _restore_project_gui_state(self, proj: EpProject) -> None:
+        """从持久化模型恢复 GUI 的项目级状态，避免跨项目残留。"""
+        self.line_manager = LineManager.from_records(proj.line_manager.to_records())
+        if proj.analysis_region is None:
+            self.analysis_region = None
+        else:
+            self.analysis_region = AnalysisRegion(
+                proj.analysis_region.upper_line_id,
+                proj.analysis_region.lower_line_id,
+            )
+        self.display_settings = dict(proj.display_settings)
+
+        surface = self.line_manager.get(LineManager.SURFACE_ID)
+        self._surface_depth_m = (
+            float(surface.offset_m) if surface.kind == "derived" else float(proj.surface_depth)
+        )
+        bottom = self.line_manager._lines.get(LineManager.BOTTOM_ID)
+        if bottom is not None and bottom.values is not None:
+            self._bottom_line = bottom.values.copy()
+        elif proj.bottom_line is not None:
+            self._bottom_line = np.asarray(proj.bottom_line, dtype=np.float32).copy()
+        else:
+            self._bottom_line = None
+        self._ds_Sv_analysis = None
+        self._analysis_region_enabled = self.analysis_region is not None
+
+        if hasattr(self, "echogram"):
+            self.echogram.set_bottom_line(self._bottom_line)
+            if hasattr(self.echogram, "set_colormap"):
+                self.echogram.set_colormap(
+                    self.display_settings["colormap"],
+                    float(self.display_settings["vmin"]),
+                    float(self.display_settings["vmax"]),
+                )
+        if hasattr(self, "echo_toolbar"):
+            self.echo_toolbar.set_editable_lines(self.line_manager.editable_lines())
 
     """文件操作：EP 项目新建/打开/保存、配置、变量列表"""
 
@@ -65,6 +138,9 @@ class FileMixin:
 
     def _new_project(self):
         """新建项目：选择多个 .raw 文件 → 合并 → 显示"""
+        if self._current_worker is not None and self._current_worker.isRunning():
+            self.statusbar.set_status("请等待当前后台任务完成后再切换项目")
+            return
         paths, _ = QFileDialog.getOpenFileNames(
             self, T("new_project"), "",
             "Raw Files (*.raw);;All Files (*)"
@@ -155,9 +231,7 @@ class FileMixin:
             proj.compute_checksums()
 
             # 保存分析结果
-            proj.surface_depth = self._surface_depth_m
-            if self._bottom_line is not None:
-                proj.bottom_line = self._bottom_line
+            self._copy_gui_state_to_project(proj)
             if self._schools_mask is not None:
                 proj.school_mask = self._schools_mask
             if self._noise_mask_manual is not None:
@@ -182,6 +256,9 @@ class FileMixin:
 
     def _open_project(self):
         """打开 .ep 项目文件"""
+        if self._current_worker is not None and self._current_worker.isRunning():
+            self.statusbar.set_status("请等待当前后台任务完成后再切换项目")
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, T("open_project"), "", "EP Project (*.ep);;All Files (*)"
         )
@@ -238,22 +315,21 @@ class FileMixin:
             ds_Sv = ds_Sv.dataset
         self.statusbar.hide_progress()
 
+        self._restore_project_gui_state(proj)
+
         # 缓存并显示 Sv
         sv = squeeze_sv(ds_Sv["Sv"].values)
         self._file_cache["merged"] = {
             "sv": sv.astype(np.float32),
             "ds": ds_Sv,
-            "bottom": proj.bottom_line,
+            "bottom": self._bottom_line,
             "noise_mask": None,
             "school_mask": proj.school_mask,
-            "surface_depth_m": proj.surface_depth,
+            "surface_depth_m": self._surface_depth_m,
         }
         self._apply_sv_to_display(ds_Sv, sv)
 
         # 恢复分析结果
-        if proj.bottom_line is not None:
-            self._bottom_line = proj.bottom_line
-            self.echogram.set_bottom_line(proj.bottom_line)
         if proj.school_mask is not None:
             self._schools_mask = proj.school_mask
             self.echogram.set_school_mask(proj.school_mask)
@@ -270,10 +346,9 @@ class FileMixin:
             self.stats_dialog.update_real_sed(proj.sed_df)
 
         # 恢复表线深度到 UI spin box
-        self._surface_depth_m = proj.surface_depth
         spin = self.property_panel.processing.spin_surface
         spin.blockSignals(True)
-        spin.setValue(proj.surface_depth)
+        spin.setValue(self._surface_depth_m)
         spin.blockSignals(False)
         self._apply_analysis_region_to_ds()
         self._update_surface_line_render()
@@ -317,6 +392,7 @@ class FileMixin:
         sv = optimize_array_dtype(sv)
         self._ds_Sv = ds_Sv
         self._ds_Sv_analysis = None
+        self._set_overlay_actions_enabled(True)
         self._update_variable_list(ds_Sv, sv)
         self.echogram.set_data(sv)
         # 底部导航缩略图

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 import xarray as xr
 
-from src.core.utils import get_sv_array, get_vertical_coords
+from src.core.utils import get_vertical_coords
 
 logger = logging.getLogger("fish_acoustics")
 
@@ -208,9 +208,9 @@ def _legacy_apply_noise_reduction(
     channel_values = np.asarray(channel_values)
     if channel_values.ndim != 3:
         raise ValueError("Sv must have ping_time and range_sample dimensions")
-    n_channels = channel_values.shape[0]
-    Sv = channel_values[0]  # (n_pings, n_samples)，用于坐标和日志
     depth = get_vertical_coords(ds_Sv)  # (n_samples,)
+    snr_threshold = noise_cfg.get("snr_threshold", 3.0)
+    low_sv_db = noise_cfg.get("low_Sv_dB", -150.0)
 
     logger.info(f"噪声去除: mode={mode}")
 
@@ -219,19 +219,17 @@ def _legacy_apply_noise_reduction(
         passive_indices = noise_cfg.get("passive_ping_indices", None)
         min_range = noise_cfg.get("min_range", 5.0)
 
-        estimate_noise = lambda values: estimate_noise_passive(
-            values, passive_indices, min_range, depth,
-        )
+        def estimate_noise(values):
+            return estimate_noise_passive(values, passive_indices, min_range, depth)
     else:
         # De Robertis 模式（默认）
         ping_num = noise_cfg.get("ping_num", 40)
         range_sample_num = noise_cfg.get("range_sample_num", 10)
         noise_max = noise_cfg.get("noise_max", -125.0)
-        low_Sv_dB = noise_cfg.get("low_Sv_dB", -150.0)
-
-        estimate_noise = lambda values: estimate_noise_de_robertis(
-            values, depth, ping_num, range_sample_num, noise_max, low_Sv_dB,
-        )
+        def estimate_noise(values):
+            return estimate_noise_de_robertis(
+                values, depth, ping_num, range_sample_num, noise_max, low_sv_db
+            )
 
     noise_2d_list = []
     noise_per_ping_list = []
@@ -242,19 +240,15 @@ def _legacy_apply_noise_reduction(
         SNR = channel_sv - noise_2d
         Sv_corrected = channel_sv.copy()
         Sv_corrected[SNR < snr_threshold] = np.nan
-        Sv_corrected[Sv_corrected < low_Sv_dB] = low_Sv_dB
+        Sv_corrected[Sv_corrected < low_sv_db] = low_sv_db
         noise_2d_list.append(noise_2d)
         noise_per_ping_list.append(noise_per_ping)
         corrected_list.append(Sv_corrected)
         snr_list.append(SNR)
-
     noise_2d = np.stack(noise_2d_list, axis=0)
     noise_per_ping = np.stack(noise_per_ping_list, axis=0)
     Sv_corrected = np.stack(corrected_list, axis=0)
     SNR = np.stack(snr_list, axis=0)
-
-    # 应用 SNR 阈值
-    snr_threshold = noise_cfg.get("snr_threshold", 3.0)
 
     # 保存结果到数据集（深拷贝避免污染原始数据）
     ds_out = ds_Sv.copy(deep=True)

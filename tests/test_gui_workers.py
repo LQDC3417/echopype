@@ -129,3 +129,36 @@ def test_merge_worker_reports_when_all_files_fail(monkeypatch):
     assert len(errors) == 1
     assert "bad1.raw" in errors[0]
     assert "bad2.raw" in errors[0]
+def test_bottom_worker_returns_valid_point_diagnostics(monkeypatch):
+    """底线 worker 应返回有效点统计，便于区分算法无结果和渲染未显示。"""
+    from src.core import bottom_detection, region
+    from src.gui.workers import BottomDetectionResult, DetectSeafloorWorker
+
+    monkeypatch.setattr(
+        bottom_detection,
+        "detect_bottom",
+        lambda *args, **kwargs: np.array([10.0, np.nan, 30.0]),
+    )
+    monkeypatch.setattr(
+        region,
+        "get_echo_range_1d",
+        lambda ds: np.array([0.0, 10.0, 20.0, 30.0]),
+    )
+    monkeypatch.setattr(
+        region,
+        "bottom_depth_to_sample_indices",
+        lambda depths, echo_range: np.array([1.0, np.nan, 3.0]),
+    )
+
+    dataset = type("Dataset", (), {"sizes": {"range_sample": 4}})()
+    worker = DetectSeafloorWorker(dataset, {"processing": {"bottom_detection": {}}})
+    finished = []
+    worker.finished.connect(finished.append)
+
+    worker.run()
+
+    assert len(finished) == 1
+    result = finished[0]
+    assert isinstance(result, BottomDetectionResult)
+    assert result.valid_count == 2
+    assert result.total_count == 3
