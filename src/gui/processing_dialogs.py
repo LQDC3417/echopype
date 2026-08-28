@@ -7,7 +7,16 @@ from copy import deepcopy
 from typing import Any
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QLineEdit,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 ConfigGetter = Callable[[], Mapping[str, Any]]
 
@@ -32,6 +41,7 @@ class ProcessingParametersDialog(QDialog):
         self._last_applied_config = (
             deepcopy(dict(last_applied_config)) if last_applied_config is not None else None
         )
+        self._last_applied_widget_state = self._snapshot_widget_state()
 
         self.setWindowTitle(title)
         layout = QVBoxLayout(self)
@@ -47,7 +57,35 @@ class ProcessingParametersDialog(QDialog):
         apply_button = self.button_box.button(QDialogButtonBox.StandardButton.Apply)
         apply_button.clicked.connect(self.apply_changes)
         self.button_box.accepted.connect(self._accept_with_pending_changes)
-        self.button_box.rejected.connect(self.reject)
+        self.button_box.rejected.connect(self._reject_without_pending_changes)
+
+    def _snapshot_widget_state(self) -> list[tuple[QWidget, object]]:
+        """保存参数控件状态，供取消时恢复尚未应用的修改。"""
+        state = []
+        for widget in self.parameter_widget.findChildren(QWidget):
+            value = None
+            if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                value = widget.value()
+            elif isinstance(widget, QComboBox):
+                value = widget.currentIndex()
+            elif isinstance(widget, QLineEdit):
+                value = widget.text()
+            if value is not None:
+                state.append((widget, value))
+        return state
+
+    def _restore_widget_state(self) -> None:
+        for widget, value in self._last_applied_widget_state:
+            signals_blocked = widget.blockSignals(True)
+            try:
+                if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                    widget.setValue(value)
+                elif isinstance(widget, QComboBox):
+                    widget.setCurrentIndex(value)
+                elif isinstance(widget, QLineEdit):
+                    widget.setText(value)
+            finally:
+                widget.blockSignals(signals_blocked)
 
     def current_config(self) -> dict[str, Any]:
         """读取参数控件的当前配置并返回独立副本。"""
@@ -67,12 +105,17 @@ class ProcessingParametersDialog(QDialog):
             return False
 
         self._last_applied_config = deepcopy(config)
+        self._last_applied_widget_state = self._snapshot_widget_state()
         self.apply_requested.emit(deepcopy(config))
         return True
 
     def _accept_with_pending_changes(self) -> None:
         self.apply_changes()
         self.accept()
+
+    def _reject_without_pending_changes(self) -> None:
+        self._restore_widget_state()
+        self.reject()
 
 
 def _create_processing_dialog(

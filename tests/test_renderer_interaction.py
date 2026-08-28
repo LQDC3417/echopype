@@ -97,6 +97,28 @@ def test_renderer_accepts_multiple_named_lines(qapp):
         renderer.close()
 
 
+def test_renderer_preserves_named_line_colors(qapp):
+    from src.viz.opengl_renderer import EchogramRenderer
+
+    renderer = EchogramRenderer()
+    try:
+        colors = {"surface": "#123456", "bottom": "#abcdef"}
+        renderer.set_lines(
+            {"surface": [2.0, 2.0], "bottom": [20.0, 21.0]}, colors=colors
+        )
+        assert renderer._named_line_colors == colors
+
+        drawn = []
+        renderer._draw_named_line = lambda values, color, *, dashed=False: drawn.append(
+            (color, dashed)
+        )
+        renderer._draw_named_lines()
+        assert drawn[0][0] == pytest.approx((0x12 / 255, 0x34 / 255, 0x56 / 255, 1.0))
+        assert drawn[1][0] == pytest.approx((0xAB / 255, 0xCD / 255, 0xEF / 255, 1.0))
+    finally:
+        renderer.close()
+
+
 def test_replacing_named_lines_removes_legacy_line_residue(qapp):
     from src.viz.opengl_renderer import EchogramRenderer
 

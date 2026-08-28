@@ -120,6 +120,8 @@ class AnalysisMixin:
 
     def _get_sed_region_boundaries(self):
         """解析当前活动区域在合并 Echogram 全局 ping 上的深度边界。"""
+        if hasattr(self, "_analysis_region_enabled") and not self._analysis_region_enabled:
+            return None, None
         region = getattr(self, "analysis_region", None)
         line_manager = getattr(self, "line_manager", None)
         if region is None or line_manager is None or self._ds_Sv is None:

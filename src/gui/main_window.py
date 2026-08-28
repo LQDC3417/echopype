@@ -357,7 +357,8 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         name, accepted = QInputDialog.getText(self, "新增线段", "线段名称")
         if not accepted:
             return
-        references = [line for line in self.line_manager if line.id != self._active_line_id]
+        # 新线尚未加入模型，因此可以安全引用当前活动线（默认就是 Surface）。
+        references = list(self.line_manager)
         labels = [line.name for line in references]
         reference_name, accepted = QInputDialog.getItem(self, "线段基准", "参考线", labels, 0, False)
         if not accepted:
@@ -366,7 +367,12 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         if not accepted:
             return
         reference = next(line for line in references if line.name == reference_name)
-        line_id = f"line_{len(list(self.line_manager))}"
+        existing_ids = {line.id for line in self.line_manager}
+        suffix = len(existing_ids)
+        line_id = f"line_{suffix}"
+        while line_id in existing_ids:
+            suffix += 1
+            line_id = f"line_{suffix}"
         try:
             self.line_manager.add_line(line_id, name, reference_id=reference.id, offset_m=offset)
         except ValueError as exc:
@@ -512,10 +518,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         # PropertyPanel 在界面优化分支中改为折叠面板，不再是 QTabWidget。
         # 保留内部 ProcessingTab 作为各参数弹窗的数据源，但不在 Dock 中展示
         # 处理参数，避免绕过 Apply/确定的执行语义。
-        for section_id in ("processing", "bottom", "advanced"):
-            section = self.property_panel._sections.get(section_id)
-            if section is not None:
-                section.hide()
+        self.property_panel.configure_summary_view()
         self.dock_right = QDockWidget("属性", self)
         self.dock_right.setObjectName("dockProperties")
         self.dock_right.setWidget(self.property_panel)
@@ -644,6 +647,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         # 参数控件仅作为内部配置来源，修改控件本身不再自动启动 Worker。
         self.property_panel.detect_schools_clicked.connect(self._detect_schools)
         self.property_panel.stats_clicked.connect(self._show_stats)
+        self.property_panel.surface_line_changed.connect(self._on_surface_line_changed)
         self.property_panel.quality_check_clicked.connect(self._run_quality_check)
         self.property_panel.multifreq_clicked.connect(self._run_multifreq_analysis)
         self.property_panel.sv_stats_clicked.connect(self._run_sv_stats)

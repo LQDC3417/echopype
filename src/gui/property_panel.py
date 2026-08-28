@@ -1085,6 +1085,7 @@ class PropertyPanel(QWidget):
 
         container = QWidget()
         content_layout = QVBoxLayout(container)
+        self._content_layout = content_layout
         content_layout.setContentsMargins(8, 8, 8, 8)
         content_layout.setSpacing(8)
 
@@ -1185,6 +1186,19 @@ class PropertyPanel(QWidget):
     def section_ids(self) -> tuple[str, ...]:
         """返回属性区顺序，供布局回归测试和后续功能扩展使用。"""
         return tuple(self._sections)
+
+    def configure_summary_view(self) -> None:
+        """将 Dock 收敛为文件信息和统计结果，处理控件仍供弹窗复用。"""
+        for section_id, section in self._sections.items():
+            section.setVisible(section_id == "file_info")
+
+        statistics = self._sections.get("statistics")
+        if statistics is None:
+            statistics = AccordionSection(T("tab_statistics"), "advanced", self.stats)
+            statistics.setObjectName("accordion_statistics")
+            self._sections["statistics"] = statistics
+            self._content_layout.insertWidget(1, statistics)
+        statistics.show()
 
     def save_settings(self):
         """保存当前配置"""

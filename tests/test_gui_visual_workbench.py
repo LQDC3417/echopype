@@ -124,3 +124,20 @@ def test_main_window_uses_document_style_workspace_chrome(qapp):
         assert window.dock_bottom.titleBarWidget() is not None
     finally:
         window.close()
+
+
+def test_main_window_right_dock_shows_only_file_and_statistics(qapp):
+    from src.gui.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        window.show()
+        qapp.processEvents()
+        visible_sections = {
+            section_id
+            for section_id, section in window.property_panel._sections.items()
+            if section.isVisible()
+        }
+        assert visible_sections == {"file_info", "statistics"}
+    finally:
+        window.close()

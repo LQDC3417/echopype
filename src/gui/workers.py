@@ -532,10 +532,13 @@ class MultiFileRealSedWorker(QThread):
 
         global_indices = np.full(len(mapped), -1, dtype=np.int64)
         local_time_ns = local_times.astype("datetime64[ns]").astype(np.int64)
+        local_to_global = {}
         for row_index in np.flatnonzero(valid_local):
-            global_indices[row_index] = global_lookup.get(
-                int(local_time_ns[local_indices[row_index]]), -1
-            )
+            local_index = local_indices[row_index]
+            if local_index not in local_to_global:
+                candidates = global_lookup.get(int(local_time_ns[local_index]), [])
+                local_to_global[local_index] = candidates.pop(0) if candidates else -1
+            global_indices[row_index] = local_to_global[local_index]
         keep = valid_local & (global_indices >= 0)
         mapped = mapped.loc[keep].copy()
         mapped["local_ping_index"] = local_indices[keep]
@@ -558,11 +561,10 @@ class MultiFileRealSedWorker(QThread):
 
         try:
             global_times = self._ping_time_ns(self.ds_Sv)
-            global_lookup = {
-                int(value): index
-                for index, value in enumerate(global_times.astype(np.int64))
-                if not np.isnat(global_times[index])
-            }
+            global_lookup = {}
+            for index, value in enumerate(global_times.astype(np.int64)):
+                if not np.isnat(global_times[index]):
+                    global_lookup.setdefault(int(value), []).append(index)
         except Exception:
             self.error.emit(traceback.format_exc())
             return

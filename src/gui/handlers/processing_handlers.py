@@ -263,12 +263,18 @@ class ProcessingMixin:
         ping_times = np.asarray(self._ds_Sv["ping_time"].values)
         echo_range = _echo_range_2d(self._ds_Sv, len(ping_times))
         visible_lines = {}
+        visible_colors = {}
         for line in self.line_manager:
             if not line.visible:
                 continue
             depths_m = self.line_manager.resolve_for_pings(line.id, ping_times)
             visible_lines[line.id] = depths_to_sample_indices(echo_range, depths_m)
-        self.echogram.set_lines(visible_lines)
+            visible_colors[line.id] = line.color
+        try:
+            self.echogram.set_lines(visible_lines, colors=visible_colors)
+        except TypeError:
+            # 兼容旧版 Renderer 以及只接受一个参数的测试替身。
+            self.echogram.set_lines(visible_lines)
         active_line_id = getattr(self, "_active_line_id", None)
         if active_line_id and hasattr(self.echogram, "set_active_line"):
             self.echogram.set_active_line(active_line_id)
@@ -386,11 +392,11 @@ class ProcessingMixin:
             self._surface_depth_m, 0, 50, 1
         )
         if ok:
-            self._surface_depth_m = val
-            self.property_panel.processing.spin_surface.setValue(val)
-            self._update_surface_line_render()
-            self._apply_analysis_region_to_ds()
-            self.statusbar.set_status(T("msg_surface_depth", val=val))
+            spin = self.property_panel.processing.spin_surface
+            spin.blockSignals(True)
+            spin.setValue(val)
+            spin.blockSignals(False)
+            self._on_surface_line_changed(val)
 
     def _on_analysis_region_toggle(self, enabled: bool):
         """切换分析区域限定：开启时裁剪 ds_Sv，关闭时恢复完整数据"""

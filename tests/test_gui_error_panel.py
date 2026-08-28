@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox, QInputDialog
 
 
 @pytest.fixture(scope="module")
@@ -46,5 +46,25 @@ def test_empty_bottom_result_is_reported_in_message_panel(qapp):
         )
         window._on_bottom_detected(np.full(3, np.nan))
         assert "结果全部为空" in window._message_text.toPlainText()
+    finally:
+        window.close()
+
+
+def test_right_click_surface_setting_updates_line_manager(qapp, monkeypatch):
+    from src.gui.main_window import MainWindow
+    from src.core.lines import LineManager
+
+    monkeypatch.setattr(
+        QInputDialog,
+        "getDouble",
+        staticmethod(lambda *args, **kwargs: (3.0, True)),
+    )
+    window = MainWindow()
+    try:
+        window._on_surface_line_dialog()
+        assert window.line_manager.get(LineManager.SURFACE_ID).offset_m == 3.0
+
+        window.property_panel.surface_line_changed.emit(4.0)
+        assert window.line_manager.get(LineManager.SURFACE_ID).offset_m == 4.0
     finally:
         window.close()

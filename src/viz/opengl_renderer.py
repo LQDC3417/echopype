@@ -109,6 +109,7 @@ class EchogramRenderer(QOpenGLWidget):
         self._bottom_line = None  # (n_pings,) sample indices
         self._surface_line = None  # float — 表线深度(in sample index units)
         self._named_lines: dict[str, np.ndarray] = {}
+        self._named_line_colors: dict[str, str] = {}
         self._active_line_id = "bottom"
         self._school_mask = None
         self._single_targets = None  # np.ndarray (N, 2) — ping_idx, sample_idx
@@ -229,9 +230,19 @@ class EchogramRenderer(QOpenGLWidget):
             self._named_lines["bottom"] = self._bottom_line.copy()
         self.update()
 
-    def set_lines(self, lines: dict[str, np.ndarray]) -> None:
+    def set_lines(
+        self,
+        lines: dict[str, np.ndarray],
+        *,
+        colors: dict[str, str] | None = None,
+    ) -> None:
         """设置所有可见线段；保留 surface/bottom 旧接口的同步行为。"""
         self._named_lines = {key: np.asarray(value, dtype=np.float32).copy() for key, value in lines.items()}
+        self._named_line_colors = {
+            key: str(value)
+            for key, value in (colors or {}).items()
+            if key in self._named_lines
+        }
         self._bottom_line = self._named_lines.get("bottom")
         surface = self._named_lines.get("surface")
         self._surface_line = float(surface[0]) if surface is not None and len(surface) else None
@@ -611,8 +622,23 @@ class EchogramRenderer(QOpenGLWidget):
         for index, (line_id, values) in enumerate(self._named_lines.items()):
             if line_id == "bottom" and not self._overlay_visibility["bottom"]:
                 continue
-            color = palette[index % len(palette)]
+            color = self._hex_color_to_rgba(self._named_line_colors.get(line_id))
+            if color is None:
+                color = palette[index % len(palette)]
             self._draw_named_line(values, color, dashed=line_id == "surface")
+
+    @staticmethod
+    def _hex_color_to_rgba(value: str | None) -> tuple[float, float, float, float] | None:
+        if not value:
+            return None
+        text = str(value).lstrip("#")
+        if len(text) != 6:
+            return None
+        try:
+            rgb = tuple(int(text[index:index + 2], 16) / 255.0 for index in (0, 2, 4))
+        except ValueError:
+            return None
+        return (*rgb, 1.0)
 
     def _draw_named_line(self, values: np.ndarray, color: tuple, *, dashed: bool = False) -> None:
         line = np.asarray(values, dtype=np.float32).reshape(-1)

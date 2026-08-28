@@ -39,9 +39,11 @@ def test_crop_resolves_arbitrary_lines_by_ping_time_and_excludes_invalid_pings()
 class _Echogram:
     def __init__(self):
         self.lines = None
+        self.colors = None
 
-    def set_lines(self, lines):
+    def set_lines(self, lines, colors=None):
         self.lines = lines
+        self.colors = colors
 
     def set_bottom_line(self, _line):
         pass
@@ -101,3 +103,12 @@ def test_processing_region_cache_invalidates_when_line_manager_changes():
     assert second is not first
     assert np.isfinite(second["Sv"].values[0]).sum() == 4
     assert any("2" in message for message in host.errors)
+
+
+def test_processing_sync_passes_persisted_line_colors_to_renderer():
+    host = _Host()
+
+    host._sync_lines_to_renderer()
+
+    assert host.echogram.colors["upper"] == host.line_manager.get("upper").color
+    assert host.echogram.colors["lower"] == host.line_manager.get("lower").color

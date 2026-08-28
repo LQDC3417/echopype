@@ -111,6 +111,42 @@ def test_multi_file_sed_maps_ping_time_filters_region_and_aggregates_once(monkey
     assert result.grid_df["n_targets"].tolist() == [2]
 
 
+def test_multi_file_sed_consumes_duplicate_global_ping_times_per_file(monkeypatch):
+    from src.gui.workers import MultiFileRealSedWorker
+
+    duplicate_time = np.array(
+        ["2026-01-01T00:00:00", "2026-01-01T00:00:00"], dtype="datetime64[ns]"
+    )
+    first, second = Path("first.raw"), Path("second.raw")
+    times_by_path = {first: duplicate_time[:1], second: duplicate_time[:1]}
+    placeholder_targets = {}
+    _, echodata_by_path, _ = _install_sed_mocks(
+        monkeypatch, placeholder_targets, times_by_path
+    )
+    placeholder_targets.update(
+        {
+            echodata_by_path[first]: pd.DataFrame(
+                {"target_id": [1], "ping_idx": [0], "range_m": [1.0], "ts_db": [-40.0]}
+            ),
+            echodata_by_path[second]: pd.DataFrame(
+                {"target_id": [2], "ping_idx": [0], "range_m": [2.0], "ts_db": [-41.0]}
+            ),
+        }
+    )
+
+    worker = MultiFileRealSedWorker([first, second], _dataset(duplicate_time), {})
+    finished, errors = [], []
+    worker.finished.connect(finished.append)
+    worker.error.connect(errors.append)
+    worker.run()
+
+    assert errors == []
+    result = finished[0]
+    assert result.targets_df["ping_idx"].tolist() == [0, 1]
+    assert result.targets_df["local_ping_index"].tolist() == [0, 0]
+    assert result.targets_df["source_file"].tolist() == ["first.raw", "second.raw"]
+
+
 def test_multi_file_sed_continues_after_partial_failure(monkeypatch):
     from src.gui.workers import MultiFileRealSedWorker
 
@@ -240,3 +276,23 @@ def test_analysis_mixin_resolves_active_region_for_global_pings():
 
     np.testing.assert_array_equal(upper, [2.0, 2.0])
     np.testing.assert_array_equal(lower, [8.0, 9.0])
+
+
+def test_analysis_mixin_ignores_region_when_region_toggle_is_off():
+    from src.core.lines import LineManager
+    from src.core.region import AnalysisRegion
+    from src.gui.handlers.analysis_handlers import AnalysisMixin
+
+    times = np.array(["2026-01-01", "2026-01-02"], dtype="datetime64[ns]")
+    lines = LineManager()
+    lines.set_line_data("bottom", [8.0, 9.0], ping_times=times, kind="detected")
+    host = SimpleNamespace(
+        _ds_Sv=_dataset(times),
+        line_manager=lines,
+        analysis_region=AnalysisRegion("surface", "bottom"),
+        _analysis_region_enabled=False,
+    )
+
+    upper, lower = AnalysisMixin._get_sed_region_boundaries(host)
+    assert upper is None
+    assert lower is None

@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QInputDialog
 
 from src.gui.toolbars import EchogramToolBar, StandardToolBar
 from src.gui.welcome_dialog import WelcomeDialog
@@ -27,3 +27,39 @@ def test_welcome_dialog_exposes_new_and_open_project_actions():
 
     assert dialog.new_button.text()
     assert dialog.open_button.text()
+
+
+def test_line_manager_can_use_active_line_as_reference(monkeypatch):
+    from src.gui.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    references = []
+    monkeypatch.setattr(QInputDialog, "getText", lambda *args: ("Derived", True))
+
+    def get_item(*args):
+        references.extend(args[3])
+        return "", False
+
+    monkeypatch.setattr(QInputDialog, "getItem", get_item)
+    window = MainWindow()
+    try:
+        window._show_line_manager()
+        assert "Surface" in references
+    finally:
+        window.close()
+
+
+def test_line_manager_avoids_reusing_existing_line_id(monkeypatch):
+    from src.gui.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(QInputDialog, "getText", lambda *args: ("New line", True))
+    monkeypatch.setattr(QInputDialog, "getItem", lambda *args: ("Surface", True))
+    monkeypatch.setattr(QInputDialog, "getDouble", lambda *args: (1.0, True))
+    window = MainWindow()
+    try:
+        window.line_manager.add_line("line_3", "Existing", reference_id="surface")
+        window._show_line_manager()
+        assert window.line_manager.get("line_4").name == "New line"
+    finally:
+        window.close()
