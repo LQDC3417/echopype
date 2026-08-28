@@ -27,6 +27,19 @@ class _RunningWorker(QObject):
         raise AssertionError("GUI must not block waiting before switching projects")
 
 
+class _StartableWorker(_RunningWorker):
+    progress = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.running = False
+        self.start_calls = 0
+
+    def start(self):
+        self.start_calls += 1
+        self.running = True
+
+
 class _CloseEvent:
     def __init__(self):
         self.ignored = False
@@ -72,3 +85,20 @@ def test_deferred_close_finishes_without_waiting_for_custom_finished_signal():
 
     assert window._current_worker is None
     assert not window._close_pending
+
+
+def test_start_worker_refuses_to_start_a_second_running_task():
+    QApplication.instance() or QApplication([])
+    window = MainWindow()
+    first = _StartableWorker()
+    second = _StartableWorker()
+
+    try:
+        assert window._start_worker(first, lambda _result: None)
+        assert first.start_calls == 1
+        assert not window._start_worker(second, lambda _result: None)
+        assert second.start_calls == 0
+        assert window._current_worker is first
+    finally:
+        first.running = False
+        window.close()

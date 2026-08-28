@@ -149,6 +149,7 @@ def merge_aligned(ds_list: list[xr.Dataset], dedup: bool = True) -> xr.Dataset:
         ds.isel(channel=0) if "channel" in ds.dims else ds
         for ds in ds_list
     ]
+    first = ds_list[0]
 
     # 公共深度网格
     common_grid = compute_common_grid(ds_list)
@@ -208,6 +209,7 @@ def merge_aligned(ds_list: list[xr.Dataset], dedup: bool = True) -> xr.Dataset:
             ),
         }
     )
+    merged.attrs.update(first.attrs)
     # depth / echo_range 与原始一致：带 channel 维度（下游 detect_seafloor 依赖）
     er_2d = np.broadcast_to(
         common_grid.astype(np.float32)[None, None, :],
@@ -218,7 +220,6 @@ def merge_aligned(ds_list: list[xr.Dataset], dedup: bool = True) -> xr.Dataset:
 
     # 复制标量校准变量（声速/吸收/波束参数等，同一调查所有文件一致，取第一个文件）
     # 缺失这些变量会导致下游 remove_background_noise 等报 KeyError
-    first = ds_list[0]
     for vname in first.data_vars:
         if vname == "Sv":
             continue
@@ -232,6 +233,37 @@ def merge_aligned(ds_list: list[xr.Dataset], dedup: bool = True) -> xr.Dataset:
             if dedup and len(times_sorted) > 1:
                 vals = vals[keep]
             merged[vname] = (("ping_time",), vals)
+
+    # 保留逐文件处理阶段生成的校正 Sv 和底线，避免 CLI 合并后丢失结果。
+    if all("Sv_corrected" in ds for ds in ds_list):
+        corrected = np.vstack(
+            [
+                _resample_sv(xr.Dataset({"Sv": ds["Sv_corrected"]}), common_grid)
+                for ds in ds_list
+            ]
+        )[sort_idx]
+        if dedup and len(times_sorted) > 1:
+            corrected = corrected[keep]
+        merged["Sv_corrected"] = (
+            ("channel", "ping_time", "range_sample"), corrected[None, ...]
+        )
+
+    if all("bottom_depth" in ds for ds in ds_list):
+        bottom_depth = np.concatenate(
+            [np.asarray(ds["bottom_depth"].values).reshape(-1) for ds in ds_list]
+        )[sort_idx]
+        if dedup and len(times_sorted) > 1:
+            bottom_depth = bottom_depth[keep]
+        merged["bottom_depth"] = (("ping_time",), bottom_depth)
+
+    for coord_name in ("latitude", "longitude"):
+        if all(coord_name in ds for ds in ds_list):
+            values = np.concatenate(
+                [np.asarray(ds[coord_name].values).reshape(-1) for ds in ds_list]
+            )[sort_idx]
+            if dedup and len(times_sorted) > 1:
+                values = values[keep]
+            merged = merged.assign_coords({coord_name: (("ping_time",), values)})
 
     logger.info(
         f"对齐拼接完成: {len(times_sorted)} pings × {len(common_grid)} samples"

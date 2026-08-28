@@ -98,7 +98,6 @@ class TestCreateIntegrationGrid:
 
     def test_distance_no_gps_raises(self):
         """无 GPS 时 distance 分段应报错"""
-        ds = mock_ds_Sv.__wrapped__() if hasattr(mock_ds_Sv, "__wrapped__") else None
         # 构造无 GPS 的 mock（去掉坐标）
         np.random.seed(42)
         n_pings, n_samples = 500, 300

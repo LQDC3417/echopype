@@ -133,6 +133,24 @@ def test_cancel_restores_widget_values_to_last_applied_config(qapp):
     assert widget.value.value() == 5
 
 
+def test_titlebar_close_restores_unapplied_widget_values(qapp):
+    from src.gui.processing_dialogs import ProcessingParametersDialog
+
+    widget = ParameterWidget()
+    dialog = ProcessingParametersDialog(
+        widget,
+        widget.get_config,
+        last_applied_config=widget.get_config(),
+    )
+
+    dialog.show()
+    widget.value.setValue(12)
+    dialog.close()
+    QApplication.processEvents()
+
+    assert widget.value.value() == 5
+
+
 def test_applied_config_is_snapshotted(qapp):
     from src.gui.processing_dialogs import ProcessingParametersDialog
 

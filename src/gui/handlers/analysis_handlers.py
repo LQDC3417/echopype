@@ -32,13 +32,10 @@ class AnalysisMixin:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return
         self.statusbar.show_progress(T("msg_quality_checking"))
-        self._current_worker = QualityCheckWorker(
-            self._get_analysis_ds(), self._bottom_line
-        )
-        self._current_worker.finished.connect(self._on_quality_done)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
+        worker = QualityCheckWorker(self._get_analysis_ds(), self._bottom_line)
+        worker.progress.connect(self.statusbar.set_status)
+        if not self._start_worker(worker, self._on_quality_done):
+            return
 
     def _on_quality_done(self, result):
         """质量检查完成 → 弹窗显示结果"""
@@ -80,13 +77,10 @@ class AnalysisMixin:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return
         self.statusbar.show_progress(T("msg_multifreq_analyzing"))
-        self._current_worker = MultifreqAnalysisWorker(
-            self._get_analysis_ds(), self._config
-        )
-        self._current_worker.finished.connect(self._on_multifreq_done)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
+        worker = MultifreqAnalysisWorker(self._get_analysis_ds(), self._config)
+        worker.progress.connect(self.statusbar.set_status)
+        if not self._start_worker(worker, self._on_multifreq_done):
+            return
 
     def _on_multifreq_done(self, result):
         """多频分析完成 → 弹窗显示结果"""
@@ -150,7 +144,7 @@ class AnalysisMixin:
             return
         self.statusbar.show_progress(T("msg_real_sed_running"))
         if len(raw_files) > 1:
-            self._current_worker = MultiFileRealSedWorker(
+            worker = MultiFileRealSedWorker(
                 raw_files,
                 self._ds_Sv,
                 self._config,
@@ -158,17 +152,16 @@ class AnalysisMixin:
                 lower_depth_m=lower_depth_m,
             )
         else:
-            self._current_worker = RealSedWorker(
+            worker = RealSedWorker(
                 self._echodata,
                 self._ds_Sv,
                 self._config,
                 upper_depth_m=upper_depth_m,
                 lower_depth_m=lower_depth_m,
             )
-        worker = self._current_worker
-        self._connect_latest_worker(worker, self._on_real_sed_done)
         worker.progress.connect(self.statusbar.set_status)
-        worker.start()
+        if not self._start_worker(worker, self._on_real_sed_done):
+            return
 
     def _on_real_sed_done(self, result):
         """真实 SED 完成 → 展示网格聚合表 + echogram 叠加（逐目标）"""
@@ -191,6 +184,7 @@ class AnalysisMixin:
             QMessageBox.information(self, T("msg_real_sed_done"), T("msg_real_sed_none"))
             return
         self._real_sed_df = targets_df
+        self._real_sed_grid_df = grid_df
         self._stale_results.discard("real_sed")
         self.stats_dialog.update_real_sed(grid_df)
         self.echogram.set_single_targets(targets_df)
@@ -207,11 +201,10 @@ class AnalysisMixin:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return
         self.statusbar.show_progress(T("msg_sv_stats"))
-        self._current_worker = SvStatsWorker(self._get_analysis_ds())
-        self._current_worker.finished.connect(self._on_sv_stats_done)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
+        worker = SvStatsWorker(self._get_analysis_ds())
+        worker.progress.connect(self.statusbar.set_status)
+        if not self._start_worker(worker, self._on_sv_stats_done):
+            return
 
     def _on_sv_stats_done(self, result):
         self.statusbar.hide_progress()
@@ -236,11 +229,10 @@ class AnalysisMixin:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return
         self.statusbar.show_progress(T("msg_transect_split"))
-        self._current_worker = TransectSplitWorker(self._get_analysis_ds())
-        self._current_worker.finished.connect(self._on_transect_split_done)
-        self._current_worker.error.connect(self._on_worker_error)
-        self._current_worker.progress.connect(self.statusbar.set_status)
-        self._current_worker.start()
+        worker = TransectSplitWorker(self._get_analysis_ds())
+        worker.progress.connect(self.statusbar.set_status)
+        if not self._start_worker(worker, self._on_transect_split_done):
+            return
 
     def _on_transect_split_done(self, result):
         self.statusbar.hide_progress()

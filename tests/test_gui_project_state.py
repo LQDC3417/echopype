@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from src.core.ep_project import EpProject
 from src.core.lines import LineManager
@@ -24,6 +25,7 @@ class _Echogram:
         self.school = object()
         self.lines = None
         self.colormap = None
+        self.single_targets = None
 
     def set_bottom_line(self, value):
         self.bottom = value
@@ -40,6 +42,9 @@ class _Echogram:
     def set_colormap(self, name, vmin, vmax):
         self.colormap = (name, vmin, vmax)
 
+    def set_single_targets(self, value):
+        self.single_targets = value
+
 
 class _Toolbar:
     def __init__(self):
@@ -47,6 +52,22 @@ class _Toolbar:
 
     def set_editable_lines(self, lines):
         self.lines = list(lines)
+
+
+class _StatsDialog:
+    def __init__(self):
+        self.schools = None
+        self.integration = None
+        self.sed_grid = None
+
+    def update_schools(self, value):
+        self.schools = value
+
+    def update_integration(self, value):
+        self.integration = value
+
+    def update_real_sed(self, value):
+        self.sed_grid = value
 
 
 class _Host(FileMixin):
@@ -72,6 +93,8 @@ def _host():
     host._schools_df = None
     host._integration_df = None
     host._real_sed_df = None
+    host._real_sed_grid_df = None
+    host.stats_dialog = _StatsDialog()
     host._ds_Sv_analysis = None
     host._analysis_region_enabled = False
     host.line_manager = LineManager()
@@ -92,6 +115,10 @@ def test_save_project_copies_complete_gui_state(tmp_path, monkeypatch):
     host.line_manager.add_line("custom", "Custom", reference_id="bottom", offset_m=-1.5)
     host.analysis_region = AnalysisRegion("surface", "bottom")
     host.display_settings = {"colormap": "inferno", "vmin": -82.0, "vmax": -28.0}
+    host._real_sed_df = pd.DataFrame(
+        {"target_id": [1], "ping_idx": [3], "range_m": [12.5], "ts_db": [-55.5]}
+    )
+    host._real_sed_grid_df = pd.DataFrame({"interval": [0], "n_targets": [1]})
 
     monkeypatch.setattr(
         file_handlers.QFileDialog,
@@ -108,6 +135,8 @@ def test_save_project_copies_complete_gui_state(tmp_path, monkeypatch):
     assert loaded.analysis_region == AnalysisRegion("surface", "bottom")
     assert loaded.display_settings == {"colormap": "inferno", "vmin": -82.0, "vmax": -28.0}
     np.testing.assert_allclose(loaded.bottom_line, [20.0, 21.0])
+    pd.testing.assert_frame_equal(loaded.sed_df, host._real_sed_df)
+    pd.testing.assert_frame_equal(loaded.sed_grid_df, host._real_sed_grid_df)
 
 
 def test_restore_project_copies_new_state_into_gui():
@@ -131,6 +160,30 @@ def test_restore_project_copies_new_state_into_gui():
     np.testing.assert_allclose(host._bottom_line, [25.0, 26.0])
     assert host.echogram.colormap == ("gray", -75.0, -25.0)
     assert [line.id for line in host.echo_toolbar.lines] == ["surface", "bottom", "custom"]
+
+
+def test_restore_project_results_keeps_sed_targets_separate_from_grid():
+    host = _host()
+    project = EpProject()
+    targets = pd.DataFrame(
+        {"target_id": [1], "ping_idx": [3], "range_m": [12.5], "ts_db": [-55.5]}
+    )
+    grid = pd.DataFrame({"interval": [0], "n_targets": [1]})
+    schools = pd.DataFrame({"school_id": [1]})
+    integration = pd.DataFrame({"mean_Sv": [-60.0]})
+    project.sed_df = targets
+    project.sed_grid_df = grid
+    project.schools_df = schools
+    project.integration_df = integration
+
+    FileMixin._restore_project_results(host, project)
+
+    pd.testing.assert_frame_equal(host._real_sed_df, targets)
+    pd.testing.assert_frame_equal(host._real_sed_grid_df, grid)
+    assert host.echogram.single_targets is targets
+    assert host.stats_dialog.sed_grid is grid
+    assert host.stats_dialog.schools is schools
+    assert host.stats_dialog.integration is integration
 
 
 def test_reset_analysis_state_resets_project_gui_state():

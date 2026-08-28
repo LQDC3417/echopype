@@ -28,11 +28,10 @@ class ProcessingMixin:
             return
         self.pipeline_step.emit(T("pipeline_sv"))
         self.statusbar.show_progress(T("msg_computing_sv"))
-        self._current_worker = ComputeSvWorker(self._echodata, self._config)
-        worker = self._current_worker
-        self._connect_latest_worker(worker, self._on_sv_computed)
+        worker = ComputeSvWorker(self._echodata, self._config)
         worker.progress.connect(self.statusbar.set_status)
-        worker.start()
+        if not self._start_worker(worker, self._on_sv_computed):
+            return
 
     def _on_sv_computed(self, ds_Sv):
         self._ds_Sv = ds_Sv
@@ -90,12 +89,11 @@ class ProcessingMixin:
         self.pipeline_step.emit(T("pipeline_noise"))
         self.statusbar.show_progress(T("msg_removing_noise"))
         analysis_ds = self._get_analysis_ds() if self._analysis_region_enabled else None
-        self._current_worker = NoiseRemovalWorker(
+        worker = NoiseRemovalWorker(
             self._ds_Sv, self._config, self._noise_mask_manual, analysis_ds=analysis_ds
         )
-        worker = self._current_worker
-        self._connect_latest_worker(worker, self._on_noise_removed)
-        worker.start()
+        if not self._start_worker(worker, self._on_noise_removed):
+            return
 
     def _on_noise_removed(self, ds_Sv):
         self._ds_Sv = ds_Sv
@@ -148,11 +146,10 @@ class ProcessingMixin:
         }
         self.pipeline_step.emit(T("pipeline_bottom"))
         self.statusbar.show_progress(T("msg_detecting_bottom"))
-        self._current_worker = DetectSeafloorWorker(self._ds_Sv, self._config)
-        worker = self._current_worker
-        self._connect_latest_worker(worker, self._on_bottom_detected)
+        worker = DetectSeafloorWorker(self._ds_Sv, self._config)
         worker.progress.connect(self.statusbar.set_status)
-        worker.start()
+        if not self._start_worker(worker, self._on_bottom_detected):
+            return
     def _on_bottom_detected(self, bottom_result):
         if isinstance(bottom_result, BottomDetectionResult):
             bottom = bottom_result.indices
@@ -419,10 +416,9 @@ class ProcessingMixin:
         self.pipeline_step.emit(T("pipeline_schools"))
         self.statusbar.show_progress(T("msg_detecting_schools"))
         ds_for_detect = self._get_analysis_ds()
-        self._current_worker = DetectSchoolsWorker(ds_for_detect, self._config)
-        worker = self._current_worker
-        self._connect_latest_worker(worker, self._on_schools_detected)
-        worker.start()
+        worker = DetectSchoolsWorker(ds_for_detect, self._config)
+        if not self._start_worker(worker, self._on_schools_detected):
+            return
 
     def _on_schools_detected(self, mask):
         # 将 mask 转换为 xr.DataArray
@@ -507,15 +503,14 @@ class ProcessingMixin:
 
         self.statusbar.show_progress(T("msg_integration_running"))
         self._ds_for_integration = ds_for_integ
-        self._current_worker = IntegrationWorker(
+        worker = IntegrationWorker(
             ds_for_integ, self._config,
             surface_depth_m=self._surface_depth_m,
             max_depth_m=max_depth_m,
         )
-        worker = self._current_worker
-        self._connect_latest_worker(worker, self._on_integration_done)
         worker.progress.connect(self.statusbar.set_status)
-        worker.start()
+        if not self._start_worker(worker, self._on_integration_done):
+            return
 
     def _on_integration_done(self, result):
         """回声积分完成 → 展示结果表格 + echogram 网格叠加"""

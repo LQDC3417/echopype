@@ -267,39 +267,31 @@ def process_single_file(echodata, config: dict) -> xr.Dataset:
 
 
 def process_all_files(config: dict) -> xr.Dataset:
-    """处理所有 raw 文件并合并。
-
-    流程：open_raw → combine_echodata → compute_Sv + noise + depth + seafloor
-    单个文件打开失败时，保留可处理的文件，并在结果 attrs 中记录失败文件名。
-    """
-    import echopype as ep
+    """逐文件处理 raw 后合并 Dataset，避免一次性合并 EchoData。"""
 
     raw_files = load_raw_files(config)
 
-    # 1. 打开所有 raw 文件，得到 EchoData 列表
-    echodata_list = []
+    # 逐文件完成完整处理，循环结束后不再保留 EchoData 对象。
+    processed_datasets = []
     failed_files = []
     for raw_file in raw_files:
         try:
             ed = open_single_file(raw_file, config)
-            echodata_list.append(ed)
+            processed_datasets.append(process_single_file(ed, config))
         except Exception as e:
-            logger.error(f"打开文件失败 {raw_file.name}: {e}")
+            logger.error(f"处理文件失败 {raw_file.name}: {e}")
             failed_files.append((raw_file, e))
             continue
 
-    if not echodata_list:
+    if not processed_datasets:
         raise RuntimeError("所有文件打开失败")
 
-    # 2. 合并 EchoData 对象（如有多个文件）
-    if len(echodata_list) > 1:
-        logger.info(f"合并 {len(echodata_list)} 个 EchoData 对象...")
-        combined_ed = ep.combine_echodata(echodata_list=echodata_list)
+    if len(processed_datasets) == 1:
+        ds_Sv = processed_datasets[0]
     else:
-        combined_ed = echodata_list[0]
+        from src.core.merge import merge_aligned
 
-    # 3. 校准 + 噪声去除 + 深度 + 底部检测
-    ds_Sv = process_single_file(combined_ed, config)
+        ds_Sv = merge_aligned(processed_datasets)
     if failed_files:
         failed_names = [path.name for path, _error in failed_files]
         ds_Sv.attrs["failed_raw_files"] = failed_names

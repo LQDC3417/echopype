@@ -298,14 +298,11 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
             self._config = proj.config
 
             self.statusbar.show_progress(T("msg_loading_files", n=len(proj.raw_files)))
-            self._current_worker = MergeFilesWorker(proj.raw_files, proj.config)
-            worker = self._current_worker
-            self._connect_latest_worker(
-                worker, lambda ds: self._on_project_loaded(ds, proj)
-            )
+            worker = MergeFilesWorker(proj.raw_files, proj.config)
             worker.progress.connect(self.statusbar.set_status)
             worker.progress_num.connect(self.statusbar.set_progress_value)
-            worker.start()
+            if not self._start_worker(worker, lambda ds: self._on_project_loaded(ds, proj)):
+                return
             _save_recent(str(path))
         except Exception as e:
             QMessageBox.critical(self, T("dialog_error"), f"{e}")
@@ -378,6 +375,8 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         except ValueError as exc:
             QMessageBox.warning(self, "线段设置", str(exc))
             return
+        self._sync_lines_to_renderer()
+        self._save_file_state()
         self._refresh_line_toolbar()
 
     def _show_display_settings(self):
@@ -740,6 +739,18 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
                 self._on_worker_error(msg) if w is self._current_worker else None
             )
         )
+
+    def _start_worker(self, worker, finished=None) -> bool:
+        """启动唯一后台任务，避免并发 Worker 覆盖当前任务引用。"""
+        current = self._current_worker
+        if current is not None and current.isRunning():
+            self.statusbar.hide_progress()
+            self.statusbar.set_status("请等待当前后台任务完成后再执行新的数据处理")
+            return False
+        self._current_worker = worker
+        self._connect_latest_worker(worker, finished)
+        worker.start()
+        return True
 
     def _schedule_parameter_apply(self, name: str, callback, interval_ms: int = 500) -> None:
         """防抖调度单个功能参数，避免连续拖动启动多个 Worker。"""

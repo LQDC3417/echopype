@@ -117,6 +117,11 @@ class ProcessingParametersDialog(QDialog):
         self._restore_widget_state()
         self.reject()
 
+    def closeEvent(self, event) -> None:
+        """标题栏关闭与取消按钮保持一致，放弃未应用的控件修改。"""
+        self._restore_widget_state()
+        super().closeEvent(event)
+
 
 def _create_processing_dialog(
     parameter_widget: QWidget,

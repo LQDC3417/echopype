@@ -109,7 +109,7 @@ def ping_resolution(ping_time: np.ndarray) -> float:
     """
     if len(ping_time) > 1:
         if np.issubdtype(np.asarray(ping_time).dtype, np.datetime64):
-            return float(np.diff(ping_time[:2]) / np.timedelta64(1, 's'))
+            return float((np.diff(ping_time[:2]) / np.timedelta64(1, 's'))[0])
         return float(np.diff(ping_time[:2])[0])
     return 1.0
 

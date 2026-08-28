@@ -61,7 +61,9 @@ class EpProject:
         # 统计结果
         self.schools_df: pd.DataFrame | None = None
         self.integration_df: pd.DataFrame | None = None
+        # SED 的逐目标结果和网格汇总用途不同，必须分别保存。
         self.sed_df: pd.DataFrame | None = None
+        self.sed_grid_df: pd.DataFrame | None = None
 
     # ═══════════════════════════════════════════════════════
     # 保存
@@ -139,6 +141,10 @@ class EpProject:
                 rs.create_dataset("integration_df", data=self.integration_df.to_json(orient="records"))
             if self.sed_df is not None and not self.sed_df.empty:
                 rs.create_dataset("sed_df", data=self.sed_df.to_json(orient="records"))
+            if self.sed_grid_df is not None and not self.sed_grid_df.empty:
+                rs.create_dataset(
+                    "sed_grid_df", data=self.sed_grid_df.to_json(orient="records")
+                )
 
 
     # ═══════════════════════════════════════════════════════
@@ -209,6 +215,10 @@ class EpProject:
                     proj.integration_df = pd.read_json(io.StringIO(_decode(rs["integration_df"][()])))
                 if "sed_df" in rs:
                     proj.sed_df = pd.read_json(io.StringIO(_decode(rs["sed_df"][()])))
+                if "sed_grid_df" in rs:
+                    proj.sed_grid_df = pd.read_json(
+                        io.StringIO(_decode(rs["sed_grid_df"][()]))
+                    )
 
         return proj
 

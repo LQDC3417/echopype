@@ -63,3 +63,23 @@ def test_line_manager_avoids_reusing_existing_line_id(monkeypatch):
         assert window.line_manager.get("line_4").name == "New line"
     finally:
         window.close()
+
+
+def test_line_manager_syncs_and_persists_new_line_immediately(monkeypatch):
+    from src.gui.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(QInputDialog, "getText", lambda *args: ("Near bottom", True))
+    monkeypatch.setattr(QInputDialog, "getItem", lambda *args: ("Surface", True))
+    monkeypatch.setattr(QInputDialog, "getDouble", lambda *args: (1.0, True))
+    window = MainWindow()
+    calls = []
+    monkeypatch.setattr(window, "_sync_lines_to_renderer", lambda: calls.append("sync"))
+    monkeypatch.setattr(window, "_save_file_state", lambda: calls.append("save"))
+    try:
+        window._show_line_manager()
+
+        assert window.line_manager.get("line_2").name == "Near bottom"
+        assert calls == ["sync", "save"]
+    finally:
+        window.close()

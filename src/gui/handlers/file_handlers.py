@@ -52,6 +52,7 @@ class FileMixin:
         self._schools_df = None
         self._integration_df = None
         self._real_sed_df = None
+        self._real_sed_grid_df = None
         self._ds_Sv_analysis = None
         self._analysis_region_enabled = False
         self.line_manager = LineManager()
@@ -72,6 +73,30 @@ class FileMixin:
             self.echogram.set_colormap("jet", -90.0, -30.0)
         if hasattr(self, "echo_toolbar"):
             self.echo_toolbar.set_editable_lines(self.line_manager.editable_lines())
+
+    def _restore_project_results(self, proj: EpProject) -> None:
+        """恢复独立保存的分析结果及其对应视图。"""
+        if proj.school_mask is not None:
+            self._schools_mask = proj.school_mask
+            self.echogram.set_school_mask(proj.school_mask)
+        if proj.noise_mask is not None:
+            self._noise_mask_manual = proj.noise_mask
+            self.echogram.set_noise_mask(proj.noise_mask)
+        if proj.schools_df is not None:
+            self._schools_df = proj.schools_df
+            self.stats_dialog.update_schools(proj.schools_df)
+            if hasattr(self, "property_panel"):
+                self.property_panel.stats.update_schools(proj.schools_df)
+        if proj.integration_df is not None:
+            self._integration_df = proj.integration_df
+            self.stats_dialog.update_integration(proj.integration_df)
+        if proj.sed_df is not None:
+            self._real_sed_df = proj.sed_df
+            self.echogram.set_single_targets(proj.sed_df)
+        sed_grid_df = getattr(proj, "sed_grid_df", None)
+        if sed_grid_df is not None:
+            self._real_sed_grid_df = sed_grid_df
+            self.stats_dialog.update_real_sed(sed_grid_df)
 
     def _copy_gui_state_to_project(self, proj: EpProject) -> None:
         """将当前 GUI 的项目级状态复制到持久化模型。"""
@@ -162,12 +187,11 @@ class FileMixin:
 
         # 启动合并加载（边加载边显示）
         self.statusbar.show_progress(T("msg_loading_files", n=len(raw_files)))
-        self._current_worker = MergeFilesWorker(raw_files, self._config)
-        worker = self._current_worker
-        self._connect_latest_worker(worker, self._on_merge_finished)
+        worker = MergeFilesWorker(raw_files, self._config)
         worker.progress.connect(self.statusbar.set_status)
         worker.progress_num.connect(self.statusbar.set_progress_value)
-        worker.start()
+        if not self._start_worker(worker, self._on_merge_finished):
+            return
 
     def _on_file_ready(self, ds_Sv, cur: int, total: int):
         """兼容旧信号：只更新轻量状态，不复制完整 Sv。"""
@@ -242,6 +266,8 @@ class FileMixin:
                 proj.integration_df = self._integration_df
             if hasattr(self, "_real_sed_df") and self._real_sed_df is not None:
                 proj.sed_df = self._real_sed_df
+            if hasattr(self, "_real_sed_grid_df") and self._real_sed_grid_df is not None:
+                proj.sed_grid_df = self._real_sed_grid_df
 
             saved = proj.save(Path(path))
             _save_recent(str(saved))
@@ -286,14 +312,11 @@ class FileMixin:
 
             # 从 .raw 重新计算 Sv
             self.statusbar.show_progress(T("msg_loading_files", n=len(proj.raw_files)))
-            self._current_worker = MergeFilesWorker(proj.raw_files, proj.config)
-            worker = self._current_worker
-            self._connect_latest_worker(
-                worker, lambda ds: self._on_project_loaded(ds, proj)
-            )
+            worker = MergeFilesWorker(proj.raw_files, proj.config)
             worker.progress.connect(self.statusbar.set_status)
             worker.progress_num.connect(self.statusbar.set_progress_value)
-            worker.start()
+            if not self._start_worker(worker, lambda ds: self._on_project_loaded(ds, proj)):
+                return
 
             _save_recent(str(path))
         except Exception as e:
@@ -329,21 +352,7 @@ class FileMixin:
         }
         self._apply_sv_to_display(ds_Sv, sv)
 
-        # 恢复分析结果
-        if proj.school_mask is not None:
-            self._schools_mask = proj.school_mask
-            self.echogram.set_school_mask(proj.school_mask)
-        if proj.noise_mask is not None:
-            self._noise_mask_manual = proj.noise_mask
-            self.echogram.set_noise_mask(proj.noise_mask)
-        if proj.schools_df is not None:
-            self._schools_df = proj.schools_df
-        if proj.integration_df is not None:
-            self._integration_df = proj.integration_df
-            self.stats_dialog.update_integration(proj.integration_df)
-        if proj.sed_df is not None:
-            self._real_sed_df = proj.sed_df
-            self.stats_dialog.update_real_sed(proj.sed_df)
+        self._restore_project_results(proj)
 
         # 恢复表线深度到 UI spin box
         spin = self.property_panel.processing.spin_surface

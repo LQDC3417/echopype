@@ -211,3 +211,40 @@ def test_process_all_files_keeps_successes_and_records_partial_open_failure(monk
 
     assert result["Sv"].values.tolist() == [[1.0]]
     assert result.attrs["failed_raw_files"] == ["bad.raw"]
+
+
+def test_process_all_files_processes_each_raw_without_combining_echodata(monkeypatch):
+    first = Path("first.raw")
+    second = Path("second.raw")
+    echodata = {first: object(), second: object()}
+    processed = {
+        echodata[first]: _make_sv_dataset([[1.0, 1.0]]),
+        echodata[second]: _make_sv_dataset([[2.0, 2.0]]).assign_coords(ping_time=[1]),
+    }
+    for dataset, bottom in zip(processed.values(), [10.0, 11.0]):
+        dataset["Sv_corrected"] = dataset["Sv"] - 1.0
+        dataset["bottom_depth"] = ("ping_time", [bottom])
+    monkeypatch.setattr(acoustic, "load_raw_files", lambda config: [first, second])
+    monkeypatch.setattr(acoustic, "open_single_file", lambda path, config: echodata[path])
+    calls = []
+    monkeypatch.setattr(
+        acoustic,
+        "process_single_file",
+        lambda value, config: calls.append(value) or processed[value],
+    )
+
+    import echopype as ep
+
+    monkeypatch.setattr(
+        ep,
+        "combine_echodata",
+        lambda *args, **kwargs: pytest.fail("CLI must not combine all EchoData objects"),
+    )
+
+    result = acoustic.process_all_files({})
+
+    assert calls == [echodata[first], echodata[second]]
+    assert result.sizes["ping_time"] == 2
+    assert result["Sv"].values[0, :, 0].tolist() == [1.0, 2.0]
+    assert result["Sv_corrected"].values[0, :, 0].tolist() == [0.0, 1.0]
+    assert result["bottom_depth"].values.tolist() == [10.0, 11.0]

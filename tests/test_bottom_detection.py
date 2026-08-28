@@ -5,10 +5,8 @@ import pytest
 import xarray as xr
 
 from src.core.bottom_detection import (
-    BottomMethod,
     detect_bottom,
     detect_bottom_afsc,
-    detect_bottom_basic,
     detect_bottom_enhanced,
     validate_bottom_line,
     _smooth_ping,

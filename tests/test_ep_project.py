@@ -1,5 +1,6 @@
 import h5py
 import numpy as np
+import pandas as pd
 
 from src.core.ep_project import EpProject, PROJECT_VERSION
 from src.core.region import AnalysisRegion
@@ -64,3 +65,32 @@ def test_new_project_keeps_writing_legacy_bottom_field_from_line_model(tmp_path)
 
     with h5py.File(path, "r") as handle:
         np.testing.assert_allclose(handle["analysis/bottom_line"][()], [30.0, 31.0])
+
+
+def test_ep_project_round_trips_sed_targets_and_grid_separately(tmp_path):
+    project = EpProject()
+    targets = pd.DataFrame(
+        {
+            "target_id": [1],
+            "ping_idx": [3],
+            "range_m": [12.5],
+            "ts_db": [-55.5],
+        }
+    )
+    grid = pd.DataFrame(
+        {
+            "interval": [0],
+            "ping_start": [0],
+            "ping_end": [9],
+            "depth_start": [2.5],
+            "depth_end": [20.5],
+            "n_targets": [1],
+        }
+    )
+    project.sed_df = targets
+    project.sed_grid_df = grid
+
+    loaded = EpProject.load(project.save(tmp_path / "sed.ep"))
+
+    pd.testing.assert_frame_equal(loaded.sed_df, targets)
+    pd.testing.assert_frame_equal(loaded.sed_grid_df, grid)

@@ -144,8 +144,8 @@ def test_build_analysis_mask_surface_only():
     """只有表线"""
     mask = build_analysis_mask((50, 100), surface_sample=10.0, bottom_line=None)
     assert mask.shape == (50, 100)
-    assert np.all(mask[:, 10:] == True)
-    assert np.all(mask[:, :10] == False)
+    assert np.all(mask[:, 10:])
+    assert not np.any(mask[:, :10])
 
 
 def test_build_analysis_mask_bottom_only():
@@ -153,8 +153,8 @@ def test_build_analysis_mask_bottom_only():
     bottom = np.full(50, 80.0)
     mask = build_analysis_mask((50, 100), surface_sample=None, bottom_line=bottom)
     assert mask.shape == (50, 100)
-    assert np.all(mask[:, :80] == True)
-    assert np.all(mask[:, 81:] == False)
+    assert np.all(mask[:, :80])
+    assert not np.any(mask[:, 81:])
 
 
 def test_build_analysis_mask_both():
@@ -162,9 +162,9 @@ def test_build_analysis_mask_both():
     bottom = np.full(50, 80.0)
     mask = build_analysis_mask((50, 100), surface_sample=10.0, bottom_line=bottom)
     assert mask.shape == (50, 100)
-    assert np.all(mask[:, :10] == False)  # 表线以上
-    assert np.all(mask[:, 10:80] == True)  # 分析区域
-    assert np.all(mask[:, 81:] == False)  # 底线以下
+    assert not np.any(mask[:, :10])  # 表线以上
+    assert np.all(mask[:, 10:80])  # 分析区域
+    assert not np.any(mask[:, 81:])  # 底线以下
 
 
 def test_build_analysis_mask_bottom_nan():
@@ -172,7 +172,7 @@ def test_build_analysis_mask_bottom_nan():
     bottom = np.full(50, 80.0)
     bottom[10] = np.nan  # 该 ping 无底线
     mask = build_analysis_mask((50, 100), surface_sample=None, bottom_line=bottom)
-    assert np.all(mask[10, :] == True)  # NaN 的 ping 全部保留
+    assert np.all(mask[10, :])  # NaN 的 ping 全部保留
 
 
 # ── crop_sv_by_region ─────────────────────────────────────

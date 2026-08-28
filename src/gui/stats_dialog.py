@@ -667,10 +667,6 @@ class StatsDialog(QDialog):
             else:
                 QMessageBox.warning(self, T("dialog_warning"), T("stats_no_integration_data"))
         elif current_tab == 2:
-            # 导出单体目标数据（已删除）
-            pass
-            # 导出单体目标数据
-        elif current_tab == 3:
             # 导出真实 SED 数据
             if self._real_sed_df is not None and not self._real_sed_df.empty:
                 self._export_dataframe(self._real_sed_df, T("stats_tab_real_sed"))

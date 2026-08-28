@@ -9,7 +9,6 @@ from src.core.noise import (
     estimate_noise_passive,
     apply_noise_reduction,
     noise_statistics,
-    NoiseEstimate,
 )
 
 
