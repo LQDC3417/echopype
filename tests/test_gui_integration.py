@@ -12,6 +12,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import SCHOOL_TEST_MAX_SECONDS, subset_for_school_detection
+
+pytestmark = pytest.mark.real_data
+
 RAW_FILE = Path(r"D:\Administrator\Desktop\echopype\raw_data\20250706SCSK-D20250706-T024009.raw")
 
 # ──────────────────────────────────────────────
@@ -123,17 +127,30 @@ def int_bottom(int_sv):
 
 
 @pytest.fixture(scope="module")
-def int_schools_mask(int_ds_sv, int_config):
-    """鱼群检测 → boolean mask DataArray"""
-    from src.core.school import detect_schools
-    return detect_schools(int_ds_sv, int_config)
+def int_school_ds(int_ds_sv):
+    """鱼群检测使用有界真实数据切片。"""
+    return subset_for_school_detection(int_ds_sv)
 
 
 @pytest.fixture(scope="module")
-def int_schools_df(int_schools_mask, int_ds_sv):
+def int_schools_mask(int_school_ds, int_config):
+    """鱼群检测 → boolean mask DataArray"""
+    from time import perf_counter
+
+    from src.core.school import detect_schools
+
+    started_at = perf_counter()
+    mask = detect_schools(int_school_ds, int_config)
+    elapsed = perf_counter() - started_at
+    assert elapsed <= SCHOOL_TEST_MAX_SECONDS
+    return mask
+
+
+@pytest.fixture(scope="module")
+def int_schools_df(int_schools_mask, int_school_ds):
     """鱼群 mask → DataFrame"""
     from src.core.school import schools_to_dataframe
-    return schools_to_dataframe(int_schools_mask, int_ds_sv)
+    return schools_to_dataframe(int_schools_mask, int_school_ds)
 
 
 # ──────────────────────────────────────────────
@@ -225,8 +242,9 @@ def main():
     sv = int_sv(ds_sv)
     int_ds_clean(ds_sv, config)
     bottom = int_bottom(sv)
-    mask = int_schools_mask(ds_sv, config)
-    schools_df = int_schools_df(mask, ds_sv)
+    school_ds = int_school_ds(ds_sv)
+    mask = int_schools_mask(school_ds, config)
+    schools_df = int_schools_df(mask, school_ds)
 
     print(f"[OK] 底部检测: {int(np.sum(~np.isnan(bottom)))}/{sv.shape[0]} ping 有底线")
     print(f"[OK] 鱼群检测: {int(mask.sum().values)} 像素, {len(schools_df)} 个鱼群")

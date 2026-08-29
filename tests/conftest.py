@@ -4,6 +4,35 @@
 import pytest
 import yaml
 
+SCHOOL_TEST_MAX_PINGS = 64
+SCHOOL_TEST_MAX_SAMPLES = 4096
+SCHOOL_TEST_MAX_SECONDS = 30.0
+
+
+def subset_for_school_detection(ds_sv):
+    """Return a fixed-size real-data slice for the fish-school acceptance test."""
+    return ds_sv.isel(
+        ping_time=slice(0, SCHOOL_TEST_MAX_PINGS),
+        range_sample=slice(0, SCHOOL_TEST_MAX_SAMPLES),
+    )
+
+
+def pytest_addoption(parser):
+    group = parser.getgroup("real-data")
+    group.addoption("--run-real-data", action="store_true", default=False)
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--run-real-data"):
+        return
+
+    skip_real_data = pytest.mark.skip(
+        reason="requires local raw data; rerun with --run-real-data"
+    )
+    for item in items:
+        if item.get_closest_marker("real_data"):
+            item.add_marker(skip_real_data)
+
 
 @pytest.fixture
 def sample_config():
