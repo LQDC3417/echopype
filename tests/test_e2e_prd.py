@@ -15,8 +15,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from conftest import SCHOOL_TEST_MAX_SECONDS, subset_for_school_detection
 from src.core.acoustic import open_single_file, process_single_file
 from src.core.utils import load_config, get_sv_array, squeeze_sv, sv_to_linear
+
+pytestmark = pytest.mark.real_data
 
 RAW_FILE = "D:/Administrator/Desktop/echopype/raw_data/20250706SCSK-D20250706-T024009.raw"
 CONFIG_PATH = "D:/Administrator/Desktop/echopype/configs/example.yaml"
@@ -115,10 +118,21 @@ class TestFR04_BottomDetection:
 
 class TestFR05_SchoolDetection:
     def test_detect_schools_returns_mask(self, ds_Sv):
+        from time import perf_counter
+
         import xarray as xr
         from src.core.school import detect_schools
-        mask = detect_schools(ds_Sv, {"thr": -55.0, "mincan": [3.0, 10.0], "maxlink": [3.0, 15.0], "minsho": [3.0, 15.0]})
+
+        school_ds = subset_for_school_detection(ds_Sv)
+        started_at = perf_counter()
+        mask = detect_schools(
+            school_ds,
+            {"thr": -55.0, "mincan": [3.0, 10.0], "maxlink": [3.0, 15.0], "minsho": [3.0, 15.0]},
+        )
+        elapsed = perf_counter() - started_at
+
         assert isinstance(mask, xr.DataArray)
+        assert elapsed <= SCHOOL_TEST_MAX_SECONDS
 
 
 # ═══════════════════════════════════════════════════════

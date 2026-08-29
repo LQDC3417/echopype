@@ -27,6 +27,9 @@ fish-acoustics = "src.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "real_data: requires local EK80 raw data and --run-real-data",
+]
 
 [tool.ruff]
 line-length = 100

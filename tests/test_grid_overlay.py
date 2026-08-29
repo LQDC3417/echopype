@@ -8,12 +8,17 @@ remove_background_noise 抛出 RuntimeError（processing_level_code）。
   3. EchogramRenderer 需要 Qt 上下文，headless 环境下用 _MockRenderer 测试 set_grid_data 逻辑。
 """
 import sys
+
+import pytest
+
 sys.path.insert(0, '.')
 from src.core.utils import load_config
 from src.core.acoustic import open_single_file, compute_sv
 from src.core.integration import create_integration_grid, integrate, ESUType
 from pathlib import Path
 import numpy as np
+
+pytestmark = pytest.mark.real_data
 
 RAW_FILE = Path('raw_data/20250706SCSK-D20250706-T024009.raw')
 

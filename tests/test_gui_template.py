@@ -1,6 +1,7 @@
 """浅色 Echoview 风格 GUI 模板的冒烟测试。"""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -9,8 +10,13 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication, QScrollArea, QTabWidget
 
-from templates.echoview_gui_template import EchoviewTemplateWindow
 from src.gui.property_panel import PropertyPanel
+
+_TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "templates" / "echoview_gui_template.py"
+if _TEMPLATE_PATH.is_file():
+    from templates.echoview_gui_template import EchoviewTemplateWindow
+else:
+    EchoviewTemplateWindow = None
 
 
 @pytest.fixture(scope="module")
@@ -19,6 +25,9 @@ def qapp():
 
 
 def test_light_template_exposes_workbench_regions(qapp):
+    if EchoviewTemplateWindow is None:
+        pytest.skip("optional local GUI template is unavailable")
+
     window = EchoviewTemplateWindow()
 
     assert window.windowTitle() == "Echoview · Fish Acoustic Workbench"
