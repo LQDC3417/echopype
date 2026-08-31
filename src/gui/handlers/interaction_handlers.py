@@ -61,6 +61,11 @@ class InteractionMixin:
             return
         sv = squeeze_sv(self._ds_Sv["Sv"].values)
         h, w = sv.shape
+        previous_mask = (
+            self._noise_mask_manual.copy()
+            if self._noise_mask_manual is not None
+            else None
+        )
 
         if self._noise_mask_manual is None:
             self._noise_mask_manual = np.zeros((h, w), dtype=bool)
@@ -71,7 +76,7 @@ class InteractionMixin:
         py2 = min(w, int(max(y1, y2)))
 
         self._noise_mask_manual[px1:px2, py1:py2] = True
-        self._undo_stack.append(("noise_mask", self._noise_mask_manual.copy()))
+        self._undo_stack.append(("noise_mask", previous_mask))
         self._redo_stack.clear()
 
         self.echogram.set_noise_mask(self._noise_mask_manual)
@@ -81,6 +86,8 @@ class InteractionMixin:
             area=(px2 - px1) * (py2 - py1), mean_sv=0.0,
         )
         self._save_file_state()
+        if hasattr(self, "_mark_results_stale"):
+            self._mark_results_stale("bottom", "schools", "integration")
         self._apply_noise_params()
 
     def _inspect_region(self, x1, y1, x2, y2):
@@ -124,6 +131,15 @@ class InteractionMixin:
     # 撤销/重做
     # ═══════════════════════════════════════════════════════
 
+    def _restore_noise_mask(self, mask):
+        """恢复手动噪声 mask，并同步重新计算依赖的去噪结果。"""
+        self._noise_mask_manual = mask.copy() if mask is not None else None
+        self.echogram.set_noise_mask(self._noise_mask_manual)
+        self._save_file_state()
+        if hasattr(self, "_mark_results_stale"):
+            self._mark_results_stale("bottom", "schools", "integration")
+        self._apply_noise_params()
+
     def _undo(self):
         if not self._undo_stack:
             return
@@ -131,8 +147,7 @@ class InteractionMixin:
         if action_type == "noise_mask":
             current = self._noise_mask_manual.copy() if self._noise_mask_manual is not None else None
             self._redo_stack.append(("noise_mask", current))
-            self._noise_mask_manual = data
-            self.echogram.set_noise_mask(data)
+            InteractionMixin._restore_noise_mask(self, data)
             self.statusbar.set_status(T("undo"))
 
     def _redo(self):
@@ -142,8 +157,7 @@ class InteractionMixin:
         if action_type == "noise_mask":
             current = self._noise_mask_manual.copy() if self._noise_mask_manual is not None else None
             self._undo_stack.append(("noise_mask", current))
-            self._noise_mask_manual = data
-            self.echogram.set_noise_mask(data)
+            InteractionMixin._restore_noise_mask(self, data)
             self.statusbar.set_status(T("redo"))
 
     # ═══════════════════════════════════════════════════════
@@ -157,9 +171,11 @@ class InteractionMixin:
         self.echogram.reset_view()
 
     def _clear_noise_regions(self):
-        self._noise_mask_manual = None
-        self.echogram.set_noise_mask(None)
-        self._save_file_state()
+        if self._noise_mask_manual is None:
+            return
+        self._undo_stack.append(("noise_mask", self._noise_mask_manual.copy()))
+        self._redo_stack.clear()
+        InteractionMixin._restore_noise_mask(self, None)
         self.statusbar.set_status(T("msg_noise_cleared"))
 
     def _clear_schools(self):
@@ -208,15 +224,16 @@ class InteractionMixin:
             if "csv" in formats:
                 exported.append(export_schools_to_csv(self._schools_df, output_dir / "schools.csv"))
 
-        if content.get("grid") and hasattr(self, '_grid_df') and self._grid_df is not None:
+        grid_df = getattr(self, "_integration_df", None)
+        if content.get("grid") and grid_df is not None and not grid_df.empty:
             if "csv" in formats:
                 from src.core.export import export_density_to_csv
-                exported.append(export_density_to_csv(self._grid_df, output_dir / "grid_stats.csv"))
+                exported.append(export_density_to_csv(grid_df, output_dir / "grid_stats.csv"))
 
         if "excel" in formats:
             schools = self._schools_df if content.get("schools") else None
             from src.core.export import export_to_excel
-            exported.append(export_to_excel(schools, None, output_dir / "results.xlsx"))
+            exported.append(export_to_excel(schools, grid_df if content.get("grid") else None, output_dir / "results.xlsx"))
 
         self.statusbar.set_status(T("msg_export_done", n=len(exported), dir=output_dir))
 

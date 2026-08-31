@@ -231,7 +231,8 @@ def detect_single_targets_real(
             vidx = np.where(valid)[0]
             if len(vidx) >= 2:
                 dr = float((er[vidx[1]] - er[vidx[0]]) / (vidx[1] - vidx[0]))
-        echo_range = np.arange(len(er), dtype=np.float64) * dr
+            first_valid = int(vidx[0])
+            echo_range = er[first_valid] + (np.arange(len(er), dtype=np.float64) - first_valid) * dr
 
     logger.info(
         f"SED 参数: threshold={ts_threshold} dB, PLDL={pldl} dB, "

@@ -1,10 +1,14 @@
 """高优先级代码审查问题的回归测试。"""
 
-import numpy as np
-import xarray as xr
-import pytest
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+import pytest
+import xarray as xr
+
+from src.core import acoustic
+from src.core.export import export_to_zarr
 from src.core.integration import IntegrationGrid, integrate
 from src.core.merge import _resample_sv
 from src.core.noise import (
@@ -12,9 +16,9 @@ from src.core.noise import (
     apply_noise_reduction,
     estimate_noise_de_robertis,
 )
-from src.core.export import export_to_zarr
-from src.core import acoustic
 from src.gui.handlers.file_handlers import FileMixin
+from src.gui.handlers import interaction_handlers
+from src.gui.handlers.interaction_handlers import InteractionMixin
 from src.gui.handlers.processing_handlers import ProcessingMixin
 from src.gui.workers import apply_manual_mask
 
@@ -62,6 +66,35 @@ def test_noise_reduction_adapts_windows_to_small_dataset():
 
     assert noise.shape == sv.shape
     assert per_ping.shape == (10,)
+
+
+def test_noise_reduction_covers_partial_ping_window():
+    sv = np.full((25, 8), -80.0)
+
+    noise, per_ping = estimate_noise_de_robertis(
+        sv,
+        np.arange(8.0),
+        ping_num=10,
+        range_sample_num=4,
+    )
+
+    assert noise.shape == sv.shape
+    assert per_ping.shape == (25,)
+
+
+def test_noise_reduction_uses_partial_range_window_in_db():
+    sv = np.full((10, 4), -80.0)
+    sv[:, 3] = -120.0
+
+    _noise, per_ping = estimate_noise_de_robertis(
+        sv,
+        np.arange(4.0),
+        ping_num=10,
+        range_sample_num=3,
+        noise_max=0.0,
+    )
+
+    assert per_ping.tolist() == pytest.approx([-120.0] * 10)
 
 
 def test_noise_reduction_keeps_channel_specific_results():
@@ -178,6 +211,115 @@ def test_reset_analysis_state_clears_previous_project_results():
     assert host.echogram.bottom is None
     assert host.echogram.noise is None
     assert host.echogram.school is None
+
+
+def test_noise_region_undo_keeps_the_previous_mask_snapshot():
+    class Echogram:
+        def set_noise_mask(self, _value):
+            pass
+
+    class RegionTable:
+        def add_region(self, **_kwargs):
+            pass
+
+    host = type("Host", (), {})()
+    host._ds_Sv = _make_sv_dataset([[1.0, 2.0], [3.0, 4.0]])
+    host._noise_mask_manual = None
+    host._undo_stack = []
+    host._redo_stack = []
+    host.echogram = Echogram()
+    host.region_table = RegionTable()
+    host._save_file_state = lambda: None
+    host._apply_noise_params = lambda: None
+
+    InteractionMixin._add_noise_region(host, 0, 0, 1, 1)
+
+    assert len(host._undo_stack) == 1
+    assert host._undo_stack[0][0] == "noise_mask"
+    assert host._undo_stack[0][1] is None
+
+
+def test_undo_noise_mask_reapplies_noise_processing():
+    class Echogram:
+        def set_noise_mask(self, value):
+            self.value = value
+
+    class StatusBar:
+        def set_status(self, _value):
+            pass
+
+    host = type("Host", (), {})()
+    host._noise_mask_manual = np.array([[True]])
+    host._undo_stack = [("noise_mask", None)]
+    host._redo_stack = []
+    host.echogram = Echogram()
+    host.statusbar = StatusBar()
+    host.noise_apply_calls = 0
+    host.save_calls = 0
+    host.stale_results = []
+
+    def apply_noise():
+        host.noise_apply_calls += 1
+
+    def save_state():
+        host.save_calls += 1
+
+    def mark_results_stale(*names):
+        host.stale_results.append(names)
+
+    host._apply_noise_params = apply_noise
+    host._save_file_state = save_state
+    host._mark_results_stale = mark_results_stale
+
+    InteractionMixin._undo(host)
+
+    assert host._noise_mask_manual is None
+    assert host.noise_apply_calls == 1
+    assert host.save_calls == 1
+    assert host.stale_results == [("bottom", "schools", "integration")]
+
+
+def test_export_grid_uses_integration_dataframe(monkeypatch, tmp_path):
+    class ExportDialog:
+        Accepted = 1
+
+        def __init__(self, _parent):
+            pass
+
+        def exec(self):
+            return self.Accepted
+
+        def get_formats(self):
+            return ["csv"]
+
+        def get_content(self):
+            return {"sv": False, "schools": False, "grid": True}
+
+    class StatusBar:
+        def set_status(self, _value):
+            pass
+
+    exported = {}
+
+    def export_density(df, path):
+        exported["dataframe"] = df
+        exported["path"] = path
+        return path
+
+    monkeypatch.setattr(interaction_handlers, "ExportDialog", ExportDialog)
+    monkeypatch.setattr("src.core.export.export_density_to_csv", export_density)
+
+    host = type("Host", (), {})()
+    host._config = {"output": {"dir": str(tmp_path)}}
+    host._ds_Sv = None
+    host._schools_df = None
+    host._integration_df = pd.DataFrame({"density_ind_ha": [1.0]})
+    host.statusbar = StatusBar()
+
+    InteractionMixin._export(host)
+
+    assert exported["dataframe"] is host._integration_df
+    assert exported["path"] == tmp_path / "grid_stats.csv"
 
 
 def test_zarr_export_refuses_to_remove_existing_output(tmp_path, monkeypatch):

@@ -24,6 +24,19 @@ def _make_ds(ping_times, echo_range, sv_rows=None):
     )
 
 
+def _make_two_channel_ds(ping_times, values):
+    values = np.asarray(values, dtype=np.float32)
+    return xr.Dataset(
+        {"Sv": (("channel", "ping_time", "range_sample"), values)},
+        coords={
+            "channel": [38.0, 120.0],
+            "ping_time": ("ping_time", np.array(ping_times, dtype="datetime64[ns]")),
+            "range_sample": [0, 1],
+            "echo_range": ("range_sample", [1.0, 2.0]),
+        },
+    )
+
+
 class TestComputeCommonGrid:
     def test_identical_grids(self):
         """网格一致时直接返回"""
@@ -43,6 +56,35 @@ class TestComputeCommonGrid:
 
 
 class TestMergeAligned:
+    def test_preserves_each_channel(self):
+        first = _make_two_channel_ds(
+            ["2026-01-01T00:00:00"],
+            [[[1.0, 1.0]], [[10.0, 10.0]]],
+        )
+        second = _make_two_channel_ds(
+            ["2026-01-01T00:01:00"],
+            [[[2.0, 2.0]], [[20.0, 20.0]]],
+        )
+
+        merged = merge_aligned([first, second])
+
+        assert merged["channel"].values.tolist() == [38.0, 120.0]
+        assert merged["Sv"].values[:, :, 0].tolist() == [[1.0, 2.0], [10.0, 20.0]]
+
+    def test_rejects_channel_specific_depth_grids(self):
+        source = _make_two_channel_ds(
+            ["2026-01-01T00:00:00"],
+            [[[1.0, 1.0]], [[10.0, 10.0]]],
+        ).assign_coords(
+            echo_range=(
+                ("channel", "ping_time", "range_sample"),
+                [[[1.0, 2.0]], [[10.0, 20.0]]],
+            )
+        )
+
+        with pytest.raises(ValueError, match="共享相同的 echo_range"):
+            merge_aligned([source, source])
+
     def test_time_sorting(self):
         """文件乱序时按真实时间戳排序"""
         # 文件 A 时间在后，文件 B 时间在前

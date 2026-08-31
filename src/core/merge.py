@@ -89,33 +89,73 @@ def _resample_sv(ds_Sv: xr.Dataset, common_grid: np.ndarray) -> np.ndarray:
     Returns
     -------
     np.ndarray
-        (n_pings, n_common_samples) 的 Sv 数组
+        无 channel 输入返回 (n_pings, n_common_samples)，有 channel 输入返回
+        (n_channels, n_pings, n_common_samples)。
     """
-    sv = ds_Sv["Sv"].values
-    if sv.ndim == 3:
-        sv = sv[0]  # 第一个 channel
-    sv = np.asarray(sv, dtype=np.float64)
+    sv = np.asarray(ds_Sv["Sv"].values, dtype=np.float64)
+    has_channel = sv.ndim == 3
+    if sv.ndim == 2:
+        sv = sv[np.newaxis, ...]
+    elif not has_channel:
+        raise ValueError("Sv must have ping_time and range_sample dimensions")
 
     er = _echo_range_1d(ds_Sv)
-    n_pings = sv.shape[0]
+    n_channels, n_pings, _ = sv.shape
 
-    # 逐 ping 沿深度插值
-    out = np.full((n_pings, len(common_grid)), np.nan, dtype=np.float32)
-    for i in range(n_pings):
-        row = sv[i]
-        valid = np.isfinite(row) & np.isfinite(er)
-        if np.count_nonzero(valid) < 2:
-            continue
-        xp = er[valid]
-        fp = row[valid]
-        order = np.argsort(xp, kind="stable")
-        xp = xp[order]
-        fp = fp[order]
-        xp, unique_idx = np.unique(xp, return_index=True)
-        fp = fp[unique_idx]
-        out[i] = np.interp(common_grid, xp, fp, left=np.nan, right=np.nan)
+    # 逐 channel、逐 ping 沿深度插值。
+    out = np.full((n_channels, n_pings, len(common_grid)), np.nan, dtype=np.float32)
+    for channel_idx in range(n_channels):
+        for ping_idx in range(n_pings):
+            row = sv[channel_idx, ping_idx]
+            valid = np.isfinite(row) & np.isfinite(er)
+            if np.count_nonzero(valid) < 2:
+                continue
+            xp = er[valid]
+            fp = row[valid]
+            order = np.argsort(xp, kind="stable")
+            xp = xp[order]
+            fp = fp[order]
+            xp, unique_idx = np.unique(xp, return_index=True)
+            fp = fp[unique_idx]
+            out[channel_idx, ping_idx] = np.interp(
+                common_grid, xp, fp, left=np.nan, right=np.nan
+            )
 
-    return out
+    return out if has_channel else out[0]
+
+
+def _channel_values(ds_Sv: xr.Dataset) -> np.ndarray:
+    """返回数据集的 channel 坐标；无 channel 数据按单通道处理。"""
+    if "channel" not in ds_Sv.dims:
+        return np.array([0], dtype=np.int64)
+    if "channel" in ds_Sv.coords:
+        return np.atleast_1d(ds_Sv["channel"].values)
+    return np.arange(ds_Sv.sizes["channel"], dtype=np.int64)
+
+
+def _validate_shared_channel_grid(ds_Sv: xr.Dataset) -> None:
+    """拒绝 channel 间不一致的深度网格，避免把 Sv 标注到错误深度。"""
+    channel_vals = _channel_values(ds_Sv)
+    if len(channel_vals) <= 1:
+        return
+
+    if "echo_range" not in ds_Sv:
+        return
+    echo_range = ds_Sv["echo_range"]
+    if "channel" not in echo_range.dims:
+        return
+    if "ping_time" in echo_range.dims:
+        echo_range = echo_range.isel(ping_time=0)
+    extra_dims = [dim for dim in echo_range.dims if dim not in ("channel", "range_sample")]
+    for dim in extra_dims:
+        echo_range = echo_range.isel({dim: 0})
+    grids = np.asarray(echo_range.transpose("channel", "range_sample").values)
+    reference = grids[0]
+    if any(
+        len(grid) != len(reference) or not np.allclose(grid, reference, equal_nan=True)
+        for grid in grids[1:]
+    ):
+        raise ValueError("多通道合并要求 channel 共享相同的 echo_range 网格")
 
 
 def merge_aligned(ds_list: list[xr.Dataset], dedup: bool = True) -> xr.Dataset:
@@ -136,20 +176,14 @@ def merge_aligned(ds_list: list[xr.Dataset], dedup: bool = True) -> xr.Dataset:
     if not ds_list:
         raise ValueError("没有可合并的文件")
 
-    # 提取原始 channel 值（保留给下游 detect_bottom 等使用）
-    channel_vals = None
     first_ds = ds_list[0]
-    if "channel" in first_ds.coords:
-        channel_vals = first_ds["channel"].values
-    elif "channel" in first_ds.dims:
-        channel_vals = first_ds["channel"].values
-
-    # 只保留第一个 channel
-    ds_list = [
-        ds.isel(channel=0) if "channel" in ds.dims else ds
-        for ds in ds_list
-    ]
-    first = ds_list[0]
+    channel_vals = _channel_values(first_ds)
+    for ds in ds_list:
+        _validate_shared_channel_grid(ds)
+    for ds in ds_list[1:]:
+        if not np.array_equal(_channel_values(ds), channel_vals):
+            raise ValueError("多文件合并要求所有文件具有相同的 channel 坐标")
+    first = first_ds
 
     # 公共深度网格
     common_grid = compute_common_grid(ds_list)
@@ -161,20 +195,22 @@ def merge_aligned(ds_list: list[xr.Dataset], dedup: bool = True) -> xr.Dataset:
     all_times = []
     for ds in ds_list:
         sv_resampled = _resample_sv(ds, common_grid)
+        if sv_resampled.ndim == 2:
+            sv_resampled = sv_resampled[np.newaxis, ...]
         times = ds["ping_time"].values
         all_sv.append(sv_resampled)
         all_times.append(times)
 
-    sv_all = np.vstack(all_sv)
+    sv_all = np.concatenate(all_sv, axis=1)
     times_all = np.concatenate(all_times)
 
     # 按真实时间戳排序
     sort_idx = np.argsort(times_all, kind="stable")
-    sv_sorted = sv_all[sort_idx]
+    sv_sorted = sv_all[:, sort_idx, :]
     times_sorted = times_all[sort_idx]
 
     # 去重（时间戳相同的 ping 只保留第一个）
-    keep = np.ones(len(sv_all), dtype=bool)
+    keep = np.ones(sv_all.shape[1], dtype=bool)
     if dedup and len(times_sorted) > 1:
         t_prev = times_sorted[0]
         for i in range(1, len(times_sorted)):
@@ -184,22 +220,15 @@ def merge_aligned(ds_list: list[xr.Dataset], dedup: bool = True) -> xr.Dataset:
                 t_prev = times_sorted[i]
         if not np.all(keep):
             logger.info(f"去重 {int((~keep).sum())} 个重叠 ping")
-        sv_sorted = sv_sorted[keep]
+        sv_sorted = sv_sorted[:, keep, :]
         times_sorted = times_sorted[keep]
 
     # 组装 xr.Dataset
-    if channel_vals is None:
-        channel_vals = np.array([0], dtype=np.int64)
-    else:
-        channel_vals = np.atleast_1d(channel_vals)[:1]
     n_ch = len(channel_vals)
-    sv_3d = np.broadcast_to(
-        sv_sorted.astype(np.float32)[None, :, :], (n_ch, sv_sorted.shape[0], sv_sorted.shape[1])
-    )
     merged = xr.Dataset(
         {
             "Sv": xr.DataArray(
-                sv_3d,
+                sv_sorted.astype(np.float32),
                 dims=["channel", "ping_time", "range_sample"],
                 coords={
                     "channel": ("channel", channel_vals),
@@ -226,26 +255,33 @@ def merge_aligned(ds_list: list[xr.Dataset], dedup: bool = True) -> xr.Dataset:
         da = first[vname]
         if da.ndim == 0:
             merged[vname] = da
-    # per-ping 校准变量（gain/sa_correction）：取合并后各 ping 的拼接值
+    # 按 ping 变化的校准变量（gain/sa_correction）保持其 channel 维度。
     for vname in ("gain_correction", "sa_correction"):
-        if vname in first.data_vars:
-            vals = np.concatenate([ds[vname].values for ds in ds_list])[sort_idx]
-            if dedup and len(times_sorted) > 1:
-                vals = vals[keep]
-            merged[vname] = (("ping_time",), vals)
+        if not all(vname in ds.data_vars for ds in ds_list):
+            continue
+        da = first[vname]
+        if "ping_time" not in da.dims or any(ds[vname].dims != da.dims for ds in ds_list):
+            continue
+        ping_axis = da.get_axis_num("ping_time")
+        vals = np.concatenate([ds[vname].values for ds in ds_list], axis=ping_axis)
+        vals = np.take(vals, sort_idx, axis=ping_axis)
+        if dedup and len(times_sorted) > 1:
+            vals = np.take(vals, np.flatnonzero(keep), axis=ping_axis)
+        merged[vname] = (da.dims, vals)
 
     # 保留逐文件处理阶段生成的校正 Sv 和底线，避免 CLI 合并后丢失结果。
     if all("Sv_corrected" in ds for ds in ds_list):
-        corrected = np.vstack(
-            [
-                _resample_sv(xr.Dataset({"Sv": ds["Sv_corrected"]}), common_grid)
-                for ds in ds_list
-            ]
-        )[sort_idx]
+        corrected_parts = []
+        for ds in ds_list:
+            corrected_part = _resample_sv(ds.assign(Sv=ds["Sv_corrected"]), common_grid)
+            if corrected_part.ndim == 2:
+                corrected_part = corrected_part[np.newaxis, ...]
+            corrected_parts.append(corrected_part)
+        corrected = np.concatenate(corrected_parts, axis=1)[:, sort_idx, :]
         if dedup and len(times_sorted) > 1:
-            corrected = corrected[keep]
+            corrected = corrected[:, keep, :]
         merged["Sv_corrected"] = (
-            ("channel", "ping_time", "range_sample"), corrected[None, ...]
+            ("channel", "ping_time", "range_sample"), corrected
         )
 
     if all("bottom_depth" in ds for ds in ds_list):

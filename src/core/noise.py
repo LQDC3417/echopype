@@ -78,37 +78,27 @@ def estimate_noise_de_robertis(
     Sv_linear = 10 ** (Sv / 10)
     Sv_linear = np.nan_to_num(Sv_linear, nan=0.0, posinf=0.0, neginf=0.0)
 
-    # 2. 计算分块数；窗口超过数据尺寸时使用整个有效轴
-    n_ping_bins = max(1, n_pings // ping_num)
-    n_range_bins = max(1, n_samples // range_sample_num)
-
-    # 3. 按窗口平均
-    # 截取到可整除的大小
-    ping_cut = n_ping_bins * ping_num
-    range_cut = n_range_bins * range_sample_num
-
-    Sv_cut = Sv_linear[:ping_cut, :range_cut]
-
-    # reshape 为 (n_ping_bins, ping_num, n_range_bins, range_sample_num)
-    Sv_reshaped = Sv_cut.reshape(n_ping_bins, ping_num, n_range_bins, range_sample_num)
-
-    # 按深度方向平均
-    Sv_depth_mean = np.nanmean(Sv_reshaped, axis=3)  # (n_ping_bins, ping_num, n_range_bins)
-
-    # 按 ping 方向平均
-    Sv_ping_mean = np.nanmean(Sv_depth_mean, axis=1)  # (n_ping_bins, n_range_bins)
-
-    # 4. 按 ping 列取最小值作为噪声估计
-    noise_per_bin = np.nanmin(Sv_ping_mean, axis=1)  # (n_ping_bins,)
-
-    # 5. 应用噪声上限
+    # 2. 按窗口平均；两个方向的尾部都作为不完整窗口参与估计。
     noise_max_linear = 10 ** (noise_max / 10)
-    noise_per_bin = np.minimum(noise_per_bin, noise_max_linear)
 
-    # 6. 扩展到完整 ping 数
-    noise_per_ping = np.repeat(noise_per_bin, ping_num)[:n_pings]
+    noise_chunks = []
+    for ping_start in range(0, n_pings, ping_num):
+        ping_stop = min(ping_start + ping_num, n_pings)
+        sv_chunk = Sv_linear[ping_start:ping_stop]
+        range_means = []
+        for range_start in range(0, n_samples, range_sample_num):
+            range_stop = min(range_start + range_sample_num, n_samples)
+            range_means.append(np.nanmean(sv_chunk[:, range_start:range_stop], axis=1))
+        sv_depth_mean = np.stack(range_means, axis=1)
+        sv_ping_mean = np.nanmean(sv_depth_mean, axis=0)
+        noise_linear = np.minimum(np.nanmin(sv_ping_mean), noise_max_linear)
+        noise_chunks.append(np.full(ping_stop - ping_start, noise_linear))
 
-    # 7. 构建 2D 噪声矩阵
+    # 3. 每个 ping 恰好有一个 dB 噪声估计（包括两个方向的尾部）。
+    noise_per_ping_linear = np.concatenate(noise_chunks)
+    noise_per_ping = 10 * np.log10(noise_per_ping_linear + 1e-20)
+
+    # 4. 构建 dB 噪声矩阵，供 SNR = Sv(dB) - noise(dB) 使用。
     noise_2d = np.tile(noise_per_ping[:, np.newaxis], (1, n_samples))
 
     return noise_2d, noise_per_ping
