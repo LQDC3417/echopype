@@ -17,6 +17,46 @@ def _make_sv_dataset(value: float) -> xr.Dataset:
     )
 
 
+def _make_two_channel_sv_dataset(value: float) -> xr.Dataset:
+    """构造带两个声学通道的最小 Sv 数据集。"""
+    return xr.Dataset(
+        {
+            "Sv": (
+                ("channel", "ping_time", "range_sample"),
+                np.array([[[value]], [[value - 1.0]]], dtype=np.float32),
+            )
+        },
+        coords={
+            "channel": ("channel", np.array([38.0, 120.0])),
+            "ping_time": ("ping_time", np.array(["2026-01-01"], dtype="datetime64[ns]")),
+            "echo_range": ("range_sample", np.array([1.0], dtype=np.float32)),
+        },
+    )
+
+
+def test_merge_worker_preserves_all_channels(monkeypatch):
+    """多文件导入应将全部声学通道交给合并结果。"""
+    from src.core import acoustic, merge
+    from src.gui.workers import MergeFilesWorker
+
+    raw_files = [Path("first.raw"), Path("second.raw")]
+    echodata_by_path = {raw_files[0]: object(), raw_files[1]: object()}
+    datasets = {
+        echodata_by_path[raw_files[0]]: _make_two_channel_sv_dataset(-40.0),
+        echodata_by_path[raw_files[1]]: _make_two_channel_sv_dataset(-41.0),
+    }
+    monkeypatch.setattr(acoustic, "open_single_file", lambda path, config: echodata_by_path[path])
+    monkeypatch.setattr(acoustic, "compute_sv", lambda echodata, config: datasets[echodata])
+    monkeypatch.setattr(merge, "merge_aligned", lambda ds_list, dedup=True: ds_list[0])
+
+    worker = MergeFilesWorker(raw_files, config={})
+    finished = []
+    worker.finished.connect(finished.append)
+    worker.run()
+
+    assert finished[0].dataset["channel"].values.tolist() == [38.0, 120.0]
+
+
 def test_merge_worker_skips_raw_echodata_combine_for_multiple_files(monkeypatch):
     """多文件导入不应因滤波器元数据维度不同而调用 combine_echodata。"""
     import echopype as ep

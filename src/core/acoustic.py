@@ -137,8 +137,8 @@ def _attach_gps(ds_Sv: xr.Dataset, echodata) -> xr.Dataset:
         t_gps, lat, lon = t_gps[uniq], lat[uniq], lon[uniq]
         # 插值到 ping_time
         ping_t = ds_Sv["ping_time"].values.astype("datetime64[ns]").astype(float)
-        lat_i = np.interp(ping_t, t_gps, lat)
-        lon_i = np.interp(ping_t, t_gps, lon)
+        lat_i = np.interp(ping_t, t_gps, lat, left=np.nan, right=np.nan)
+        lon_i = np.interp(ping_t, t_gps, lon, left=np.nan, right=np.nan)
         ds_Sv = ds_Sv.assign_coords(
             latitude=("ping_time", lat_i),
             longitude=("ping_time", lon_i),

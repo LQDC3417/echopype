@@ -173,8 +173,6 @@ class MergeFilesWorker(QThread):
                 echodata = open_single_file(path, self.config)
                 stage = "compute_sv"
                 ds = compute_sv(echodata, self.config)
-                if "channel" in ds.dims:
-                    ds = ds.isel(channel=0)
             except Exception as exc:
                 failed_files.append(
                     FileFailure(
