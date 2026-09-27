@@ -68,7 +68,7 @@ class MainStatusBar(QStatusBar):
 
         # ─── 流水线步骤 ───
         self.lbl_step = QLabel("")
-        self.lbl_step.setStyleSheet("color: #e53e3e; font-weight: bold; padding: 0 8px;")
+        self.lbl_step.setStyleSheet("color: #B42318; font-weight: bold; padding: 0 8px;")
         self.addWidget(self.lbl_step)
 
         # ─── 状态信息 ───
@@ -112,7 +112,7 @@ class MainStatusBar(QStatusBar):
 
         # ─── 当前文件 ───
         self.lbl_file = QLabel("")
-        self.lbl_file.setStyleSheet("color: #4a5568; padding: 0 8px;")
+        self.lbl_file.setStyleSheet("color: #5C6773; padding: 0 8px;")
         self.lbl_file.setMaximumWidth(200)
         self.addPermanentWidget(self.lbl_file)
 
@@ -147,7 +147,7 @@ class MainStatusBar(QStatusBar):
     def _separator(self):
         """创建分隔符"""
         sep = QLabel("|")
-        sep.setStyleSheet("color: #999; padding: 0 4px;")
+        sep.setStyleSheet("color: #9AA3AD; padding: 0 4px;")
         return sep
 
     def _update_time(self):

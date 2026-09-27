@@ -33,11 +33,15 @@ def export_to_netcdf(ds_Sv: xr.Dataset, output_path: str | Path) -> Path:
     # 选择要导出的变量（排除过大的中间变量）
     export_vars = []
     for var in ds_Sv.data_vars:
-        if var in ("Sv", "Sv_corrected", "depth", "echo_range", "bottom_depth"):
+        if var in ("Sv", "Sv_corrected", "depth", "echo_range", "bottom_depth", "latitude", "longitude", "frequency_nominal", "source_file"):
             export_vars.append(var)
 
-    ds_export = ds_Sv[export_vars] if export_vars else ds_Sv
-    ds_export.to_netcdf(output_path)
+    ds_export = (ds_Sv[export_vars] if export_vars else ds_Sv).copy(deep=False)
+    # echopype 的可选去噪属性可能为 None，netCDF 不支持空属性。
+    ds_export.attrs = {k: v for k, v in ds_export.attrs.items() if v is not None}
+    for name in ds_export.variables:
+        ds_export[name].attrs = {k: v for k, v in ds_export[name].attrs.items() if v is not None}
+    ds_export.to_netcdf(output_path, engine="h5netcdf")
     logger.info(f"已导出 netCDF: {output_path} ({output_path.stat().st_size / 1024:.0f} KB)")
     return output_path
 
@@ -128,11 +132,9 @@ def export_sv_to_csv(ds_Sv: xr.Dataset, output_path: str | Path) -> Path:
 
     var = "Sv_corrected" if "Sv_corrected" in ds_Sv else "Sv"
     sv = ds_Sv[var]
-    if "channel" in sv.dims:
-        sv = sv.isel(channel=0)
-
-    n_pings, n_samples = sv.shape
-    est_rows = n_pings * n_samples
+    if "channel" in sv.dims and "channel" not in ds_Sv.coords:
+        raise ValueError("多通道 Sv 导出缺少 channel 身份坐标")
+    est_rows = sv.size
     est_mb = est_rows * 20 / (1024 * 1024)  # 粗估每行 ~20 bytes
     if est_mb > _SV_CSV_SIZE_WARN_MB:
         warnings.warn(
@@ -140,7 +142,25 @@ def export_sv_to_csv(ds_Sv: xr.Dataset, output_path: str | Path) -> Path:
             stacklevel=2,
         )
 
-    df = sv.to_dataframe(name="Sv").reset_index()
+    df = sv.to_dataframe(name=var).reset_index()
+    # 把常以 Dataset data variable 保存的导航与距离字段按 Sv 维度对齐。
+    aligned_names = (
+        "depth", "echo_range", "frequency_nominal", "latitude", "longitude", "source_file"
+    )
+    for name in aligned_names:
+        if name not in ds_Sv or name in df.columns:
+            continue
+        value = ds_Sv[name]
+        if not set(value.dims).issubset(sv.dims):
+            raise ValueError(
+                f"变量 {name} 的维度 {value.dims} 无法与 Sv 维度 {sv.dims} 对齐"
+            )
+        broadcast, _ = xr.broadcast(value, sv)
+        broadcast = broadcast.transpose(*sv.dims)
+        if broadcast.shape != sv.shape:
+            raise ValueError(f"变量 {name} 广播后形状与 Sv 不一致")
+        df[name] = broadcast.values.reshape(-1)
+    df["sv_variable"] = var
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
     logger.info(f"已导出 Sv CSV: {output_path} ({output_path.stat().st_size / 1024 / 1024:.1f} MB)")
     return output_path

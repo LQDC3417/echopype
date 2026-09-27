@@ -152,9 +152,9 @@ class StatsDialog(QDialog):
 
         summary_layout = QHBoxLayout()
         self.lbl_integration_info = QLabel(T("integration_info"))
-        self.lbl_integration_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #4a5568;")
+        self.lbl_integration_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #1F2933;")
         self.lbl_integration_stats = QLabel("--")
-        self.lbl_integration_stats.setStyleSheet("font-size: 12px; color: #718096;")
+        self.lbl_integration_stats.setStyleSheet("font-size: 12px; color: #5C6773;")
         summary_layout.addWidget(self.lbl_integration_info)
         summary_layout.addStretch()
         summary_layout.addWidget(self.lbl_integration_stats)
@@ -190,9 +190,9 @@ class StatsDialog(QDialog):
 
         summary_layout = QHBoxLayout()
         self.lbl_real_sed_info = QLabel(T("real_sed_info"))
-        self.lbl_real_sed_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #4a5568;")
+        self.lbl_real_sed_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #1F2933;")
         self.lbl_real_sed_stats = QLabel("--")
-        self.lbl_real_sed_stats.setStyleSheet("font-size: 12px; color: #718096;")
+        self.lbl_real_sed_stats.setStyleSheet("font-size: 12px; color: #5C6773;")
         summary_layout.addWidget(self.lbl_real_sed_info)
         summary_layout.addStretch()
         summary_layout.addWidget(self.lbl_real_sed_stats)
@@ -262,11 +262,11 @@ class StatsDialog(QDialog):
 
     def update_schools(self, schools_df):
         """更新鱼群列表"""
+        self._schools_df = schools_df
         if schools_df is None or schools_df.empty:
             self.school_table.setRowCount(0)
             return
 
-        self._schools_df = schools_df
         self._populate_school_table(schools_df)
 
     def _populate_school_table(self, df):
@@ -318,13 +318,13 @@ class StatsDialog(QDialog):
         self.school_table.setSortingEnabled(True)
     def update_integration(self, df):
         """更新回声积分结果"""
+        self._integration_df = df
         if df is None or df.empty:
             self.lbl_integration_info.setText(T("integration_info"))
             self.lbl_integration_stats.setText("--")
             self.integration_table.setRowCount(0)
             return
 
-        self._integration_df = df
         self.lbl_integration_info.setText(T("integration_info_fmt", n=len(df)))
 
         parts = []
@@ -415,13 +415,13 @@ class StatsDialog(QDialog):
 
     def update_real_sed(self, df):
         """更新 SED 网格聚合结果"""
+        self._real_sed_df = df
         if df is None or df.empty:
             self.lbl_real_sed_info.setText(T("real_sed_info"))
             self.lbl_real_sed_stats.setText("--")
             self.real_sed_table.setRowCount(0)
             return
 
-        self._real_sed_df = df
         cells_with_targets = int((df["n_targets"] > 0).sum())
         total_targets = int(df["n_targets"].sum())
         self.lbl_real_sed_info.setText(T("real_sed_info_fmt", n=cells_with_targets))
@@ -569,6 +569,8 @@ class StatsDialog(QDialog):
         if not rows:
             return
 
+        kind = self._result_kind(table)
+
         # 获取表头
         headers = []
         for col in range(table.columnCount()):
@@ -576,7 +578,15 @@ class StatsDialog(QDialog):
             headers.append(header_item.text() if header_item else "")
 
         # 获取数据
-        data_lines = ["\t".join(headers)]
+        data_lines = []
+        parent = self.parent()
+        if kind and parent is not None and (
+            kind in getattr(parent, "_stale_results", set())
+            or kind in getattr(parent, "_incomplete_results", set())
+        ):
+            channel = getattr(parent, "_current_channel", "") or "未记录通道"
+            data_lines.append(f"历史/过期结果 · 通道 {channel}")
+        data_lines.append("\t".join(headers))
         for row in rows:
             row_data = []
             for col in range(table.columnCount()):
@@ -605,6 +615,8 @@ class StatsDialog(QDialog):
     def _export_rows(self, table, rows):
         """导出指定行到文件"""
         if not rows:
+            return
+        if not self._ensure_result_exportable(self._result_kind(table)):
             return
 
         file_path, _selected_filter = QFileDialog.getSaveFileName(
@@ -653,6 +665,9 @@ class StatsDialog(QDialog):
     def _on_export_clicked(self):
         """导出当前标签页数据"""
         current_tab = self.tabs.currentIndex()
+        kinds = ("schools", "integration", "real_sed")
+        if not self._ensure_result_exportable(kinds[current_tab]):
+            return
 
         if current_tab == 0:
             # 导出鱼群数据
@@ -675,6 +690,15 @@ class StatsDialog(QDialog):
 
     def _on_export_all_clicked(self):
         """导出所有数据"""
+        kinds = []
+        if self._schools_df is not None and not self._schools_df.empty:
+            kinds.append("schools")
+        if self._integration_df is not None and not self._integration_df.empty:
+            kinds.append("integration")
+        if self._real_sed_df is not None and not self._real_sed_df.empty:
+            kinds.append("real_sed")
+        if not self._ensure_result_exportable(*kinds):
+            return
         file_path, _selected_filter = QFileDialog.getSaveFileName(
             self, T("stats_btn_export_all"), "",
             "Excel (*.xlsx);;JSON (*.json)"
@@ -721,6 +745,9 @@ class StatsDialog(QDialog):
 
     def _export_dataframe(self, df, default_name):
         """导出 DataFrame 到文件"""
+        kind = ("schools", "integration", "real_sed")[self.tabs.currentIndex()]
+        if not self._ensure_result_exportable(kind):
+            return
         file_path, _selected_filter = QFileDialog.getSaveFileName(
             self, f"{default_name}", default_name,
             "CSV (*.csv);;Excel (*.xlsx);;JSON (*.json)"
@@ -740,6 +767,27 @@ class StatsDialog(QDialog):
             QMessageBox.information(self, T("stats_export_success"), f"{default_name}: {file_path}")
         except Exception as e:
             QMessageBox.critical(self, T("stats_export_failed"), f"{e!s}")
+
+    @staticmethod
+    def _result_kind(table):
+        if table is None:
+            return None
+        dialog = table.window()
+        for attribute, kind in (
+            ("school_table", "schools"),
+            ("integration_table", "integration"),
+            ("real_sed_table", "real_sed"),
+        ):
+            if table is getattr(dialog, attribute, None):
+                return kind
+        return None
+
+    def _ensure_result_exportable(self, *kinds):
+        if not kinds:
+            return True
+        parent = self.parent()
+        gate = getattr(parent, "_ensure_result_exportable", None)
+        return gate(*kinds) if callable(gate) else True
 
 
 def _isnan(val):

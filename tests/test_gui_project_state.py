@@ -42,6 +42,9 @@ class _Echogram:
     def set_colormap(self, name, vmin, vmax):
         self.colormap = (name, vmin, vmax)
 
+    def set_analysis_region_enabled(self, enabled):
+        self.analysis_region_enabled = enabled
+
     def set_single_targets(self, value):
         self.single_targets = value
 
@@ -114,6 +117,7 @@ def test_save_project_copies_complete_gui_state(tmp_path, monkeypatch):
     host.line_manager.set_line_data("bottom", [20.0, 21.0], kind="manual")
     host.line_manager.add_line("custom", "Custom", reference_id="bottom", offset_m=-1.5)
     host.analysis_region = AnalysisRegion("surface", "bottom")
+    host._analysis_region_enabled = False
     host.display_settings = {"colormap": "inferno", "vmin": -82.0, "vmax": -28.0}
     host._real_sed_df = pd.DataFrame(
         {"target_id": [1], "ping_idx": [3], "range_m": [12.5], "ts_db": [-55.5]}
@@ -133,6 +137,7 @@ def test_save_project_copies_complete_gui_state(tmp_path, monkeypatch):
     assert loaded.line_manager.get("surface").offset_m == 7.5
     assert loaded.line_manager.get("custom").offset_m == -1.5
     assert loaded.analysis_region == AnalysisRegion("surface", "bottom")
+    assert loaded.analysis_region_enabled is False
     assert loaded.display_settings == {"colormap": "inferno", "vmin": -82.0, "vmax": -28.0}
     np.testing.assert_allclose(loaded.bottom_line, [20.0, 21.0])
     pd.testing.assert_frame_equal(loaded.sed_df, host._real_sed_df)
@@ -145,6 +150,7 @@ def test_restore_project_copies_new_state_into_gui():
     project.line_manager.set_line_data("bottom", [25.0, 26.0], kind="detected")
     project.line_manager.add_line("custom", "Custom", reference_id="bottom", offset_m=-2.0)
     project.analysis_region = AnalysisRegion("surface", "bottom")
+    project.analysis_region_enabled = False
     project.display_settings = {"colormap": "gray", "vmin": -75.0, "vmax": -25.0}
     project.surface_depth = 6.5
     project.bottom_line = np.array([25.0, 26.0], dtype=np.float32)
@@ -155,10 +161,12 @@ def test_restore_project_copies_new_state_into_gui():
     assert host.line_manager is not project.line_manager
     assert host.line_manager.get("custom").offset_m == -2.0
     assert host.analysis_region == AnalysisRegion("surface", "bottom")
+    assert host._analysis_region_enabled is False
     assert host.display_settings == {"colormap": "gray", "vmin": -75.0, "vmax": -25.0}
     assert host._surface_depth_m == 6.5
     np.testing.assert_allclose(host._bottom_line, [25.0, 26.0])
     assert host.echogram.colormap == ("gray", -75.0, -25.0)
+    assert host.echogram.analysis_region_enabled is False
     assert [line.id for line in host.echo_toolbar.lines] == ["surface", "bottom", "custom"]
 
 
@@ -188,6 +196,8 @@ def test_restore_project_results_keeps_sed_targets_separate_from_grid():
 
 def test_reset_analysis_state_resets_project_gui_state():
     host = _host()
+    host._analysis_region_enabled = True
+    host.echogram.set_analysis_region_enabled(True)
     host.line_manager.set_offset("surface", 8.0)
     host.line_manager.add_line("custom", "Custom", reference_id="surface")
     host.analysis_region = AnalysisRegion("surface", "custom")
@@ -200,6 +210,8 @@ def test_reset_analysis_state_resets_project_gui_state():
 
     assert [line.id for line in host.line_manager] == ["zero", "surface"]
     assert host.analysis_region is None
+    assert host._analysis_region_enabled is False
+    assert host.echogram.analysis_region_enabled is False
     assert host.display_settings == {"colormap": "jet", "vmin": -90.0, "vmax": -30.0}
     assert host._active_line_id == "surface"
     assert host._surface_depth_m == 2.0
@@ -238,3 +250,44 @@ def test_open_project_refuses_switch_while_worker_is_running(monkeypatch):
 
     assert host._current_worker is worker
     assert "后台任务" in host.statusbar.message
+
+
+def test_invalid_config_preserves_current_config(monkeypatch):
+    host = _host()
+    original = host._config
+    monkeypatch.setattr(file_handlers.QFileDialog, "getOpenFileName", lambda *a: ("bad.yaml", ""))
+    monkeypatch.setattr(file_handlers, "load_config", lambda p: {"processing": []})
+    warnings = []
+    monkeypatch.setattr(file_handlers.QMessageBox, "warning", lambda *a: warnings.append(a[-1]))
+    host._open_config()
+    assert host._config is original
+    assert warnings
+
+
+def test_partial_project_load_preserves_current_analysis():
+    from src.gui.workers import MergeResult, FileFailure
+    host = _host()
+    host._current_project_path = Path("original.ep")
+    host.line_manager.set_offset("surface", 8.0)
+    host.statusbar.hide_progress = lambda: None
+    messages = []
+    host._append_error_message = messages.append
+    result = MergeResult(None, ("good.raw",), (FileFailure("bad.raw", "open", "bad", "trace"),))
+    host._on_project_loaded(result, EpProject(), Path("other.ep"))
+    assert host._current_project_path == Path("original.ep")
+    assert host.line_manager.get("surface").offset_m == 8.0
+    assert messages
+
+
+def test_new_project_keeps_current_state_until_import_succeeds(monkeypatch):
+    host = _host()
+    host._current_worker = None
+    host._current_raw_files = [Path("old.raw")]
+    host.line_manager.set_offset("surface", 8.0)
+    host.statusbar.show_progress = lambda *a: None
+    host.statusbar.set_progress_value = lambda *a: None
+    host._start_worker = lambda *a: True
+    monkeypatch.setattr(file_handlers.QFileDialog, "getOpenFileNames", lambda *a: (["new.raw"], ""))
+    host._new_project()
+    assert host._current_raw_files == [Path("old.raw")]
+    assert host.line_manager.get("surface").offset_m == 8.0

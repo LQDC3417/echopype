@@ -16,7 +16,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from src.core.region import get_echo_range_1d
 from src.core.utils import get_sv_array, get_vertical_coords, sv_to_linear
 
 logger = logging.getLogger("fish_acoustics")
@@ -56,19 +55,16 @@ def _extract_gps(ds_Sv: xr.Dataset) -> tuple:
     if lat is None or lon is None:
         return None, None
 
-    # 处理多维坐标（取第一个 channel）
-    if lat.ndim > 1:
-        lat_arr = ds_Sv.get("latitude", None)
-        if lat_arr is not None and "channel" in lat_arr.dims:
-            ch_dim = list(lat_arr.dims).index("channel")
-            lat = lat[tuple(slice(0, 1) if d != ch_dim else slice(None) for d in range(lat.ndim))].squeeze()
-            lon = lon[tuple(slice(0, 1) if d != ch_dim else slice(None) for d in range(lon.ndim))].squeeze()
-        else:
-            if lat.ndim == 2:
-                if lat.shape[1] < lat.shape[0]:
-                    lat, lon = lat[:, 0], lon[:, 0]
-                else:
-                    lat, lon = lat[0, :], lon[0, :]
+    # 按维度名选择首通道，保留全部 ping，避免轴顺序改变时截掉测线。
+    coordinates = []
+    for name in ("latitude", "longitude"):
+        values = ds_Sv[name]
+        if "channel" in values.dims:
+            values = values.isel(channel=0)
+        if values.dims != ("ping_time",):
+            raise ValueError("GPS 坐标必须按 ping_time 对齐")
+        coordinates.append(values.values)
+    lat, lon = coordinates
 
     return lat, lon
 
@@ -192,6 +188,18 @@ class IntegrationGrid:
     depth_end: np.ndarray
 
 
+def _integration_depth(ds_Sv: xr.Dataset) -> np.ndarray:
+    """保留逐 ping 的真实深度；缺失物理坐标时沿用公共坐标回退。"""
+    for name in ("depth", "echo_range"):
+        if name in ds_Sv:
+            depth = ds_Sv[name]
+            if "channel" in depth.dims:
+                depth = depth.isel(channel=0)
+            depth = depth.broadcast_like(ds_Sv["Sv"].isel(channel=0) if "channel" in ds_Sv["Sv"].dims else ds_Sv["Sv"])
+            return depth.transpose("ping_time", "range_sample").values
+    return np.broadcast_to(get_vertical_coords(ds_Sv), get_sv_array(ds_Sv).shape)
+
+
 def create_integration_grid(
     ds_Sv: xr.Dataset,
     esu_type: ESUType = ESUType.PINGS,
@@ -227,12 +235,21 @@ def create_integration_grid(
     ValueError
         distance 模式下无 GPS 数据时抛出
     """
+    if not np.isfinite(esu_size) or esu_size <= 0:
+        raise ValueError("esu_size 必须为有限正数")
+    if esu_type == ESUType.PINGS and (esu_size < 1 or esu_size != int(esu_size)):
+        raise ValueError("ping 分段的 esu_size 必须为正整数")
+    if not np.isfinite(layer_width) or layer_width <= 0:
+        raise ValueError("layer_width 必须为有限正数")
     n_pings = ds_Sv.sizes["ping_time"]
-    depth = get_vertical_coords(ds_Sv)
+    depth = _integration_depth(ds_Sv)
 
     # 确定深度范围
     d_min = surface_depth_m
     d_max = float(np.nanmax(depth)) if max_depth_m is None else max_depth_m
+
+    if not np.isfinite(d_min) or not np.isfinite(d_max) or d_max <= d_min:
+        raise ValueError("最大深度必须大于表线深度，且均为有限值")
 
     # 创建水平区间
     if esu_type == ESUType.PINGS:
@@ -254,6 +271,7 @@ def create_integration_grid(
 
     # 创建垂直层
     depth_edges = np.arange(d_min, d_max + layer_width, layer_width)
+    depth_edges[-1] = d_max
     depth_starts = depth_edges[:-1]
     depth_ends = depth_edges[1:]
 
@@ -297,7 +315,8 @@ def _compute_abc_density(
     # ABC 积分与密度换算均复用 density.py 的单一来源
     from src.core.density import abc_integral, density_from_abc
 
-    abc = float(abc_integral(sv_to_linear(sv_layer), dr_layer))
+    # EDSU 报告每 ping 垂直积分的均值，不随区间 ping 数增大。
+    abc = float(np.mean(abc_integral(sv_to_linear(sv_layer), dr_layer, axis=1)))
     density_ha = density_from_abc(abc, ts_default_db)
     return abc, density_ha
 
@@ -338,18 +357,16 @@ def integrate(
     IntegrationResult
         积分结果
     """
-    # 复制数组，避免底部掩码原地改写 Sv 视图时污染原始 ds_Sv
-    Sv = get_sv_array(ds_Sv).copy()  # (n_pings, n_samples)
-    depth = get_vertical_coords(ds_Sv)  # (n_samples,)
-    _n_pings, n_samples = Sv.shape
+    Sv = get_sv_array(ds_Sv)  # (n_pings, n_samples)
+    depth = _integration_depth(ds_Sv)
+    if bottom_depth_m is not None:
+        bottom_depth_m = np.asarray(bottom_depth_m)
+        if bottom_depth_m.shape != (Sv.shape[0],):
+            raise ValueError("底线必须为每个 ping 提供一个深度")
 
-    # 计算深度分辨率
-    er = get_echo_range_1d(ds_Sv)
-    if er is not None:
-        dr = np.abs(np.diff(er))
-        dr = np.append(dr, dr[-1])
-    else:
-        dr = np.ones(n_samples)
+    # 与逐 ping ABC 共用厚度，保留各 ping 的采样间距。
+    from src.core.density import _get_depth_resolution
+    dr = _get_depth_resolution(ds_Sv)
 
     # 初始化结果数组
     shape = (grid.n_intervals, grid.n_layers)
@@ -374,92 +391,33 @@ def integrate(
         sv_interval = Sv[p_start:p_end, :]
         dr_interval = dr[p_start:p_end, :] if dr.ndim == 2 else np.broadcast_to(dr, sv_interval.shape)
 
-        # 底部掩码（如果提供）
+        depth_interval = depth[p_start:p_end]
+        valid_interval = np.isfinite(sv_interval) & (sv_interval >= min_threshold) & (sv_interval <= max_threshold)
         if exclude_below_bottom and bottom_depth_m is not None:
-            bot_interval = bottom_depth_m[p_start:p_end]
-            for j in range(grid.n_layers):
-                d_lo = grid.depth_start[j]
-                d_hi = grid.depth_end[j]
+            bottom = bottom_depth_m[p_start:p_end, np.newaxis]
+            valid_interval &= ~np.isfinite(bottom) | (depth_interval < bottom)
 
-                depth_mask = (depth >= d_lo) & (depth < d_hi)
-                if not np.any(depth_mask):
-                    n_total[i, j] = 0
-                    cell_count += 1
-                    if progress_callback:
-                        progress_callback(cell_count, total_cells)
-                    continue
-
-                sv_layer = sv_interval[:, depth_mask]
-                dr_layer = dr_interval[:, depth_mask]
-
-                # 底部掩码
-                for ping_idx in range(sv_layer.shape[0]):
-                    bot_depth = bot_interval[ping_idx]
-                    if np.isfinite(bot_depth):
-                        below_bot = depth[depth_mask] >= bot_depth
-                        sv_layer[ping_idx, below_bot] = np.nan
-
-                # 阈值掩码
-                threshold_mask = (sv_layer >= min_threshold) & (sv_layer <= max_threshold)
-                valid_mask = np.isfinite(sv_layer) & threshold_mask
-
-                n_total[i, j] = sv_layer.size
-                n_good[i, j] = int(np.sum(valid_mask))
-                n_excluded[i, j] = n_total[i, j] - n_good[i, j]
-
-                if n_good[i, j] > 0:
-                    sv_valid = sv_layer[valid_mask]
-                    mean_Sv[i, j] = float(np.mean(sv_valid))
-                    min_Sv[i, j] = float(np.min(sv_valid))
-                    max_Sv[i, j] = float(np.max(sv_valid))
-                    sv_filtered = np.where(valid_mask, sv_layer, np.nan)
-                    abc[i, j], density_ind_ha[i, j] = _compute_abc_density(
-                        sv_filtered, dr_layer, ts_default_db
-                    )
-
-                cell_count += 1
-                if progress_callback:
-                    progress_callback(cell_count, total_cells)
-        else:
-            # 无底部掩码的情况
-            for j in range(grid.n_layers):
-                d_lo = grid.depth_start[j]
-                d_hi = grid.depth_end[j]
-
-                depth_mask = (depth >= d_lo) & (depth < d_hi)
-                if not np.any(depth_mask):
-                    n_total[i, j] = 0
-                    cell_count += 1
-                    if progress_callback:
-                        progress_callback(cell_count, total_cells)
-                    continue
-
-                sv_layer = sv_interval[:, depth_mask]
-                dr_layer = dr_interval[:, depth_mask] if dr_interval.ndim == 2 else dr_interval[depth_mask]
-
-                threshold_mask = (sv_layer >= min_threshold) & (sv_layer <= max_threshold)
-                valid_mask = np.isfinite(sv_layer) & threshold_mask
-
-                n_total[i, j] = sv_layer.size
-                n_good[i, j] = int(np.sum(valid_mask))
-                n_excluded[i, j] = n_total[i, j] - n_good[i, j]
-
-                if n_good[i, j] > 0:
-                    sv_valid = sv_layer[valid_mask]
-                    mean_Sv[i, j] = float(np.mean(sv_valid))
-                    min_Sv[i, j] = float(np.min(sv_valid))
-                    max_Sv[i, j] = float(np.max(sv_valid))
-                    sv_filtered = np.where(valid_mask, sv_layer, np.nan)
-                    abc[i, j], density_ind_ha[i, j] = _compute_abc_density(
-                        sv_filtered, dr_layer, ts_default_db
-                    )
-
-                cell_count += 1
-                if progress_callback:
-                    progress_callback(cell_count, total_cells)
+        for j in range(grid.n_layers):
+            depth_mask = (depth_interval >= grid.depth_start[j]) & (depth_interval < grid.depth_end[j])
+            valid_mask = valid_interval & depth_mask
+            n_total[i, j] = int(np.sum(depth_mask))
+            n_good[i, j] = int(np.sum(valid_mask))
+            n_excluded[i, j] = n_total[i, j] - n_good[i, j]
+            if n_good[i, j] > 0:
+                sv_valid = sv_interval[valid_mask]
+                mean_Sv[i, j] = float(10 * np.log10(np.mean(sv_to_linear(sv_valid))))
+                min_Sv[i, j] = float(np.min(sv_valid))
+                max_Sv[i, j] = float(np.max(sv_valid))
+                sv_filtered = np.where(valid_mask, sv_interval, np.nan)
+                abc[i, j], density_ind_ha[i, j] = _compute_abc_density(
+                    sv_filtered, dr_interval, ts_default_db
+                )
+            cell_count += 1
+            if progress_callback:
+                progress_callback(cell_count, total_cells)
 
     logger.info(f"回声积分完成: {grid.n_intervals} 个区间 × {grid.n_layers} 层")
-    logger.info(f"  有效样本比例: {np.sum(n_good) / np.sum(n_total) * 100:.1f}%")
+    logger.info(f"  有效样本比例: {np.sum(n_good) / max(np.sum(n_total), 1) * 100:.1f}%")
 
     return IntegrationResult(
         mean_Sv=mean_Sv,
@@ -485,7 +443,7 @@ def integration_statistics_summary(result: IntegrationResult) -> dict:
     dict
         包含全局统计信息
     """
-    valid_mask = np.isfinite(result.mean_Sv)
+    valid_mask = np.isfinite(result.mean_Sv) & (result.n_good > 0)
     if not np.any(valid_mask):
         return {"n_intervals": 0, "n_layers": 0, "total_good_samples": 0}
 
@@ -496,7 +454,9 @@ def integration_statistics_summary(result: IntegrationResult) -> dict:
         "total_excluded_samples": int(np.sum(result.n_excluded)),
         "total_samples": int(np.sum(result.n_total)),
         "coverage_ratio": float(np.sum(result.n_good) / np.sum(result.n_total)) if np.sum(result.n_total) > 0 else 0.0,
-        "mean_Sv_global": float(np.nanmean(result.mean_Sv[valid_mask])),
+        "mean_Sv_global": float(10 * np.log10(np.average(
+            sv_to_linear(result.mean_Sv[valid_mask]), weights=result.n_good[valid_mask]
+        ))),
         "abc_global": float(np.nanmean(result.abc[valid_mask])),
         "density_global": float(np.nanmean(result.density_ind_ha[valid_mask])),
     }

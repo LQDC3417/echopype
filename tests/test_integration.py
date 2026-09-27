@@ -158,6 +158,11 @@ class TestIntegrate:
 class TestIntegrationStatisticsSummary:
     """integration_statistics_summary 函数测试"""
 
+    def test_summary_uses_sample_weighted_linear_mean(self):
+        result = _make_result()
+        expected = 10 * np.log10(np.average(10 ** (result.mean_Sv / 10), weights=result.n_good))
+        assert integration_statistics_summary(result)["mean_Sv_global"] == pytest.approx(expected)
+
     def test_summary(self, mock_ds_Sv):
         grid = create_integration_grid(mock_ds_Sv, esu_type=ESUType.PINGS, esu_size=100, layer_width=10.0)
         result = integrate(mock_ds_Sv, grid)
@@ -222,3 +227,43 @@ def test_full_pipeline():
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+@pytest.mark.parametrize("with_bottom", [False, True])
+def test_integration_averages_linear_sv_and_per_ping_abc(with_bottom):
+    ds = xr.Dataset({"Sv": (("ping_time", "range_sample"), [[-40., -60.]] * 4)},
+                    coords={"ping_time": range(4), "range_sample": range(2),
+                            "echo_range": ("range_sample", [1., 2.])})
+    grid = create_integration_grid(ds, esu_size=4, layer_width=3., max_depth_m=3.)
+    result = integrate(ds, grid, bottom_depth_m=np.full(4, 3.) if with_bottom else None)
+    assert result.abc[0, 0] == pytest.approx(4 * np.pi * (1e-4 + 1e-6))
+    assert result.mean_Sv[0, 0] == pytest.approx(10 * np.log10((1e-4 + 1e-6) / 2))
+
+
+def test_distance_grid_preserves_channel_gps_pings(mock_ds_Sv):
+    ds = mock_ds_Sv.assign_coords(channel=[0, 1])
+    for name in ("latitude", "longitude"):
+        ds[name] = (("channel", "ping_time"), np.tile(mock_ds_Sv[name].values, (2, 1)))
+    grid = create_integration_grid(ds, esu_type=ESUType.DISTANCE, esu_size=50)
+    assert grid.ping_end[-1] == 500
+
+
+@pytest.mark.parametrize("kwargs", [{"esu_size": 0}, {"esu_size": .5}, {"layer_width": 0}, {"layer_width": float("nan")}])
+def test_grid_rejects_invalid_sizes(mock_ds_Sv, kwargs):
+    with pytest.raises(ValueError):
+        create_integration_grid(mock_ds_Sv, **kwargs)
+
+
+def test_grid_clips_last_layer_to_maximum(mock_ds_Sv):
+    grid = create_integration_grid(mock_ds_Sv, layer_width=5, max_depth_m=23)
+    assert grid.depth_end[-1] == 23
+
+
+def test_integration_layers_use_each_ping_depth():
+    ds = xr.Dataset({"Sv": (("ping_time", "range_sample"), [[-40., -40.]] * 2),
+                     "depth": (("ping_time", "range_sample"), [[1., 2.], [11., 12.]])},
+                    coords={"ping_time": [0, 1], "range_sample": [0, 1],
+                            "echo_range": ("range_sample", [1., 2.])})
+    grid = create_integration_grid(ds, esu_size=2, layer_width=5., max_depth_m=15.)
+    result = integrate(ds, grid, bottom_depth_m=np.array([1.5, 11.5]))
+    np.testing.assert_array_equal(result.n_good, [[1, 0, 1]])

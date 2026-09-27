@@ -94,7 +94,7 @@ class QualityDialog(QDialog):
         row_range = QHBoxLayout()
         row_range.addWidget(QLabel(T("quality_sv_range")))
         self.lbl_sv_range = QLabel("--")
-        self.lbl_sv_range.setStyleSheet("font-weight: bold; color: #2b6cb0;")
+        self.lbl_sv_range.setStyleSheet("font-weight: bold; color: #0B6E99;")
         row_range.addWidget(self.lbl_sv_range)
         row_range.addStretch()
         layout.addLayout(row_range)
@@ -103,7 +103,7 @@ class QualityDialog(QDialog):
         row_size = QHBoxLayout()
         row_size.addWidget(QLabel(T("quality_data_size")))
         self.lbl_data_size = QLabel("--")
-        self.lbl_data_size.setStyleSheet("font-weight: bold; color: #2b6cb0;")
+        self.lbl_data_size.setStyleSheet("font-weight: bold; color: #0B6E99;")
         row_size.addWidget(self.lbl_data_size)
         row_size.addStretch()
         layout.addLayout(row_size)
@@ -112,7 +112,7 @@ class QualityDialog(QDialog):
         row_nan = QHBoxLayout()
         row_nan.addWidget(QLabel(T("quality_nan_ratio")))
         self.lbl_nan_ratio = QLabel("--")
-        self.lbl_nan_ratio.setStyleSheet("font-weight: bold; color: #2b6cb0;")
+        self.lbl_nan_ratio.setStyleSheet("font-weight: bold; color: #0B6E99;")
         row_nan.addWidget(self.lbl_nan_ratio)
         row_nan.addStretch()
         layout.addLayout(row_nan)
@@ -130,7 +130,7 @@ class QualityDialog(QDialog):
         row_pings = QHBoxLayout()
         row_pings.addWidget(QLabel(T("quality_valid_pings")))
         self.lbl_valid_pings = QLabel("--")
-        self.lbl_valid_pings.setStyleSheet("font-weight: bold; color: #2b6cb0;")
+        self.lbl_valid_pings.setStyleSheet("font-weight: bold; color: #0B6E99;")
         row_pings.addWidget(self.lbl_valid_pings)
         row_pings.addStretch()
         layout.addLayout(row_pings)
@@ -139,7 +139,7 @@ class QualityDialog(QDialog):
         row_nan = QHBoxLayout()
         row_nan.addWidget(QLabel(T("quality_nan_ratio")))
         self.lbl_bottom_nan = QLabel("--")
-        self.lbl_bottom_nan.setStyleSheet("font-weight: bold; color: #2b6cb0;")
+        self.lbl_bottom_nan.setStyleSheet("font-weight: bold; color: #0B6E99;")
         row_nan.addWidget(self.lbl_bottom_nan)
         row_nan.addStretch()
         layout.addLayout(row_nan)
@@ -163,7 +163,7 @@ class QualityDialog(QDialog):
         # 无警告时的提示
         self.lbl_no_warnings = QLabel(T("quality_no_warnings"))
         self.lbl_no_warnings.setAlignment(Qt.AlignCenter)
-        self.lbl_no_warnings.setStyleSheet("color: #38A169; font-style: italic;")
+        self.lbl_no_warnings.setStyleSheet("color: #067647; font-style: italic;")
         self.lbl_no_warnings.setVisible(False)
         layout.addWidget(self.lbl_no_warnings)
 
@@ -210,7 +210,7 @@ class QualityDialog(QDialog):
 
         # NaN 比例过高时变红警告
         if nan_ratio > 0.5:
-            self.lbl_nan_ratio.setStyleSheet("font-weight: bold; color: #E53E3E;")
+            self.lbl_nan_ratio.setStyleSheet("font-weight: bold; color: #B42318;")
 
     def _update_bottom_section(self, result):
         """更新底线质量显示"""
@@ -222,7 +222,7 @@ class QualityDialog(QDialog):
         self.lbl_bottom_nan.setText(f"{nan_ratio:.1%}")
 
         if nan_ratio > 0.3:
-            self.lbl_bottom_nan.setStyleSheet("font-weight: bold; color: #E53E3E;")
+            self.lbl_bottom_nan.setStyleSheet("font-weight: bold; color: #B42318;")
 
     def _update_warnings(self, sv_result, bottom_result):
         """更新警告列表"""

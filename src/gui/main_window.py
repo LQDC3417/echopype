@@ -88,12 +88,14 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
     def __init__(self):
         super().__init__()
         self.setWindowTitle(T("app_title"))
-        self.setMinimumSize(1400, 900)
+        self.setMinimumSize(1200, 760)
+        self.resize(1400, 900)
 
         # ── 状态 ──
         self._config: dict | None = None
         self._echodata = None
         self._ds_Sv = None            # 完整 Sv（含水底数据）
+        self._ds_Sv_all = None        # 全通道原始数据唯一所有者
         self._ds_Sv_analysis = None   # 分析区域裁剪后的 Sv（表线~底线）
         self._noise_mask_manual = None
         self._bottom_line = None
@@ -106,14 +108,23 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._analysis_region_enabled = False  # 分析区域限定（仅控制 UI 渲染，不影响分析裁剪）
         self._schools_mask = None
         self._schools_df = None
+        self._integration_df = None
+        self._noise_applied = False
         self._current_worker = None
         self._close_pending = False
+        self._closing = False
         self._current_channel = ""
+        self._channel_states: dict[str, dict] = {}
+        self._channel_corrected: dict[str, object] = {}
+        self._project_channel_config: dict = {}
         self._undo_stack = []
         self._redo_stack = []
         self._current_mode = MouseMode.NAVIGATE
         self._run_all_chain = False
+        self._continue_integration_after_noise = False
         self._stale_results: set[str] = set()
+        self._input_incomplete = False
+        self._incomplete_results: set[str] = set()
         self._parameter_timers: dict[str, QTimer] = {}
         self._parameter_callbacks = {}
         self._processing_dialogs = {}
@@ -124,7 +135,7 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._display_to_key = {}  # 显示名 → 缓存 key 的反向映射
 
         # 防抖
-        self._noise_timer = QTimer()
+        self._noise_timer = QTimer(self)
         self._noise_timer.setSingleShot(True)
         self._noise_timer.setInterval(400)
         self._noise_timer.timeout.connect(self._apply_noise_params)
@@ -134,12 +145,16 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._register_dock_view_actions()
         self._connect_signals()
         self._apply_default_config()
+        self._refresh_workbench()
 
         # 流水线信号
         self.pipeline_step.connect(self.statusbar.set_step)
 
     def closeEvent(self, event):
         """后台任务运行时延迟关闭，避免阻塞 UI 或销毁活跃 QThread。"""
+        if not self._closing:
+            self._closing = True
+            self._cancel_pending_work()
         worker = self._current_worker
         if worker is not None and worker.isRunning():
             if hasattr(worker, "requestInterruption"):
@@ -160,13 +175,24 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
             return
         super().closeEvent(event)
 
+    def _cancel_pending_work(self) -> None:
+        """关闭窗口时取消尚未执行的参数和流水线回调。"""
+        self._run_all_chain = False
+        self._noise_timer.stop()
+        for timer in self._parameter_timers.values():
+            timer.stop()
+        self._parameter_callbacks.clear()
+
     def _complete_deferred_close(self, worker):
         if not self._close_pending or worker is not self._current_worker:
             return
         if worker.isRunning():
             QTimer.singleShot(50, lambda active=worker: self._complete_deferred_close(active))
             return
+        if hasattr(worker, "deleteLater"):
+            worker.deleteLater()
         self._current_worker = None
+        self._refresh_workbench()
         self._close_pending = False
         QTimer.singleShot(0, self.close)
 
@@ -182,6 +208,9 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         fm.addAction(self._act(T("new_project"), self._new_project, "Ctrl+N"))
         fm.addAction(self._act(T("open_project"), self._open_project, "Ctrl+O"))
         fm.addAction(self._act(T("save_project"), self._save_project, "Ctrl+S"))
+        fm.addAction(self._act("调查信息...", self._edit_survey_info))
+        fm.addAction(self._act("导出已保存项目的复现说明...", self._export_project_manifest))
+        fm.addAction(self._act("按已保存快照重算积分...", self._replay_saved_project))
         fm.addSeparator()
 
         # 最近打开的项目
@@ -212,9 +241,11 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._act_noise = self._checkable(T("show_noise_overlay"), True)
         self._act_school = self._checkable(T("show_school_overlay"), True)
         self._act_bottom = self._checkable(T("show_bottom_line"), True)
+        self._act_grid = self._checkable(T("show_grid_overlay"), True)
         vm.addAction(self._act_noise)
         vm.addAction(self._act_school)
         vm.addAction(self._act_bottom)
+        vm.addAction(self._act_grid)
         vm.addSeparator()
 
         # 语言切换子菜单
@@ -292,16 +323,11 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
                 )
                 return
 
-            self._reset_analysis_state()
-            self._current_raw_files = proj.raw_files
-            self._current_project_path = Path(path)
-            self._config = proj.config
-
             self.statusbar.show_progress(T("msg_loading_files", n=len(proj.raw_files)))
             worker = MergeFilesWorker(proj.raw_files, proj.config)
             worker.progress.connect(self.statusbar.set_status)
             worker.progress_num.connect(self.statusbar.set_progress_value)
-            if not self._start_worker(worker, lambda ds: self._on_project_loaded(ds, proj)):
+            if not self._start_worker(worker, lambda ds: self._on_project_loaded(ds, proj, Path(path))):
                 return
             _save_recent(str(path))
         except Exception as e:
@@ -425,44 +451,17 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
             "vmax": float(vmax),
         }
         self.echogram.set_colormap(colormap, float(vmin), float(vmax))
+        self.property_panel.display.set_values(colormap, vmin, vmax)
 
     def _show_processing_dialog(self, kind: str):
-        """显示单一功能参数窗口；只有 Apply/确定才启动对应 Worker。"""
+        """ESP3：跳到右栏对应任务页，不再弹窗夺走参数控件。"""
         if self._ds_Sv is None:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return
         if self._current_worker is not None and self._current_worker.isRunning():
             self.statusbar.set_status("请等待当前后台任务完成后再执行新的数据处理")
             return
-
-        dialog = self._processing_dialogs.get(kind)
-        if dialog is None:
-            from src.gui.processing_dialogs import ProcessingParametersDialog
-
-            processing = self.property_panel.processing
-            specs = {
-                "noise": (processing.noise_group, processing.get_noise_config, "噪声去除参数", self._apply_noise_params),
-                "schools": (processing.school_group, processing.get_school_config, "鱼群检测参数", self._detect_schools),
-                "integration": (processing.integration_group, processing.get_integration_config, "回声积分参数", self._run_integration),
-                "sed": (processing.real_sed_group, processing.get_real_sed_config, "SED 单体目标检测参数", self._run_real_sed),
-            }
-            parameter_widget, getter, title, callback = specs[kind]
-            # 旧参数页已从 Dock 移除；原有功能按钮会绕过 Apply/确定语义。
-            button_name = {
-                "schools": "btn_detect_schools",
-                "integration": "btn_integration",
-                "sed": "btn_real_sed",
-            }.get(kind)
-            if button_name:
-                getattr(processing, button_name).hide()
-            dialog = ProcessingParametersDialog(
-                parameter_widget, getter, title=title, parent=self
-            )
-            dialog.apply_requested.connect(lambda _config, cb=callback: cb())
-            self._processing_dialogs[kind] = dialog
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        self.property_panel.show_task(kind)
 
     # ═══════════════════════════════════════════════════════
     # UI 布局
@@ -593,12 +592,10 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
     # ═══════════════════════════════════════════════════════
 
     def _connect_signals(self):
+        self.left_panel.workflow_requested.connect(self._on_workflow_requested)
         # 标准工具栏
         self.std_toolbar.open_clicked.connect(self._new_project)
-        self.std_toolbar.open_config_clicked.connect(self._open_config)
-        self.std_toolbar.save_config_clicked.connect(self._save_config)
-        self.std_toolbar.undo_clicked.connect(self._undo)
-        self.std_toolbar.redo_clicked.connect(self._redo)
+        self.std_toolbar.open_project_clicked.connect(self._open_project)
         self.std_toolbar.export_clicked.connect(self._export)
 
         # Echogram 工具栏
@@ -617,6 +614,13 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._act_bottom.toggled.connect(
             lambda visible: self.echogram.set_overlay_visible("bottom", visible)
         )
+        self._act_grid.toggled.connect(
+            lambda visible: self.echogram.set_overlay_visible("grid", visible)
+        )
+        self._act_grid.toggled.connect(
+            lambda visible: self.property_panel.display.chk_grid_overlay.setChecked(visible)
+        )
+        self.property_panel.display.grid_overlay_toggled.connect(self._act_grid.setChecked)
 
         # Echogram 交互
         self.echogram.mouse_moved.connect(self.statusbar.set_coords)
@@ -644,7 +648,20 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
 
         # 属性面板（处理参数）
         # 参数控件仅作为内部配置来源，修改控件本身不再自动启动 Worker。
+        self.property_panel.noise_params_changed.connect(self._on_noise_params_changed)
+        self.property_panel.bottom_params_changed.connect(self._on_bottom_params_changed)
+        self.property_panel.school_params_changed.connect(self._on_school_params_changed)
+        self.property_panel.integration_params_changed.connect(self._on_integration_params_changed)
+        self.property_panel.real_sed_params_changed.connect(self._on_real_sed_params_changed)
+        self.property_panel.processing.combo_channel.currentIndexChanged.connect(
+            self._on_channel_selected
+        )
+        self.property_panel.processing.chk_noise_enabled.stateChanged.connect(
+            self._on_noise_policy_changed
+        )
         self.property_panel.detect_schools_clicked.connect(self._detect_schools)
+        self.property_panel.apply_current_clicked.connect(self._apply_noise_params)
+        self.property_panel.apply_all_clicked.connect(self._apply_all_params)
         self.property_panel.stats_clicked.connect(self._show_stats)
         self.property_panel.surface_line_changed.connect(self._on_surface_line_changed)
         self.property_panel.quality_check_clicked.connect(self._run_quality_check)
@@ -726,30 +743,66 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.statusbar.set_status(f"{T('dialog_error')}: {summary[:180]}")
         self._append_error_message(msg)
 
+    def _release_worker(self, worker) -> None:
+        """在线程真正停止后释放引用，避免连续处理积累后台线程对象。"""
+        if worker is not self._current_worker:
+            return
+        if hasattr(worker, "isRunning") and worker.isRunning():
+            QTimer.singleShot(50, lambda active=worker: self._release_worker(active))
+            return
+        if self._close_pending:
+            self._complete_deferred_close(worker)
+            return
+        if hasattr(worker, "deleteLater"):
+            worker.deleteLater()
+        self._current_worker = None
+        if hasattr(self, "property_panel"):
+            self.property_panel.processing.setEnabled(True)
+        self._refresh_workbench()
+
     def _connect_latest_worker(self, worker, finished=None):
         """只接受当前 Worker 的结果，避免旧参数任务覆盖新结果。"""
         if finished is not None:
-            worker.finished.connect(
-                lambda result, w=worker: (
-                    finished(result) if w is self._current_worker else None
-                )
-            )
-        worker.error.connect(
-            lambda msg, w=worker: (
-                self._on_worker_error(msg) if w is self._current_worker else None
-            )
-        )
+            def on_finished(result, w=worker):
+                if w is not self._current_worker:
+                    return
+                try:
+                    if not self._closing:
+                        finished(result)
+                        self._refresh_workbench()
+                finally:
+                    self._release_worker(w)
+
+            worker.finished.connect(on_finished)
+
+        def on_error(msg, w=worker):
+            if w is not self._current_worker:
+                return
+            try:
+                if not self._closing:
+                    self._on_worker_error(msg)
+            finally:
+                self._release_worker(w)
+
+        worker.error.connect(on_error)
 
     def _start_worker(self, worker, finished=None) -> bool:
         """启动唯一后台任务，避免并发 Worker 覆盖当前任务引用。"""
+        if self._closing:
+            return False
         current = self._current_worker
         if current is not None and current.isRunning():
             self.statusbar.hide_progress()
             self.statusbar.set_status("请等待当前后台任务完成后再执行新的数据处理")
             return False
+        if current is not None:
+            self._release_worker(current)
         self._current_worker = worker
+        if hasattr(self, "property_panel"):
+            self.property_panel.processing.setEnabled(False)
         self._connect_latest_worker(worker, finished)
         worker.start()
+        self._refresh_workbench()
         return True
 
     def _schedule_parameter_apply(self, name: str, callback, interval_ms: int = 500) -> None:
@@ -765,16 +818,105 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         timer.start()
 
     def _run_scheduled_parameter(self, name: str) -> None:
+        if self._closing:
+            return
         callback = self._parameter_callbacks.get(name)
         if callback is not None:
             callback()
 
     def _mark_results_stale(self, *names: str) -> None:
         self._stale_results.update(names)
-        labels = {"bottom": "底线", "schools": "鱼群", "integration": "积分", "real_sed": "SED"}
+        labels = {"noise": "去噪", "bottom": "底线", "schools": "鱼群", "integration": "积分", "real_sed": "SED"}
         text = "、".join(labels.get(name, name) for name in names)
         if text:
             self.statusbar.set_status(f"参数已变更：{text}结果需要重新计算")
+        self._refresh_workbench()
+
+    def _ensure_result_exportable(self, *names: str) -> bool:
+        """阻止过期或不完整分析结果进入正式文件导出。"""
+        blocked = set(names) & (self._stale_results | self._incomplete_results)
+        if self._input_incomplete and names:
+            reason = "当前项目包含未确认接受的 RAW 文件失败，分析成果不能正式导出。"
+        elif blocked:
+            labels = {"noise": "去噪", "bottom": "底线", "schools": "鱼群", "integration": "积分", "real_sed": "SED"}
+            reason = "以下结果已过期或不完整，请重算后再导出：" + "、".join(
+                labels.get(name, name) for name in sorted(blocked)
+            )
+        else:
+            return True
+        QMessageBox.warning(self, T("dialog_warning"), reason)
+        return False
+
+    def _refresh_workbench(self):
+        """展示实际分析范围和状态，不把参数设置视为计算完成。"""
+        if not hasattr(self, "left_panel"):
+            return
+        ds = self._ds_Sv
+        worker = self._current_worker
+        labels = {"noise": "去噪", "bottom": "底线", "schools": "鱼群", "integration": "积分", "real_sed": "SED"}
+        cfg = (self._config or {}).get("integration", {})
+        details = ""
+        if ds is not None:
+            channel = str(ds.channel.values[0]) if "channel" in ds.coords else "单通道"
+            variable = "Sv_corrected" if "Sv_corrected" in ds else "Sv"
+            region = "已限定分析区域" if self._analysis_region_enabled else "全水柱（积分仍应用表线深度）"
+            details = (f"分析通道：{channel}\n分析变量：{variable} · {region}\n"
+                       f"EDSU：{cfg.get('esu_size', 500)} {cfg.get('esu_type', 'pings')} · 层宽 {cfg.get('layer_width', 5)} m")
+        self.left_panel.update_survey(
+            getattr(self, "_current_raw_files", ()), self._config, has_data=ds is not None,
+            busy=worker is not None and worker.isRunning(),
+            project_path=getattr(self, "_current_project_path", None),
+            has_results=self._integration_df is not None or self._schools_df is not None,
+            stale_results=[labels.get(k, k) for k in sorted(self._stale_results)], status_text=details,
+        )
+
+    def _on_workflow_requested(self, action):
+        callbacks = {"import": self._new_project, "quality": self._run_quality_check,
+                     "region": self._show_analysis_region_dialog,
+                     "integration": lambda: self._show_processing_dialog("integration"),
+                     "save": self._save_project, "survey": self._edit_survey_info}
+        callbacks[action]()
+
+    def _edit_survey_info(self):
+        reservoir = (self._config or {}).get("reservoir", {})
+        name, ok = QInputDialog.getText(self, "调查信息", "调查名称：", text=reservoir.get("name", "淡水调查"))
+        if not ok or not name.strip():
+            return
+        region, ok = QInputDialog.getText(self, "调查信息", "水域 / 调查地点：", text=reservoir.get("region", ""))
+        if ok:
+            self._config.setdefault("reservoir", {}).update(name=name.strip(), region=region.strip())
+            self._refresh_workbench()
+
+    def _export_project_manifest(self):
+        from PySide6.QtWidgets import QFileDialog
+        from src.core.ep_project import EpProject
+        path = getattr(self, "_current_project_path", None)
+        if not path:
+            QMessageBox.information(self, "复现说明", "请先保存项目；说明对应磁盘上的已保存快照。")
+            return
+        output, _ = QFileDialog.getSaveFileName(self, "导出已保存快照说明", str(Path(path).with_suffix(".json")), "JSON (*.json)")
+        if output:
+            try:
+                EpProject.load(Path(path)).export_manifest(Path(output))
+                self.statusbar.set_status(f"已导出已保存快照说明：{output}")
+            except Exception as exc:
+                self._append_error_message(str(exc))
+
+    def _replay_saved_project(self):
+        from datetime import datetime
+        from PySide6.QtWidgets import QFileDialog
+        from src.gui.workers import ReplayProjectWorker
+        path = getattr(self, "_current_project_path", None)
+        if not path:
+            QMessageBox.information(self, "快照重算", "请先保存项目。重算使用已保存的参数和区域，结果写入独立目录。")
+            return
+        parent = QFileDialog.getExistingDirectory(self, "选择重算结果父目录（将创建独立子目录）")
+        if not parent:
+            return
+        output = Path(parent) / f"replay-{datetime.now():%Y%m%d-%H%M%S-%f}"
+        worker = ReplayProjectWorker(path, output)
+        worker.progress.connect(self.statusbar.set_status)
+        self._start_worker(worker, lambda result: self.statusbar.set_status(f"快照积分重算完成：{result}"))
 
     def _append_error_message(self, msg: str) -> None:
         """将后台错误写入可滚动消息面板，不阻塞主窗口。"""
@@ -785,17 +927,18 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self.dock_bottom.show()
 
     def _on_toolbar_colormap_changed(self, cmap: str, vmin: float, vmax: float) -> None:
-        self.property_panel.display.set_values(cmap, vmin, vmax)
-        self.echogram.set_colormap(cmap, vmin, vmax)
+        self._apply_display_settings(cmap, vmin, vmax)
 
     def _on_display_params_changed(self, cmap: str, vmin: float, vmax: float) -> None:
-        self.echo_toolbar.set_display_values(cmap, vmin, vmax)
-        self.echogram.set_colormap(cmap, vmin, vmax)
+        self._apply_display_settings(cmap, vmin, vmax)
 
     def _set_overlay_actions_enabled(self, enabled: bool) -> None:
         """无数据时禁用结果开关，导入成功后恢复可用。"""
-        for action in (self._act_noise, self._act_school, self._act_bottom):
+        for action in (self._act_noise, self._act_school, self._act_bottom, self._act_grid):
             action.setEnabled(enabled)
+        if not enabled:
+            # 无数据时网格开关保持可用性一致，但数据本身已清除
+            self.property_panel.display.chk_grid_overlay.setEnabled(True)
 
     # ═══════════════════════════════════════════════════════
     # 文件操作 — 批量导入

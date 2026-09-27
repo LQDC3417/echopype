@@ -55,3 +55,18 @@ def test_sv_statistics_summary_basic():
     assert len(df) == 1
     for col in ["mean_sv", "median_sv", "std_sv", "p5_sv", "p95_sv"]:
         assert col in df.columns
+
+
+def test_abc_uses_each_ping_sample_thickness():
+    ds = _make_ds_sv(n_pings=2, n_samples=3)
+    ds["Sv"][:] = -40.
+    ds["echo_range"][:] = [[1., 2., 3.], [1., 3., 5.]]
+    values = calculate_abc(ds, {}).abc.to_numpy()
+    np.testing.assert_allclose(values, 4 * np.pi * 1e-4 * np.array([3., 6.]))
+
+
+def test_abc_keeps_last_valid_sample_when_ping_has_nan_tail():
+    ds = xr.Dataset({"Sv": (("ping_time", "range_sample"), [[-40., -40., -40., np.nan]])},
+                    coords={"ping_time": [0], "echo_range": ("range_sample", [1., 2., 3., np.nan])})
+    complete_grid = ds.assign_coords(echo_range=("range_sample", [1., 2., 3., 4.]))
+    np.testing.assert_allclose(calculate_abc(ds, {}).abc, calculate_abc(complete_grid, {}).abc)

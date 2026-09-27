@@ -26,9 +26,10 @@ class MouseMode(Enum):
 
 
 class StandardToolBar(QToolBar):
-    """文件、撤销和导出操作；不再提供全局 Run All。"""
+    """画布上方的项目入口；细粒度编辑保留在菜单和画布工具中。"""
 
     open_clicked = Signal()
+    open_project_clicked = Signal()
     open_config_clicked = Signal()
     save_config_clicked = Signal()
     run_clicked = Signal()  # 兼容既有 signal 连接，不创建入口
@@ -41,17 +42,11 @@ class StandardToolBar(QToolBar):
         self.setMovable(False)
         self.setObjectName("StandardToolBar")
         self.setIconSize(QSize(22, 22))
-        self.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
         # ─── 文件操作 ───
         self.addAction(self._act(T("toolbar_import"), self.open_clicked, "import", "Ctrl+I"))
-        self.addAction(self._act(T("toolbar_open_config"), self.open_config_clicked, "open", "Ctrl+O"))
-        self.addAction(self._act(T("toolbar_save_config"), self.save_config_clicked, "save", "Ctrl+Shift+S"))
-        self.addSeparator()
-
-        # ─── 撤销/重做 ───
-        self.addAction(self._act(T("toolbar_undo"), self.undo_clicked, "undo", "Ctrl+Z"))
-        self.addAction(self._act(T("toolbar_redo"), self.redo_clicked, "redo", "Ctrl+Y"))
+        self.addAction(self._act(T("toolbar_open_project"), self.open_project_clicked, "open", "Ctrl+O"))
         self.addSeparator()
 
         # ─── 导出 ───
@@ -102,6 +97,7 @@ class EchogramToolBar(QToolBar):
             self._add_mode_button(mode, icon_name, label)
         self.pan_button = self._add_mode_button(MouseMode.PAN, "pan_open", T("mode_pan"))
         self.pan_button.setObjectName("panToolButton")
+        self._mode_buttons[MouseMode(self.mode_combo.currentIndex())].setChecked(True)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_index_changed)
 
         self.addSeparator()
@@ -175,7 +171,7 @@ class EchogramToolBar(QToolBar):
 
     def _label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #8a8a92; font-size: 11px;")
+        lbl.setStyleSheet("color: #5C6773; font-size: 11px;")
         return lbl
 
     def set_editable_lines(self, lines) -> None:

@@ -8,9 +8,9 @@
 |---|---|
 | 项目名称 | Fish Acoustics / echopype 声学数据处理系统 |
 | 文档类型 | 当前实现需求文档（Reverse-engineered Requirements） |
-| 依据 | `src/`、`configs/`、`tests/`、`README.md` |
-| 当前日期 | 2026-08-26 |
-| 主要入口 | PySide6 GUI、Click CLI |
+| 依据 | `src/`、`tests/`、`README.md` |
+| 当前日期 | 2026-09-26 |
+| 主要入口 | PySide6 GUI |
 | 核心依赖 | echopype、xarray、NumPy、PySide6、PyOpenGL、pandas |
 
 本文档描述“代码现在应该能够做什么”，不等同于完整的产品规划。标记为“限制”的内容表示当前实现已经暴露出的边界，不代表已完成修复。
@@ -19,10 +19,7 @@
 
 系统用于导入 EK80 等水声探测数据，生成并查看 Echogram，完成 Sv 计算、噪声处理、底部检测、鱼群识别、回声积分、密度估算和结果导出。
 
-系统应支持以下两类工作方式：
-
-1. GUI 交互式分析：用户通过项目、配置、处理菜单和 Echogram 界面完成数据分析。
-2. CLI 批处理：用户通过 YAML 配置文件执行声学处理、鱼群检测和结果输出。
+当前产品工作流是 GUI 交互式分析：用户通过项目、配置、处理菜单和 Echogram 界面完成数据分析。仓库不再提供 CLI。
 
 ## 3. 系统边界与技术架构
 
@@ -47,7 +44,7 @@ compute_Sv → xr.Dataset(Sv, depth, echo_range, GPS)
 
 | 模块 | 职责 |
 |---|---|
-| `src/core/acoustic.py` | raw 文件加载、Sv 计算、深度和 GPS 附加、CLI 主流程 |
+| `src/core/acoustic.py` | raw 文件加载、Sv 计算、深度和 GPS 附加 |
 | `src/core/merge.py` | GUI 多文件 Sv 对齐、深度重采样、时间排序和去重 |
 | `src/core/noise.py` | 噪声参数和噪声相关分析 |
 | `src/core/bottom_detection.py` | basic、enhanced、AFSC 底部检测 |
@@ -106,11 +103,7 @@ compute_Sv → xr.Dataset(Sv, depth, echo_range, GPS)
 - 将各文件结果拼接为一个连续 `xr.Dataset`。
 - 对多个文件的不同采样深度进行重采样。
 
-当前限制：
-
-- 多文件 GUI 导入后不生成一个合并的 `EchoData` 对象。
-- 因此依赖单个原始 EchoData 的 Real SED 和重新计算链路不适用于多文件场景。
-- CLI 的 `process_all_files()` 仍采用 raw-level `combine_echodata()` 路径，和 GUI 多文件流程不同。
+当前限制：多文件 GUI 导入后不生成合并 `EchoData` 对象。SED 对多文件逐个处理原始 EchoData，再按实际 ping 时间映射结果；项目 replay 使用保存的合并 Sv 与活动通道参数重算积分，不重放 SED。
 
 ### FR-03 Sv 计算
 
@@ -264,7 +257,7 @@ compute_Sv → xr.Dataset(Sv, depth, echo_range, GPS)
 
 ### FR-13 项目文件
 
-`.ep` 文件应保存：
+`.ep` v1.3 文件保存：
 
 - raw 文件路径列表。
 - raw 文件 MD5 校验和。
@@ -274,11 +267,10 @@ compute_Sv → xr.Dataset(Sv, depth, echo_range, GPS)
 - 底线。
 - 噪声 mask。
 - 鱼群 mask。
-- 鱼群统计表。
-- 积分结果表。
-- SED 结果表。
+- 活动通道 ID 和各通道处理参数、线、区域、mask、结果状态及撤销信息。
+- 鱼群、积分和 SED 的强类型结果表（区分未计算与已计算空表）。
 
-`.ep` 文件不保存大体积 Sv 数据。打开项目时必须重新读取 raw 文件并重新计算。
+`.ep` 文件不保存大体积 Sv 数组。打开项目时校验 raw 并重新计算 Sv；历史结果标记待核验，自动去噪策略与当前内存是否已生成校正数据分开保存。
 
 ### FR-14 数据导出
 
@@ -411,13 +403,13 @@ output: {}
 
 以下内容是根据当前代码识别出的限制，不属于已经完成的功能需求：
 
-1. GUI 多文件导入使用自定义 Sv 合并；多文件没有可供 Real SED 使用的统一 EchoData。
-2. CLI 的 `process_all_files()` 仍直接调用 `combine_echodata()`，可能遇到 EK80 `WBT_filter_n` 维度冲突。
-3. GUI 多文件合并后，部分依赖原始 EchoData 元数据的后处理需要专门验证。
-4. 当前 `.ep` 项目只保存分析结果和元数据，不保存 Sv 缓存，因此打开项目需要重新处理 raw。
+1. GUI 多文件导入使用自定义 Sv 合并；多文件 SED 按各原始文件处理后映射结果，尚无 ESP3/Echoview 同数据基准输出。
+2. 项目 replay 目前重算选定通道积分，不重跑底部、鱼群或 SED 检测，也不是历史操作序列回放。
+3. `.ep` 不保存 Sv 缓存，打开项目需要重新读取 raw 并校准；保存的结果表和通道状态用于查看、审计及后续计算。
+4. 过期、未核验或部分输入的结果不能正式导出；原始数据导出与分析结果导出有不同资格要求。
 5. 具体支持哪些声纳型号，取决于 `sonar_model` 配置和当前 echopype 版本。
-6. 需求文档没有定义正式的用户权限、审计日志、远程数据源和插件机制，当前代码也没有实现这些能力。
-7. 性能指标目前主要通过测试和人工操作验证，没有形成稳定的基准测试体系。
+6. 约 1 GB 用户现场调查尚未指定并执行本轮验收；超过 30 个文件/30 GB 的分块处理也未实现或验收。
+7. 需求文档没有定义正式的用户权限、远程数据源和插件机制；性能仍缺少可重复基准体系。
 
 ## 11. 验收建议
 

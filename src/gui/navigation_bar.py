@@ -14,6 +14,9 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QWidget
 
+from src.gui.i18n import T
+from src.gui.theme import CHROME_COLORS
+
 logger = logging.getLogger(__name__)
 
 
@@ -81,12 +84,11 @@ class EchogramNavBar(QWidget):
             painter.end()
             return
 
-        # 背景（深色主题统一）
-        painter.fillRect(0, 0, w, h, QColor(30, 30, 34))
+        painter.fillRect(0, 0, w, h, QColor(CHROME_COLORS["panel"]))
 
         if self._thumb is None:
-            painter.setPen(QColor(138, 138, 146))
-            painter.drawText(8, h // 2 + 4, "加载数据后显示导航")
+            painter.setPen(QColor(CHROME_COLORS["secondary"]))
+            painter.drawText(8, h // 2 + 4, T("nav_thumbnail_empty"))
             painter.end()
             return
 
@@ -104,8 +106,10 @@ class EchogramNavBar(QWidget):
         start, end = self._view_ratio
         x0 = 4 + start * thumb_w
         x1 = 4 + end * thumb_w
-        painter.setBrush(QColor(0, 180, 216, 60))
-        painter.setPen(QColor(51, 197, 225, 220))
+        fill = QColor(CHROME_COLORS["accent"])
+        fill.setAlpha(60)
+        painter.setBrush(fill)
+        painter.setPen(QColor(CHROME_COLORS["accent"]))
         painter.drawRect(int(x0), 4, max(1, int(x1 - x0)), thumb_h)
 
         painter.end()

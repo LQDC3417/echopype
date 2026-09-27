@@ -5,6 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+import xarray as xr
 
 pytest.importorskip("PySide6")
 
@@ -45,7 +46,7 @@ def test_bottom_parameter_change_does_not_start_processing(qapp, monkeypatch):
 
     window = MainWindow()
     calls = []
-    window._ds_Sv = object()
+    window._ds_Sv = xr.Dataset()
     monkeypatch.setattr(window, "_detect_bottom", lambda: calls.append("bottom"))
     try:
         window._on_bottom_params_changed({"threshold": -41.0})
@@ -83,6 +84,9 @@ def test_old_worker_result_is_ignored_after_a_new_parameter_run(qapp):
                 slot(value)
 
     class FakeWorker:
+        def isRunning(self):
+            return False
+
         def __init__(self):
             self.finished = FakeSignal()
             self.error = FakeSignal()
@@ -103,4 +107,24 @@ def test_old_worker_result_is_ignored_after_a_new_parameter_run(qapp):
         assert results == ["new"]
     finally:
         window._current_worker = None
+        window.close()
+
+
+def test_integration_requires_known_noise_policy_before_starting_worker(qapp, monkeypatch):
+    """旧项目未确认去噪策略时，不修改配置或启动积分 Worker。"""
+    from src.gui.handlers import processing_handlers
+    from src.gui.main_window import MainWindow
+
+    window = MainWindow()
+    started = []
+    monkeypatch.setattr(processing_handlers.QMessageBox, "information", lambda *args: None)
+    monkeypatch.setattr(window, "_start_worker", lambda *args: started.append(args) or True)
+    window._ds_Sv = xr.Dataset()
+    window._config = {"integration": {"kept": 1}}
+    window._noise_enabled = None
+    try:
+        window._run_integration()
+        assert started == []
+        assert window._config == {"integration": {"kept": 1}}
+    finally:
         window.close()

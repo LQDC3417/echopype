@@ -31,3 +31,12 @@ def test_real_sed_preserves_nonzero_echo_range_origin(monkeypatch):
     result = sed.detect_single_targets_real(echodata, ds_ts, {})
 
     assert result.loc[0, "range_m"] == pytest.approx(11.0)
+
+    ds_ts["depth"] = ds_ts.echo_range + 5
+    result = sed.detect_single_targets_real(
+        echodata, ds_ts, {"single_target_real": {"min_depth_m": 15}}
+    )
+    assert len(result) == 1
+    assert result.loc[0, "range_m"] == pytest.approx(11.0)
+    assert result.loc[0, "depth_m"] == pytest.approx(16.0)
+    assert len(sed.filter_targets_by_region(result, np.array([15.]), np.array([17.]))) == 1

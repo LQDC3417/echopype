@@ -42,7 +42,7 @@ class AnalysisRegionDialog(QDialog):
         form.addRow("在所选线以上", self.lower_combo)
         layout.addLayout(form)
         self.error_label = QLabel()
-        self.error_label.setStyleSheet("color: #c62828;")
+        self.error_label.setStyleSheet("color: #B42318;")
         layout.addWidget(self.error_label)
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok

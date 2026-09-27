@@ -126,7 +126,7 @@ class MultifreqDialog(QDialog):
         self.lbl_compare_hint = QLabel(T("multifreq_need_2channels"))
         self.lbl_compare_hint.setAlignment(Qt.AlignCenter)
         self.lbl_compare_hint.setStyleSheet(
-            "font-size: 13px; color: #999; padding: 20px;"
+            "font-size: 13px; color: #5C6773; padding: 20px;"
         )
         self.lbl_compare_hint.setVisible(False)
         g_layout.addWidget(self.lbl_compare_hint)

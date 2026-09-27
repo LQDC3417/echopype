@@ -3,6 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from src.gui.main_window import MainWindow
@@ -101,4 +102,42 @@ def test_start_worker_refuses_to_start_a_second_running_task():
         assert window._current_worker is first
     finally:
         first.running = False
+        window.close()
+
+
+def test_finished_worker_is_released_after_result_callback():
+    QApplication.instance() or QApplication([])
+    window = MainWindow()
+    worker = _StartableWorker()
+    results = []
+    window._current_worker = worker
+    worker.running = False
+
+    try:
+        window._connect_latest_worker(worker, results.append)
+        worker.finished.emit("done")
+        QApplication.processEvents()
+
+        assert results == ["done"]
+        assert window._current_worker is None
+    finally:
+        window.close()
+
+
+def test_pending_parameter_timer_is_cancelled_before_close():
+    QApplication.instance() or QApplication([])
+    window = MainWindow()
+    calls = []
+
+    try:
+        window._schedule_parameter_apply("test", lambda: calls.append("run"), interval_ms=1)
+        timer = window._parameter_timers["test"]
+
+        window._cancel_pending_work()
+        QTest.qWait(20)
+
+        assert not timer.isActive()
+        assert window._parameter_callbacks == {}
+        assert calls == []
+    finally:
         window.close()

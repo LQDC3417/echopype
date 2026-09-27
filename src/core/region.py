@@ -149,7 +149,7 @@ def crop_sv_by_line_region(
     echo_range = _echo_range_2d(ds_Sv, len(ping_times))
     mask, excluded = build_line_region_mask(echo_range, upper, lower)
 
-    ds_out = ds_Sv.copy(deep=True)
+    ds_out = ds_Sv.copy(deep=False)
     mask_da = xr.DataArray(
         mask,
         dims=("ping_time", "range_sample"),

@@ -33,7 +33,7 @@ class DisplaySettingsDialog(QDialog):
         form.addRow("Sv 最大值 (dB)", self.vmax_spin)
         layout.addLayout(form)
         self.error_label = QLabel()
-        self.error_label.setStyleSheet("color: #ff6b6b;")
+        self.error_label.setStyleSheet("color: #B42318;")
         layout.addWidget(self.error_label)
         buttons = QHBoxLayout()
         self.apply_button = QPushButton("应用")

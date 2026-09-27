@@ -19,6 +19,38 @@ _current_language = "zh"
 # ═══════════════════════════════════════════════════════════════
 
 _TEXTS = {
+    # 工作台导航与紧凑任务页
+    "nav_files": {"zh": "调查文件", "en": "Survey Files"},
+    "nav_thumbnail_empty": {"zh": "加载数据后显示导航", "en": "Load data to show navigation"},
+    "nav_variables": {"zh": "数据图层", "en": "Data Layers"},
+    "nav_actions": {"zh": "快捷操作", "en": "Quick Actions"},
+    "nav_no_project": {"zh": "当前无项目", "en": "No project open"},
+    "nav_empty_hint": {"zh": "导入 .raw 数据或打开 .ep 项目以开始分析。", "en": "Import .raw data or open an .ep project to begin."},
+    "nav_files_hint": {"zh": "源文件按加载顺序列出；悬停查看完整路径。", "en": "Source files in loading order. Hover to view the full path."},
+    "nav_action_survey": {"zh": "调查信息", "en": "Survey Info"},
+    "nav_action_import": {"zh": "导入", "en": "Import"},
+    "nav_action_quality": {"zh": "质控", "en": "Quality"},
+    "nav_action_region": {"zh": "区域", "en": "Region"},
+    "nav_action_integration": {"zh": "积分", "en": "Integrate"},
+    "nav_action_save": {"zh": "保存", "en": "Save"},
+    "nav_survey": {"zh": "淡水调查", "en": "Freshwater Survey"},
+    "nav_unsaved": {"zh": "尚未保存项目", "en": "Project not saved yet"},
+    "nav_busy": {"zh": "正在处理数据，请等待当前任务完成。", "en": "Processing data. Please wait for the current task."},
+    "nav_results_ready": {"zh": "已有分析结果", "en": "Analysis results available"},
+    "nav_pending": {"zh": "待检查质量与分析区域", "en": "Review quality and analysis region"},
+    "nav_stale": {"zh": "待重算：{items}", "en": "Recompute: {items}"},
+    "nav_loaded": {"zh": "{count} 个源文件 · {status}", "en": "{count} source files · {status}"},
+    "task_processing": {"zh": "处理", "en": "Processing"},
+    "task_integration": {"zh": "积分", "en": "Integration"},
+    "task_lines": {"zh": "线段", "en": "Lines"},
+    "task_display": {"zh": "显示", "en": "Display"},
+    "task_info": {"zh": "信息", "en": "Info"},
+    "btn_apply_current_short": {"zh": "应用到当前图层", "en": "Apply current"},
+    "btn_apply_all_short": {"zh": "保存当前参数", "en": "Save settings"},
+    "btn_apply_all_layers": {"zh": "保存当前通道参数；计算需手动启动", "en": "Save this channel's settings; start analysis manually"},
+    "legend_title": {"zh": "Sv 色标", "en": "Sv Color Scale"},
+    "legend_hint": {"zh": "Sv（dB）；灰色表示无数据。右键修改显示设置。", "en": "Sv (dB); gray indicates no data. Right-click to change display settings."},
+    "legend_no_data": {"zh": "无数据", "en": "No data"},
     # ── 应用级 ──
     "app_title": {
         "zh": "Echogram — 鱼类声学资源评估系统",
@@ -111,7 +143,8 @@ _TEXTS = {
     "about": {"zh": "关于", "en": "About"},
 
     # ── 工具栏 ──
-    "toolbar_import": {"zh": "导入", "en": "Import"},
+    "toolbar_import": {"zh": "导入数据", "en": "Import Data"},
+    "toolbar_open_project": {"zh": "打开项目", "en": "Open Project"},
     "toolbar_open_config": {"zh": "打开配置", "en": "Open Config"},
     "toolbar_save_config": {"zh": "保存配置", "en": "Save Config"},
     "toolbar_run_all": {"zh": "全部运行", "en": "Run All"},
@@ -141,8 +174,8 @@ _TEXTS = {
     "status_depth_fmt": {"zh": "深度: {val:.1f} m", "en": "Depth: {val:.1f} m"},
     "status_sv": {"zh": "Sv: -- dB", "en": "Sv: -- dB"},
     "status_sv_fmt": {"zh": "Sv: {val:.1f} dB", "en": "Sv: {val:.1f} dB"},
-    "status_zoom": {"zh": "缩放: 1.0x", "en": "Zoom: 1.0x"},
-    "status_zoom_fmt": {"zh": "缩放: {val:.1f}x", "en": "Zoom: {val:.1f}x"},
+    "status_zoom": {"zh": "缩放: 100%", "en": "Zoom: 100%"},
+    "status_zoom_fmt": {"zh": "缩放: {val:.0%}", "en": "Zoom: {val:.0%}"},
     "status_coords": {"zh": "Ping: -- | 采样: --", "en": "Ping: -- | Sample: --"},
     "status_coords_fmt": {"zh": "Ping: {ping:.0f} | 采样: {sample:.0f}", "en": "Ping: {ping:.0f} | Sample: {sample:.0f}"},
     "status_gps": {"zh": "GPS: --", "en": "GPS: --"},
@@ -194,6 +227,11 @@ _TEXTS = {
     "noise_ping_num": {"zh": "Ping 数:", "en": "Ping Count:"},
     "noise_range_num": {"zh": "Range 样本:", "en": "Range Samples:"},
     "noise_snr_threshold": {"zh": "SNR 阈值:", "en": "SNR Threshold:"},
+    "noise_policy_enabled": {"zh": "自动去噪", "en": "Automatic denoising"},
+    "noise_policy_tip": {
+        "zh": "重算积分时按当前设置先执行自动去噪；取消勾选后只应用人工噪声标注。",
+        "en": "Apply automatic noise removal before recomputing. Manual noise masks still apply when disabled.",
+    },
 
     # 表线设置
     "surface_group": {"zh": "表线设置", "en": "Surface Line"},
@@ -212,9 +250,9 @@ _TEXTS = {
     "bottom_search_min": {"zh": "最小深度:", "en": "Min Search Depth:"},
     "bottom_window_len": {"zh": "平滑长度:", "en": "Window Length:"},
     "bottom_backstep": {"zh": "回步值:", "en": "Backstep:"},
-    "btn_detect_bottom": {"zh": "检测底部", "en": "Detect Bottom"},
-    "btn_draw_bottom": {"zh": "绘制底线", "en": "Draw Bottom"},
-    "btn_update_bottom": {"zh": "更新底线", "en": "Update Bottom"},
+    "btn_detect_bottom": {"zh": "检测底部", "en": "Detect"},
+    "btn_draw_bottom": {"zh": "绘制底线", "en": "Draw"},
+    "btn_update_bottom": {"zh": "更新底线", "en": "Update"},
 
     # 鱼群检测
     "school_group": {"zh": "鱼群检测", "en": "School Detection"},
@@ -246,6 +284,26 @@ _TEXTS = {
     "btn_sv_stats": {"zh": "Sv 统计摘要", "en": "Sv Statistics"},
     "btn_transect_split": {"zh": "Transect 分段", "en": "Transect Split"},
     "btn_apply_all": {"zh": "应用全部参数", "en": "Apply All Parameters"},
+    "btn_apply_current_layer": {"zh": "应用到当前 Layer", "en": "Apply to Current Layer"},
+    "tab_echo_integration": {"zh": "回声积分", "en": "Echo Integration"},
+    "tab_lines": {"zh": "线段", "en": "Lines"},
+    "show_grid_overlay": {"zh": "显示积分网格", "en": "Show Integration Grid"},
+    "grid_overlay_hint": {
+        "zh": "积分完成后在声图叠加 ESU 单元（按 mean_Sv 着色）",
+        "en": "Overlay ESU cells on the echogram after integration (colored by mean_Sv)",
+    },
+    "channel_combo_tip": {
+        "zh": "当前显示/处理所用声学通道（多通道分析仍以实现为准）",
+        "en": "Acoustic channel for display/processing context",
+    },
+    "integration_empty_hint": {
+        "zh": "尚无积分结果。在本页设置参数后点击「回声积分」。",
+        "en": "No integration results yet. Set parameters and run Echo Integration.",
+    },
+    "integration_summary": {
+        "zh": "积分结果 {n} 行（预览最多 200 行）",
+        "en": "{n} integration rows (preview up to 200)",
+    },
 
     # ── 回声积分 ──
     "menu_integration": {"zh": "回声积分", "en": "Echo Integration"},
@@ -305,12 +363,12 @@ _TEXTS = {
     "region_inspect": {"zh": "检查", "en": "Inspect"},
     "region_delete": {"zh": "删除区域", "en": "Delete Region"},
     "region_export_data": {"zh": "导出区域数据", "en": "Export Region Data"},
-    "region_prev": {"zh": "◀ 上一条", "en": "◀ Prev"},
-    "region_next": {"zh": "下一条 ▶", "en": "Next ▶"},
+    "region_prev": {"zh": "上一条", "en": "Prev"},
+    "region_next": {"zh": "下一条", "en": "Next"},
     "bottom_region_tab": {"zh": "区域", "en": "Regions"},
     "bottom_messages_tab": {"zh": "消息", "en": "Messages"},
     "messages_clear": {"zh": "清空", "en": "Clear"},
-    "view_tab": {"zh": "View {n}", "en": "View {n}"},
+    "view_tab": {"zh": "声图 {n}", "en": "Echogram {n}"},
     "status_time": {"zh": "时间: --", "en": "Time: --"},
     "status_time_fmt": {"zh": "时间: {t}", "en": "Time: {t}"},
 

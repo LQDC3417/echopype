@@ -44,8 +44,12 @@ def test_empty_bottom_result_is_reported_in_message_panel(qapp):
         window._ds_Sv = xr.Dataset(
             {"Sv": (("ping_time", "range_sample"), np.zeros((3, 2)))}
         )
+        window._run_all_chain = True
+        window.line_manager.set_line_data("bottom", [1., 1., 1.], [0, 1, 2])
         window._on_bottom_detected(np.full(3, np.nan))
         assert "结果全部为空" in window._message_text.toPlainText()
+        assert window._run_all_chain is False
+        assert np.isnan(window.line_manager.get("bottom").values).all()
     finally:
         window.close()
 

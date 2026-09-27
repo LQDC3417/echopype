@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "fish-acoustics"
@@ -13,17 +13,21 @@ dependencies = [
     "pandas",
     "numpy",
     "matplotlib",
-    "click",
     "pyyaml",
     "PySide6>=6.6.0",
     "PyOpenGL>=3.1.7",
     "scipy",
     "h5py",
+    "h5netcdf",
     "openpyxl",
 ]
 
-[project.scripts]
-fish-acoustics = "src.cli:main"
+[tool.setuptools.package-data]
+"src.gui" = ["assets/icons/*.svg", "assets/presets.yaml"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src", "src.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

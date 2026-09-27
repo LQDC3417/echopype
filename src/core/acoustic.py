@@ -50,7 +50,7 @@ def open_single_file(raw_file: Path, config: dict):
     return echodata
 
 
-def _detect_waveform_mode(echodata) -> tuple:
+def _detect_waveform_mode(echodata, channel_id=None) -> tuple:
     """
     从 EchoData 自动检测 waveform_mode 和 encode_mode。
 
@@ -63,8 +63,20 @@ def _detect_waveform_mode(echodata) -> tuple:
     try:
         bg = echodata["Sonar/Beam_group1"]
 
+        def selected_values(variable):
+            values = bg[variable]
+            if channel_id is not None and "channel" in values.dims:
+                labels = {}
+                for value in values.channel.values:
+                    label = value.decode("utf-8") if isinstance(value, bytes) else str(value)
+                    labels[label] = value
+                if str(channel_id) not in labels:
+                    raise ValueError(f"Beam_group1 中不存在所选通道：{channel_id}")
+                values = values.sel(channel=[labels[str(channel_id)]])
+            return values.values
+
         # 检测 transmit_type: "CW" → narrowband, "FM"/"BB" → broadband
-        transmit_type = bg["transmit_type"].values
+        transmit_type = selected_values("transmit_type")
         if transmit_type.ndim > 1:
             transmit_type = transmit_type[0]  # 取第一个 channel
         first_type = str(transmit_type.flat[0]).upper() if transmit_type.size > 0 else "CW"
@@ -75,12 +87,13 @@ def _detect_waveform_mode(echodata) -> tuple:
             waveform_mode = "CW"
 
         # 检测 beam_type: 1=complex, 3=power/angle
-        beam_type = int(bg["beam_type"].values[0]) if "beam_type" in bg else 1
+        beam_type = int(selected_values("beam_type")[0]) if "beam_type" in bg else 1
         encode_mode = "complex" if beam_type == 1 else "power"
 
         logger.info(f"自动检测: waveform_mode={waveform_mode}, encode_mode={encode_mode}")
         return waveform_mode, encode_mode
-
+    except (ValueError, KeyError):
+        raise
     except Exception as e:
         logger.warning(f"自动检测失败，使用默认值 CW/power: {e}")
         return "CW", "power"
@@ -191,7 +204,7 @@ def compute_sv(echodata, config: dict) -> xr.Dataset:
 
 def process_single_file(echodata, config: dict) -> xr.Dataset:
     """
-    处理单个 EchoData 对象的完整流程（供 CLI 和批量导入使用）：
+    处理单个 EchoData 对象的完整流程（供 GUI 和批量导入使用）：
     1. compute_Sv + depth
     2. remove_background_noise — 噪声去除
     3. detect_seafloor — 底部检测
@@ -277,7 +290,9 @@ def process_all_files(config: dict) -> xr.Dataset:
     for raw_file in raw_files:
         try:
             ed = open_single_file(raw_file, config)
-            processed_datasets.append(process_single_file(ed, config))
+            ds = process_single_file(ed, config)
+            ds = ds.assign_coords(source_file=("ping_time", [str(raw_file.resolve())] * ds.sizes["ping_time"]))
+            processed_datasets.append(ds)
         except Exception as e:
             logger.error(f"处理文件失败 {raw_file.name}: {e}")
             failed_files.append((raw_file, e))

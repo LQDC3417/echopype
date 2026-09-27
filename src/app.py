@@ -7,10 +7,11 @@ import sys
 os.environ["PYTHONUTF8"] = "1"
 
 from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
 from src.gui.main_window import MainWindow
-from src.gui.theme import DARK_THEME
+from src.gui.theme import LIGHT_THEME
 
 
 def main():
@@ -19,10 +20,13 @@ def main():
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(sys.argv)
+    families = QFontDatabase.families()
+    family = next((name for name in ("Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC") if name in families), app.font().family())
+    app.setFont(QFont(family, 9))
     app.setApplicationName("Echogram")
     app.setApplicationVersion("2.0")
     app.setOrganizationName("FishAcoustics")
-    app.setStyleSheet(DARK_THEME)
+    app.setStyleSheet(LIGHT_THEME)
 
     window = MainWindow()
     window.show()

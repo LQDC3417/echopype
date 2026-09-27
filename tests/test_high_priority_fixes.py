@@ -152,10 +152,10 @@ def test_manual_mask_does_not_modify_raw_sv():
     ds = _make_sv_dataset([[1.0, 2.0, 3.0]])
     original = ds["Sv"].values.copy()
 
-    apply_manual_mask(ds, np.array([[True, False, False]]))
+    corrected = apply_manual_mask(ds, np.array([[True, False, False]]))
 
     assert np.array_equal(ds["Sv"].values, original)
-    assert np.isnan(ds["Sv_corrected"].values[0, 0])
+    assert np.isnan(corrected["Sv_corrected"].values[0, 0])
 
 
 def test_analysis_region_switch_keeps_full_dataset_when_disabled():
@@ -198,6 +198,7 @@ def test_reset_analysis_state_clears_previous_project_results():
     host._integration_df = object()
     host._real_sed_df = object()
     host._ds_Sv_analysis = object()
+    host._channel_config_snapshot = lambda: {}
 
     FileMixin._reset_analysis_state(host)
 
@@ -230,7 +231,7 @@ def test_noise_region_undo_keeps_the_previous_mask_snapshot():
     host.echogram = Echogram()
     host.region_table = RegionTable()
     host._save_file_state = lambda: None
-    host._apply_noise_params = lambda: None
+    host._apply_noise_params = lambda automatic=True: None
 
     InteractionMixin._add_noise_region(host, 0, 0, 1, 1)
 
@@ -258,7 +259,7 @@ def test_undo_noise_mask_reapplies_noise_processing():
     host.save_calls = 0
     host.stale_results = []
 
-    def apply_noise():
+    def apply_noise(automatic=True):
         host.noise_apply_calls += 1
 
     def save_state():
@@ -276,7 +277,7 @@ def test_undo_noise_mask_reapplies_noise_processing():
     assert host._noise_mask_manual is None
     assert host.noise_apply_calls == 1
     assert host.save_calls == 1
-    assert host.stale_results == [("bottom", "schools", "integration")]
+    assert host.stale_results == [("noise", "bottom", "schools", "integration", "real_sed")]
 
 
 def test_export_grid_uses_integration_dataframe(monkeypatch, tmp_path):
@@ -315,6 +316,8 @@ def test_export_grid_uses_integration_dataframe(monkeypatch, tmp_path):
     host._schools_df = None
     host._integration_df = pd.DataFrame({"density_ind_ha": [1.0]})
     host.statusbar = StatusBar()
+    host._ensure_result_exportable = lambda *_names: True
+    host._input_incomplete = False
 
     InteractionMixin._export(host)
 
@@ -364,6 +367,8 @@ def test_process_all_files_processes_each_raw_without_combining_echodata(monkeyp
         echodata[second]: _make_sv_dataset([[2.0, 2.0]]).assign_coords(ping_time=[1]),
     }
     for dataset, bottom in zip(processed.values(), [10.0, 11.0]):
+        dataset.coords["ping_time"] = np.asarray(dataset.ping_time.values, dtype="datetime64[ns]")
+        dataset.coords["echo_range"] = ("range_sample", [1.0, 2.0])
         dataset["Sv_corrected"] = dataset["Sv"] - 1.0
         dataset["bottom_depth"] = ("ping_time", [bottom])
     monkeypatch.setattr(acoustic, "load_raw_files", lambda config: [first, second])

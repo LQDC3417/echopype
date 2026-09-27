@@ -15,6 +15,7 @@ from pathlib import Path
 import yaml
 from PySide6.QtCore import QSettings, QSize, Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -25,9 +26,11 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -37,7 +40,7 @@ from src.gui.icons import icon
 from src.gui.i18n import T
 
 # 预设配置文件路径
-PRESETS_FILE = Path(__file__).parent.parent.parent / "configs" / "presets.yaml"
+PRESETS_FILE = Path(__file__).parent / "assets" / "presets.yaml"
 
 
 class _InfoRow(QWidget):
@@ -49,12 +52,15 @@ class _InfoRow(QWidget):
         layout.setSpacing(8)
 
         self.lbl_label = QLabel(label)
-        self.lbl_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_label.setStyleSheet("color: #5C6773; font-size: 11px;")
         self.lbl_label.setFixedWidth(70)
 
         self.lbl_value = QLabel(value)
-        self.lbl_value.setStyleSheet("color: #e2e8f0; font-size: 11px;")
+        self.lbl_value.setStyleSheet("color: #1F2933; font-size: 11px;")
         self.lbl_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.lbl_value.setWordWrap(True)
+        self.lbl_value.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        layout.setAlignment(self.lbl_label, Qt.AlignTop)
 
         layout.addWidget(self.lbl_label)
         layout.addWidget(self.lbl_value, 1)
@@ -62,11 +68,12 @@ class _InfoRow(QWidget):
     def set_value(self, value: str):
         """设置值并更新样式"""
         self.lbl_value.setText(value)
+        self.lbl_value.setToolTip(value)
         no_data_values = ["--", T("info_no_data"), ""]
         if value in no_data_values:
-            self.lbl_value.setStyleSheet("color: #64748b; font-size: 11px;")
+            self.lbl_value.setStyleSheet("color: #9AA3AD; font-size: 11px;")
         else:
-            self.lbl_value.setStyleSheet("color: #e2e8f0; font-size: 11px;")
+            self.lbl_value.setStyleSheet("color: #1F2933; font-size: 11px;")
 
 
 class FileInfoTab(QWidget):
@@ -94,14 +101,18 @@ class FileInfoTab(QWidget):
         """更新文件信息"""
         if ds_Sv is None:
             return
-        if "channel" in ds_Sv:
-            self.row_freq.set_value(str(ds_Sv["channel"].values[0]))
+        self.row_freq.set_value("--")
+        if "frequency_nominal" in ds_Sv:
+            frequencies = ds_Sv["frequency_nominal"].values.ravel()
+            self.row_freq.set_value(" / ".join(dict.fromkeys(
+                f"{float(freq) / 1000:g} kHz" for freq in frequencies
+            )))
         if "ping_time" in ds_Sv:
             n_pings = len(ds_Sv["ping_time"])
             self.row_pings.set_value(str(n_pings))
             times = ds_Sv["ping_time"].values
             if len(times) > 1:
-                self.row_time.set_value(f"{str(times[0])[:19]} ~ {str(times[-1])[:19]}")
+                self.row_time.set_value(f"{str(times[0])[:19]}\n~ {str(times[-1])[:19]}")
         if "range_sample" in ds_Sv:
             n_samples = len(ds_Sv["range_sample"])
             self.row_samples.set_value(str(n_samples))
@@ -140,6 +151,19 @@ class ProcessingTab(QWidget):
         self._content_layout = layout
         layout.setSpacing(8)
         layout.setContentsMargins(8, 8, 8, 8)
+
+        # ── Channel（ESP3 Processing 页顶部）──
+        channel_group = self.channel_group = QGroupBox(T("info_frequency"))
+        channel_layout = QHBoxLayout(channel_group)
+        channel_layout.setContentsMargins(8, 12, 8, 8)
+        self.combo_channel = QComboBox()
+        self.combo_channel.setObjectName("channelCombo")
+        self.combo_channel.setMinimumWidth(160)
+        self.combo_channel.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.combo_channel.setMinimumContentsLength(12)
+        self.combo_channel.setToolTip(T("channel_combo_tip"))
+        channel_layout.addWidget(self.combo_channel, 1)
+        layout.addWidget(channel_group)
 
         # ── 预设配置 ──
         preset_group = self.preset_group = QGroupBox(T("preset_group"))
@@ -181,10 +205,14 @@ class ProcessingTab(QWidget):
         self.spin_snr.setRange(0, 30)
         self.spin_snr.setValue(3.0)
         self.spin_snr.setSuffix(" dB")
+        self.chk_noise_enabled = QCheckBox(T("noise_policy_enabled"))
+        self.chk_noise_enabled.setToolTip(T("noise_policy_tip"))
+        self.chk_noise_enabled.setTristate(True)
 
         noise_layout.addRow(T("noise_ping_num"), self.spin_ping_num)
         noise_layout.addRow(T("noise_range_num"), self.spin_range_num)
         noise_layout.addRow(T("noise_snr_threshold"), self.spin_snr)
+        noise_layout.addRow(self.chk_noise_enabled)
         self.noise_group.setLayout(noise_layout)
         layout.addWidget(self.noise_group)
 
@@ -940,6 +968,46 @@ class StatsTab(QWidget):
         schools_group.setLayout(schools_layout)
         layout.addWidget(schools_group, 1)
 
+        # ── 积分结果预览（ESP3 Echo Integration 页也会引用）──
+        integ_group = QGroupBox(T("tab_echo_integration"))
+        integ_layout = QVBoxLayout()
+        integ_layout.setContentsMargins(8, 12, 8, 8)
+        self.integration_table = QTableWidget()
+        self.integration_table.setObjectName("integrationPreview")
+        self.integration_table.setAlternatingRowColors(True)
+        self.integration_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.integration_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.integration_table.verticalHeader().setVisible(False)
+        self.integration_table.horizontalHeader().setStretchLastSection(True)
+        self.integration_summary = QLabel(T("integration_empty_hint"))
+        self.integration_summary.setObjectName("integrationSummary")
+        integ_layout.addWidget(self.integration_summary)
+        integ_layout.addWidget(self.integration_table)
+        integ_group.setLayout(integ_layout)
+        layout.addWidget(integ_group, 1)
+
+    def update_integration(self, df) -> None:
+        """刷新积分结果预览表。"""
+        if df is None or getattr(df, "empty", True):
+            self.integration_table.setRowCount(0)
+            self.integration_table.setColumnCount(0)
+            self.integration_summary.setText(T("integration_empty_hint"))
+            return
+        cols = list(df.columns)
+        self.integration_table.setColumnCount(len(cols))
+        self.integration_table.setHorizontalHeaderLabels([str(c) for c in cols])
+        rows = min(len(df), 200)
+        self.integration_table.setRowCount(rows)
+        for r in range(rows):
+            for c, col in enumerate(cols):
+                val = df.iloc[r, c]
+                if isinstance(val, float):
+                    text = f"{val:.4g}"
+                else:
+                    text = str(val)
+                self.integration_table.setItem(r, c, QTableWidgetItem(text))
+        self.integration_summary.setText(T("integration_summary", n=len(df)))
+
     def update_schools(self, schools_df):
         """更新鱼群列表"""
         if schools_df is None or schools_df.empty:
@@ -961,6 +1029,7 @@ class DisplaySettingsPanel(QWidget):
     """Echogram 显示设置，和处理参数分离，修改后立即更新画面。"""
 
     display_params_changed = Signal(str, float, float)
+    grid_overlay_toggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -985,6 +1054,13 @@ class DisplaySettingsPanel(QWidget):
         self.spin_vmax.setValue(-20.0)
         self.spin_vmax.setSuffix(" dB")
         layout.addRow(T("toolbar_sv_max"), self.spin_vmax)
+
+        self.chk_grid_overlay = QCheckBox(T("show_grid_overlay"))
+        self.chk_grid_overlay.setObjectName("chkGridOverlay")
+        self.chk_grid_overlay.setChecked(True)
+        self.chk_grid_overlay.setToolTip(T("grid_overlay_hint"))
+        layout.addRow(self.chk_grid_overlay)
+        self.chk_grid_overlay.toggled.connect(self.grid_overlay_toggled)
 
         self.combo_cmap.currentTextChanged.connect(self._emit_changed)
         self.spin_vmin.valueChanged.connect(self._emit_changed)
@@ -1024,7 +1100,9 @@ class AccordionSection(QWidget):
         self.header.setObjectName("accordionHeader")
         self.header.setText(title)
         self.header.setIcon(icon(icon_name))
-        self.header.setIconSize(QSize(20, 20))
+        self.header.setIconSize(QSize(16, 16))
+        self.header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.header.setArrowType(Qt.DownArrow)
         self.header.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.header.setCheckable(True)
         self.header.setChecked(True)
@@ -1034,12 +1112,14 @@ class AccordionSection(QWidget):
 
         self.body = QWidget(self)
         body_layout = QVBoxLayout(self.body)
-        body_layout.setContentsMargins(10, 8, 10, 10)
+        body_layout.setContentsMargins(6, 6, 6, 8)
         body_layout.setSpacing(6)
         body_layout.addWidget(content)
         layout.addWidget(self.body)
 
     def set_expanded(self, expanded: bool) -> None:
+        self.header.setChecked(expanded)
+        self.header.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
         self.body.setVisible(expanded)
         self.header.setProperty("expanded", expanded)
         self.header.style().unpolish(self.header)
@@ -1047,7 +1127,7 @@ class AccordionSection(QWidget):
 
 
 class PropertyPanel(QWidget):
-    """右侧属性面板 — 参照 Echoview Properties 面板"""
+    """右侧属性面板 — ESP3 任务页：Processing / Echo Int. / Lines / Display / Results"""
 
     noise_params_changed = Signal(dict)
     bottom_params_changed = Signal(dict)
@@ -1066,6 +1146,7 @@ class PropertyPanel(QWidget):
     detect_bottom_clicked = Signal()
     draw_bottom_clicked = Signal()
     update_bottom_clicked = Signal()
+    apply_current_clicked = Signal()
     apply_all_clicked = Signal()
     export_clicked = Signal()
 
@@ -1078,55 +1159,109 @@ class PropertyPanel(QWidget):
         self.processing = ProcessingTab()
         self.stats = StatsTab()
 
-        scroll = QScrollArea(self)
-        scroll.setObjectName("propertyScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        for btn_name in (
+            "btn_detect_schools",
+            "btn_integration",
+            "btn_real_sed",
+            "btn_quality",
+            "btn_multifreq",
+            "btn_sv_stats",
+            "btn_transect",
+        ):
+            btn = getattr(self.processing, btn_name, None)
+            if btn is not None:
+                btn.setProperty("cssClass", None)
 
-        container = QWidget()
-        content_layout = QVBoxLayout(container)
-        self._content_layout = content_layout
-        content_layout.setContentsMargins(8, 8, 8, 8)
-        content_layout.setSpacing(8)
+        self._tabs = QTabWidget()
+        self._tabs.setObjectName("propertyTaskTabs")
+        self._tabs.setDocumentMode(True)
 
-        processing_overview = self._bundle_processing_widgets(
+        proc_page = QWidget()
+        proc_layout = QVBoxLayout(proc_page)
+        proc_layout.setContentsMargins(8, 8, 8, 8)
+        proc_layout.setSpacing(8)
+        for w in (
+            self.processing.channel_group,
             self.processing.preset_group,
             self.processing.noise_group,
             self.processing.surface_group,
-        )
-        export_panel = self._make_export_panel()
-        annotation_panel = self._make_annotation_panel()
-        section_specs = (
-            ("file_info", T("tab_file_info"), "file_info", self.file_info),
-            ("display", T("panel_display_settings"), "display", self.display),
-            ("processing", T("tab_processing"), "processing", processing_overview),
-            ("bottom", T("bottom_group"), "bottom", self.processing.bottom_group),
-            ("export", T("toolbar_export"), "export", export_panel),
-            ("annotations", T("panel_annotations"), "ruler", annotation_panel),
-            ("advanced", T("panel_advanced_analysis"), "advanced", self.processing),
-        )
-        self._sections = {}
-        for section_id, title, icon_name, widget in section_specs:
-            section = AccordionSection(title, icon_name, widget)
-            section.setObjectName(f"accordion_{section_id}")
-            self._sections[section_id] = section
-            content_layout.addWidget(section)
-        content_layout.addStretch()
-        scroll.setWidget(container)
+            self.processing.school_group,
+        ):
+            proc_layout.addWidget(self._take_processing_widget(w))
+        apply_row = QVBoxLayout()
+        self.btn_apply_current = QPushButton(T("btn_apply_current_short"))
+        self.btn_apply_current.setToolTip(T("btn_apply_current_layer"))
+        self.btn_apply_current.setObjectName("btnApplyCurrent")
+        self.btn_apply_current.setProperty("cssClass", "primary")
+        self.btn_apply_current.clicked.connect(self.apply_current_clicked)
+        self.btn_apply_all = QPushButton(T("btn_apply_all_short"))
+        self.btn_apply_all.setToolTip(T("btn_apply_all_layers"))
+        self.btn_apply_all.setObjectName("btnApplyAll")
+        self.btn_apply_all.clicked.connect(self.apply_all_clicked)
+        apply_row.addWidget(self.btn_apply_current)
+        apply_row.addWidget(self.btn_apply_all)
+        proc_layout.addLayout(apply_row)
+        proc_layout.addWidget(self._make_export_panel())
+        proc_layout.addStretch()
+        self._tabs.addTab(self._scroll_wrap(proc_page), T("task_processing"))
+        self._tabs.setTabToolTip(0, T("tab_processing"))
+
+        ei_page = QWidget()
+        ei_layout = QVBoxLayout(ei_page)
+        ei_layout.setContentsMargins(8, 8, 8, 8)
+        ei_layout.setSpacing(8)
+        ei_layout.addWidget(self._take_processing_widget(self.processing.integration_group))
+        # 积分结果预览（与 Results 页共用 StatsTab.integration_table 的父级拆分会破坏表格）
+        # 这里只放摘要 + 独立镜像表，由 update_integration_preview 写入。
+        self.ei_result_summary = QLabel(T("integration_empty_hint"))
+        self.ei_result_summary.setObjectName("eiResultSummary")
+        ei_layout.addWidget(self.ei_result_summary)
+        self.ei_result_table = QTableWidget()
+        self.ei_result_table.setObjectName("eiResultTable")
+        self.ei_result_table.setAlternatingRowColors(True)
+        self.ei_result_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.ei_result_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.ei_result_table.verticalHeader().setVisible(False)
+        self.ei_result_table.horizontalHeader().setStretchLastSection(True)
+        ei_layout.addWidget(self.ei_result_table, 1)
+        ei_layout.addWidget(self._take_processing_widget(self.processing.real_sed_group))
+        ei_layout.addStretch()
+        self._tabs.addTab(self._scroll_wrap(ei_page), T("task_integration"))
+        self._tabs.setTabToolTip(1, T("tab_echo_integration"))
+
+        lines_page = QWidget()
+        lines_layout = QVBoxLayout(lines_page)
+        lines_layout.setContentsMargins(8, 8, 8, 8)
+        lines_layout.setSpacing(8)
+        lines_layout.addWidget(self._take_processing_widget(self.processing.bottom_group))
+        lines_layout.addWidget(self._make_annotation_panel())
+        lines_layout.addStretch()
+        self._tabs.addTab(self._scroll_wrap(lines_page), T("task_lines"))
+        self._tabs.setTabToolTip(2, T("tab_lines"))
+
+        disp_page = QWidget()
+        disp_layout = QVBoxLayout(disp_page)
+        disp_layout.setContentsMargins(8, 8, 8, 8)
+        disp_layout.setSpacing(8)
+        disp_layout.addWidget(self.display)
+        disp_layout.addStretch()
+        self._tabs.addTab(self._scroll_wrap(disp_page), T("task_display"))
+        self._tabs.setTabToolTip(3, T("panel_display_settings"))
+
+        res_page = QWidget()
+        res_layout = QVBoxLayout(res_page)
+        res_layout.setContentsMargins(8, 8, 8, 8)
+        res_layout.setSpacing(8)
+        res_layout.addWidget(self.file_info)
+        res_layout.addWidget(self.stats)
+        res_layout.addStretch()
+        self._tabs.addTab(self._scroll_wrap(res_page), T("task_info"))
+        self._tabs.setTabToolTip(4, T("tab_file_info"))
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(scroll)
-        self.setStyleSheet(
-            "QScrollArea { background: #15191e; border: none; }"
-            "QWidget#accordionSection { background: #1b2128; border: 1px solid #34414d; "
-            "border-radius: 6px; }"
-            "QToolButton#accordionHeader { background: #1b2128; color: #00cbea; border: none; "
-            "padding: 9px 10px; text-align: left; font-weight: 600; font-size: 13px; }"
-            "QToolButton#accordionHeader:hover { background: #222b34; }"
-        )
+        main_layout.addWidget(self._tabs)
 
-        # 转发信号
         self.processing.noise_params_changed.connect(self.noise_params_changed)
         self.processing.bottom_params_changed.connect(self.bottom_params_changed)
         self.processing.school_params_changed.connect(self.school_params_changed)
@@ -1146,21 +1281,26 @@ class PropertyPanel(QWidget):
         self.processing.real_sed_clicked.connect(self.real_sed_clicked)
 
     @staticmethod
+    def _scroll_wrap(widget: QWidget) -> QScrollArea:
+        # 窄侧栏让长表单行换行，避免参数与提示撑出页面。
+        for form in widget.findChildren(QFormLayout):
+            form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+            form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        for label in widget.findChildren(QLabel):
+            label.setWordWrap(True)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(widget)
+        return scroll
+
+    @staticmethod
     def _take_processing_widget(widget: QWidget) -> QWidget:
-        """把已有参数控件从旧容器转入参考图的分区，不改变任何信号。"""
         parent = widget.parentWidget()
         if parent is not None and parent.layout() is not None:
             parent.layout().removeWidget(widget)
+        widget.setParent(None)
         return widget
-
-    def _bundle_processing_widgets(self, *widgets: QWidget) -> QWidget:
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        for widget in widgets:
-            layout.addWidget(self._take_processing_widget(widget))
-        return panel
 
     def _make_export_panel(self) -> QWidget:
         panel = QWidget()
@@ -1169,7 +1309,6 @@ class PropertyPanel(QWidget):
         layout.setSpacing(6)
         layout.addWidget(QLabel(T("panel_export_hint")))
         button = QPushButton(T("toolbar_export"))
-        button.setProperty("cssClass", "primary")
         button.clicked.connect(self.export_clicked)
         layout.addWidget(button)
         return panel
@@ -1183,27 +1322,70 @@ class PropertyPanel(QWidget):
         layout.addWidget(QLabel(T("panel_annotation_result_hint")))
         return panel
 
-    def section_ids(self) -> tuple[str, ...]:
-        """返回属性区顺序，供布局回归测试和后续功能扩展使用。"""
-        return tuple(self._sections)
+    def section_ids(self) -> tuple:
+        return ("processing", "echo_integration", "lines", "display", "file_info")
 
     def configure_summary_view(self) -> None:
-        """将 Dock 收敛为文件信息和统计结果，处理控件仍供弹窗复用。"""
-        for section_id, section in self._sections.items():
-            section.setVisible(section_id == "file_info")
+        """ESP3 任务页默认 Processing 首页；全部页签保持可达。"""
+        self._tabs.setCurrentIndex(0)
 
-        statistics = self._sections.get("statistics")
-        if statistics is None:
-            statistics = AccordionSection(T("tab_statistics"), "advanced", self.stats)
-            statistics.setObjectName("accordion_statistics")
-            self._sections["statistics"] = statistics
-            self._content_layout.insertWidget(1, statistics)
-        statistics.show()
+    def set_channels(self, channels) -> None:
+        """刷新通道列表；二元组格式为（显示标签，原始通道 ID）。"""
+        combo = self.processing.combo_channel
+        current = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        for ch in channels or ():
+            if isinstance(ch, (tuple, list)) and len(ch) == 2:
+                combo.addItem(str(ch[0]), str(ch[1]))
+            else:
+                combo.addItem(str(ch), str(ch))
+        if current is not None:
+            idx = combo.findData(current)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+
+    def update_integration_preview(self, df) -> None:
+        """同步 EI 页与 Results 页的积分预览。"""
+        self.stats.update_integration(df)
+        if df is None or getattr(df, "empty", True):
+            self.ei_result_table.setRowCount(0)
+            self.ei_result_table.setColumnCount(0)
+            self.ei_result_summary.setText(T("integration_empty_hint"))
+            return
+        cols = list(df.columns)
+        self.ei_result_table.setColumnCount(len(cols))
+        self.ei_result_table.setHorizontalHeaderLabels([str(c) for c in cols])
+        rows = min(len(df), 200)
+        self.ei_result_table.setRowCount(rows)
+        for r in range(rows):
+            for c, col in enumerate(cols):
+                val = df.iloc[r, c]
+                text = f"{val:.4g}" if isinstance(val, float) else str(val)
+                self.ei_result_table.setItem(r, c, QTableWidgetItem(text))
+        self.ei_result_summary.setText(T("integration_summary", n=len(df)))
+
+    def show_task(self, kind: str) -> None:
+        """把右栏切到对应 ESP3 任务页。"""
+        tab_index = {
+            "noise": 0,
+            "schools": 0,
+            "processing": 0,
+            "integration": 1,
+            "sed": 1,
+            "echo_integration": 1,
+            "bottom": 2,
+            "region": 2,
+            "lines": 2,
+            "display": 3,
+            "file_info": 4,
+            "stats": 4,
+        }.get(kind, 0)
+        self._tabs.setCurrentIndex(tab_index)
 
     def save_settings(self):
-        """保存当前配置"""
         self.processing.save_settings()
 
     def get_all_config(self) -> dict:
-        """获取所有配置"""
         return self.processing.get_all_config()

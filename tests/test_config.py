@@ -1,5 +1,7 @@
 """配置加载测试"""
 
+from src.gui.property_panel import PRESETS_FILE
+
 import pytest
 
 from src.core.utils import load_config, validate_config
@@ -47,3 +49,21 @@ def test_validate_config_valid(sample_config):
     """测试正常验证"""
     errors = validate_config(sample_config)
     assert errors == []
+
+
+@pytest.mark.parametrize("config", [None, [], "invalid", {"input": None}])
+def test_validate_config_rejects_malformed_sections(config):
+    assert validate_config(config)
+
+
+@pytest.mark.parametrize("section,field", [("reservoir", "name"), ("input", "raw_dir"), ("output", "dir")])
+def test_validate_config_rejects_empty_required_values(sample_config, section, field):
+    sample_config[section][field] = ""
+    assert validate_config(sample_config)
+def test_packaged_presets_are_available():
+    import yaml
+
+    with PRESETS_FILE.open("r", encoding="utf-8") as handle:
+        presets = yaml.safe_load(handle)["presets"]
+
+    assert {"reservoir", "river", "ocean", "default"} <= presets.keys()

@@ -42,7 +42,10 @@ def get_sv_array(ds_Sv: xr.Dataset) -> np.ndarray:
         shape=(n_pings, n_samples)
     """
     var = "Sv_corrected" if "Sv_corrected" in ds_Sv else "Sv"
-    return squeeze_sv(ds_Sv[var].values)
+    sv = ds_Sv[var]
+    if "channel" in sv.dims:
+        sv = sv.isel(channel=0)
+    return sv.transpose("ping_time", "range_sample").values
 
 
 def get_vertical_coords(ds_Sv: xr.Dataset) -> np.ndarray:
@@ -59,7 +62,9 @@ def get_vertical_coords(ds_Sv: xr.Dataset) -> np.ndarray:
         depth_data = ds_Sv["depth"]
         if "channel" in depth_data.dims:
             depth_data = depth_data.isel(channel=0)
-        coords = depth_data.isel(ping_time=0).values
+        if "ping_time" in depth_data.dims:
+            depth_data = depth_data.isel(ping_time=0)
+        coords = depth_data.transpose("range_sample").values
     elif "echo_range" in ds_Sv:
         # 取数逻辑复用 region.get_echo_range_1d（channel 压缩 + 取第一 ping）
         from src.core.region import get_echo_range_1d
@@ -125,21 +130,21 @@ def load_config(config_path: str) -> dict:
 
 def validate_config(config: dict) -> list[str]:
     """验证配置文件必要字段，返回错误列表（空列表 = 通过）。"""
+    if not isinstance(config, dict):
+        return ["配置必须是 YAML 字典"]
     errors = []
     required = ["reservoir", "input", "processing", "output"]
     for key in required:
         if key not in config:
             errors.append(f"配置文件缺少必要字段: {key}")
+        elif not isinstance(config[key], dict):
+            errors.append(f"配置字段 {key} 必须是字典")
 
-    # 验证 input
-    if "input" in config:
-        if "raw_dir" not in config["input"]:
-            errors.append("配置缺少 input.raw_dir")
-
-    # 验证 output
-    if "output" in config:
-        if "dir" not in config["output"]:
-            errors.append("配置缺少 output.dir")
+    for section, field in (("reservoir", "name"), ("input", "raw_dir"), ("output", "dir")):
+        if isinstance(config.get(section), dict):
+            value = config[section].get(field)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"配置缺少有效的 {section}.{field}")
 
     return errors
 

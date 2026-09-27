@@ -165,3 +165,14 @@ def test_ping_resolution_numeric():
     """数值 ping_time → 原值"""
     assert ping_resolution(np.array([0.0, 2.0, 4.0])) == pytest.approx(2.0)
     assert ping_resolution(np.array([0.0])) == pytest.approx(1.0)
+
+
+def test_named_sv_dimensions_and_one_dimensional_depth():
+    import numpy as np
+    import xarray as xr
+    from src.core.utils import get_sv_array, get_vertical_coords
+    ds = xr.Dataset({"Sv": (("range_sample", "ping_time", "channel"), np.arange(6).reshape(3, 2, 1)),
+                     "depth": ("range_sample", [1., 2., 3.])},
+                    coords={"range_sample": range(3), "ping_time": range(2), "channel": [0]})
+    np.testing.assert_array_equal(get_sv_array(ds), [[0, 2, 4], [1, 3, 5]])
+    np.testing.assert_array_equal(get_vertical_coords(ds), [1., 2., 3.])

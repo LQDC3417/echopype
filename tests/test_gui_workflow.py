@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QApplication, QInputDialog
+from PySide6.QtWidgets import QApplication, QInputDialog, QLabel
 
 from src.gui.toolbars import EchogramToolBar, StandardToolBar
 from src.gui.welcome_dialog import WelcomeDialog
@@ -27,6 +27,19 @@ def test_welcome_dialog_exposes_new_and_open_project_actions():
 
     assert dialog.new_button.text()
     assert dialog.open_button.text()
+
+
+def test_welcome_dialog_uses_compact_canvas_start_layout():
+    QApplication.instance() or QApplication([])
+    dialog = WelcomeDialog([])
+    try:
+        assert dialog.objectName() == "welcomeDialog"
+        assert dialog.findChild(QLabel, "welcomeTitle").text() == "欢迎使用"
+        assert dialog.new_button.objectName() == "importRawButton"
+        assert dialog.open_button.objectName() == "openProjectButton"
+        assert dialog.recent_list.objectName() == "recentProjects"
+    finally:
+        dialog.close()
 
 
 def test_line_manager_can_use_active_line_as_reference(monkeypatch):

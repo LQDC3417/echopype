@@ -202,3 +202,18 @@ def test_bottom_worker_returns_valid_point_diagnostics(monkeypatch):
     assert isinstance(result, BottomDetectionResult)
     assert result.valid_count == 2
     assert result.total_count == 3
+
+
+def test_merge_worker_stops_before_next_file_when_interrupted(monkeypatch):
+    from src.core import acoustic
+    from src.gui.workers import MergeFilesWorker
+    worker = MergeFilesWorker([Path("first.raw"), Path("second.raw")], {})
+    calls = []
+    monkeypatch.setattr(worker, "isInterruptionRequested", lambda: bool(calls))
+    monkeypatch.setattr(acoustic, "open_single_file", lambda path, config: calls.append(path) or object())
+    monkeypatch.setattr(acoustic, "compute_sv", lambda *a: _make_sv_dataset(-40.0))
+    results = []
+    worker.finished.connect(results.append)
+    worker.run()
+    assert calls == [Path("first.raw")]
+    assert results == []

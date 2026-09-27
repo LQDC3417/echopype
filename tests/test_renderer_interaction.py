@@ -56,6 +56,10 @@ def test_pan_mode_uses_left_drag_to_move_echogram(qapp):
     renderer.resize(800, 600)
     renderer.set_data(np.zeros((100, 50), dtype=np.float32))
     renderer.set_mouse_mode(MouseMode.PAN)
+    renderer._zoom_x *= 2
+    renderer._zoom_y *= 2
+    renderer.set_view_ratio(0.25, 0.75)
+    renderer._offset_y = -150
     before = (renderer._offset_x, renderer._offset_y)
     try:
         renderer.mousePressEvent(

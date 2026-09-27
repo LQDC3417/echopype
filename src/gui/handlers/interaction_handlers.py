@@ -39,9 +39,13 @@ class InteractionMixin:
             er = self._ds_Sv["echo_range"]
             if "channel" in er.dims:
                 er = er.isel(channel=0)
+            pidx = round(ping)
+            if not 0 <= pidx < self._ds_Sv.sizes["ping_time"]:
+                self.statusbar.set_depth_info(float('nan'))
+                return
+            if "ping_time" in er.dims:
+                er = er.isel(ping_time=pidx)
             er_vals = er.values
-            if er_vals.ndim == 2:
-                er_vals = er_vals[0, :]  # 取第一 ping 的深度剖面
             idx = round(sample)
             if 0 <= idx < len(er_vals):
                 self.statusbar.set_depth_info(float(er_vals[idx]))
@@ -75,6 +79,10 @@ class InteractionMixin:
         px2 = min(h, int(max(x1, x2)))
         py2 = min(w, int(max(y1, y2)))
 
+        if px2 <= px1 or py2 <= py1:
+            self._noise_mask_manual = previous_mask
+            return
+
         self._noise_mask_manual[px1:px2, py1:py2] = True
         self._undo_stack.append(("noise_mask", previous_mask))
         self._redo_stack.clear()
@@ -87,13 +95,15 @@ class InteractionMixin:
         )
         self._save_file_state()
         if hasattr(self, "_mark_results_stale"):
-            self._mark_results_stale("bottom", "schools", "integration")
-        self._apply_noise_params()
+            self._mark_results_stale("noise", "bottom", "schools", "integration", "real_sed")
+        self._apply_noise_params(automatic=getattr(self, "_noise_enabled", None) is True)
 
     def _inspect_region(self, x1, y1, x2, y2):
         if self._ds_Sv is None:
             return
-        sv = squeeze_sv(self._ds_Sv["Sv"].values)
+        sv = self.echogram.get_data()
+        if sv is None:
+            return
 
         px1, px2 = int(min(x1, x2)), int(max(x1, x2))
         py1, py2 = int(min(y1, y2)), int(max(y1, y2))
@@ -105,11 +115,12 @@ class InteractionMixin:
             return
 
         region_data = sv[px1:px2, py1:py2]
-        valid = region_data[~np.isnan(region_data)]
+        valid = region_data[np.isfinite(region_data)]
         if len(valid) == 0:
             return
 
-        mean_sv = float(np.mean(valid))
+        # Sv 为对数值，必须在线性域平均后转换回 dB。
+        mean_sv = float(10 * np.log10(np.mean(10.0 ** (valid / 10.0))))
         self.region_table.add_region(
             name=T("region_inspect"), region_type=T("region_inspect"),
             ping_range=f"{px1}-{px2}", depth_range=f"{py1}-{py2}",
@@ -137,8 +148,8 @@ class InteractionMixin:
         self.echogram.set_noise_mask(self._noise_mask_manual)
         self._save_file_state()
         if hasattr(self, "_mark_results_stale"):
-            self._mark_results_stale("bottom", "schools", "integration")
-        self._apply_noise_params()
+            self._mark_results_stale("noise", "bottom", "schools", "integration", "real_sed")
+        self._apply_noise_params(automatic=getattr(self, "_noise_enabled", None) is True)
 
     def _undo(self):
         if not self._undo_stack:
@@ -205,8 +216,19 @@ class InteractionMixin:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return
 
+        required_results = []
+        if content.get("schools"):
+            required_results.append("schools")
+        if content.get("grid"):
+            required_results.append("integration")
+        if content.get("sv") and self._ds_Sv is not None and "Sv_corrected" in self._ds_Sv:
+            required_results.append("noise")
+        if required_results and not self._ensure_result_exportable(*required_results):
+            return
+
         output_dir = get_output_dir(self._config)
         exported = []
+        sv_stem = "sv_data_partial" if self._input_incomplete else "sv_data"
 
         # 按内容导出
         if content.get("sv") and self._ds_Sv is not None:
@@ -216,9 +238,9 @@ class InteractionMixin:
                 export_to_netcdf,
             )
             if "netcdf" in formats:
-                exported.append(export_to_netcdf(self._get_analysis_ds(), output_dir / "sv_data.nc"))
+                exported.append(export_to_netcdf(self._get_analysis_ds(), output_dir / f"{sv_stem}.nc"))
             if "csv" in formats:
-                exported.append(export_sv_to_csv(self._get_analysis_ds(), output_dir / "sv_data.csv"))
+                exported.append(export_sv_to_csv(self._get_analysis_ds(), output_dir / f"{sv_stem}.csv"))
 
         if content.get("schools") and self._schools_df is not None and not self._schools_df.empty:
             if "csv" in formats:
@@ -240,6 +262,8 @@ class InteractionMixin:
     def _export_schools(self):
         if self._schools_df is None or self._schools_df.empty:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_detect_schools_first"))
+            return
+        if not self._ensure_result_exportable("schools"):
             return
         path, _ = QFileDialog.getSaveFileName(self, T("menu_export_schools"), "", "CSV (*.csv)")
         if path:

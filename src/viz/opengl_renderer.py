@@ -11,6 +11,7 @@
 """
 
 import logging
+from pathlib import Path
 
 import numpy as np
 from matplotlib import cm
@@ -33,6 +34,7 @@ from OpenGL.GL import (
     GL_PROJECTION,
     GL_QUADS,
     GL_RGBA,
+    GL_SCISSOR_TEST,
     GL_SRC_ALPHA,
     GL_TEXTURE_2D,
     GL_TEXTURE_MAG_FILTER,
@@ -59,6 +61,7 @@ from OpenGL.GL import (
     glMatrixMode,
     glOrtho,
     glPixelStorei,
+    glScissor,
     glTexCoord2f,
     glTexImage2D,
     glTexParameteri,
@@ -69,9 +72,10 @@ from OpenGL.GL import (
 from PySide6.QtCore import QRect, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtWidgets import QMenu
+from PySide6.QtWidgets import QMenu, QToolTip
 
 from src.gui.toolbars import MouseMode
+from src.viz.color_legend import ColorLegend
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +99,7 @@ class EchogramRenderer(QOpenGLWidget):
     integration_requested = Signal()
     real_sed_requested = Signal()
     file_page_requested = Signal(int)  # delta: -1=上一页, +1=下一页
-    zoom_changed = Signal(float, float)  # (zoom_x, zoom_y)
+    zoom_changed = Signal(float, float)  # 相对于全图的 X/Y 倍率
 
     MAX_TEX_SIZE_FALLBACK = 16384  # GPU 查询失败时的保底值
 
@@ -117,17 +121,19 @@ class EchogramRenderer(QOpenGLWidget):
             "noise": True,
             "bottom": True,
             "school": True,
+            "grid": True,
         }
-        self._colorbar_rect = None
 
         # 网格叠加
         self._grid_cells = None   # list[dict] — ping_start/end, depth_lo/hi (sample index)
         self._grid_values = None  # np.ndarray — 每格的着色值（如 mean_sv）
         self._grid_vmin = -70.0
         self._grid_vmax = -20.0
-        self._grid_colors_cache = None   # 缓存的颜色数组 (N, 4) RGBA
+        self._grid_colors_cache = None   # 缓存的颜色数组 (N, 3) RGB
         self._grid_colors_dirty = True   # 颜色缓存是否需要更新
-        self._grid_alpha = 0.35          # 网格填充透明度
+        self._grid_alpha = 0.28          # 网格填充透明度（浅色仪器风）
+        self._grid_meta = None           # {"n_cells", "vmin", "vmax", "color_by"}
+        self._grid_drawn_cells = 0       # 本帧实际绘制的单元数（诊断）
 
         # ??????????
         self._bottom_line_color = (0.8, 0.6, 0.0, 1.0)  # ???
@@ -176,6 +182,7 @@ class EchogramRenderer(QOpenGLWidget):
         self._offset_y = 0.0
         self._zoom_x = 1.0
         self._zoom_y = 1.0
+        self._view_size = None
         self._max_tex_size = self.MAX_TEX_SIZE_FALLBACK  # initializeGL 后更新为 GPU 真实值
 
         # 鼠标状态
@@ -192,6 +199,9 @@ class EchogramRenderer(QOpenGLWidget):
         # 通道信息叠加
         self._channel_text = ""
         self._analysis_region_enabled = False
+        self._file_seams = []
+        self.legend = ColorLegend(self)
+        self._layout_legend()
 
         # 启用鼠标追踪（用于悬停检测）
         self.setMouseTracking(True)
@@ -207,12 +217,28 @@ class EchogramRenderer(QOpenGLWidget):
     # ── 数据设置 ──────────────────────────────────────────────
 
     def set_data(self, sv_data: np.ndarray) -> None:
+        if self._sv_data is not None and self._sv_data.shape != sv_data.shape:
+            self._file_seams = []
         self._sv_data = sv_data.astype(np.float32)
         self._n_pings = sv_data.shape[0]
         self._n_samples = sv_data.shape[1]
         self._texture_dirty = True
         self._fit_to_view()
+        self.legend.update()
         self.update()
+
+    def set_file_sources(self, sources, times) -> None:
+        """按排序后的来源变更位置标记接缝，变量切换不改变接缝。"""
+        self._file_seams = []
+        if sources is not None and len(sources) == self._n_pings:
+            for i in np.flatnonzero(np.asarray(sources)[1:] != np.asarray(sources)[:-1]) + 1:
+                label = f"{Path(str(sources[i - 1])).name} → {Path(str(sources[i])).name}\n{times[i]}"
+                self._file_seams.append((int(i), label))
+        self.update()
+
+    def get_data(self) -> np.ndarray | None:
+        """返回当前显示变量，供区域检查读取。"""
+        return self._sv_data
 
     def set_noise_mask(self, mask) -> None:
         if mask is None:
@@ -285,66 +311,102 @@ class EchogramRenderer(QOpenGLWidget):
             self._school_mask = mask.astype(bool)
         self.update()
 
-    def set_grid_data(self, grid_df, ds_Sv=None, color_by: str = "mean_sv") -> None:
-        """设置网格叠加数据。
+    def set_grid_data(self, grid_df, ds_Sv=None, color_by: str = "mean_Sv") -> None:
+        """设置 ESU/积分网格叠加数据。
 
         Parameters
         ----------
         grid_df : pd.DataFrame
-            网格分析结果，含 ping_start/end, depth_lo/hi, mean_sv 等列
+            含 ping_start/end 与 depth_start/end 或 depth_lo/hi；着色列如 mean_Sv / abc
         ds_Sv : xr.Dataset, optional
             用于将深度米转换为 sample index
         color_by : str
-            着色指标列名，默认 "mean_sv"
+            着色指标列名（自动兼容 mean_Sv/mean_sv 大小写）
         """
         if grid_df is None or grid_df.empty:
-            self._grid_cells = None
-            self._grid_values = None
-            self.update()
+            self.clear_grid_overlay()
             return
+
+        # 列名兼容
+        col = color_by
+        if col not in grid_df.columns:
+            for alt in (color_by.lower(), color_by.upper(), "mean_Sv", "mean_sv", "abc"):
+                if alt in grid_df.columns:
+                    col = alt
+                    break
+        depth_lo_col = "depth_lo" if "depth_lo" in grid_df.columns else "depth_start"
+        depth_hi_col = "depth_hi" if "depth_hi" in grid_df.columns else "depth_end"
+
+        echo_range = None
+        if ds_Sv is not None and "echo_range" in ds_Sv:
+            echo_range = np.asarray(ds_Sv["echo_range"].values, dtype=np.float64)
+            while echo_range.ndim > 1:
+                echo_range = echo_range[0]
 
         cells = []
         values = []
-
-        # 尝试获取深度→sample 转换信息
-        echo_range = None
-        if ds_Sv is not None and "echo_range" in ds_Sv:
-            echo_range = ds_Sv["echo_range"].values
-            # 降维到 1D：(channel, ping, sample) → (sample,)
-            while echo_range.ndim > 1:
-                echo_range = echo_range[0]  # 逐维取第一个元素
-
+        labels = []
         for _, row in grid_df.iterrows():
             ping_start = int(row["ping_start"])
             ping_end = int(row["ping_end"])
+            depth_lo = float(row.get(depth_lo_col, 0.0))
+            depth_hi = float(row.get(depth_hi_col, self._n_samples))
 
-            # 深度 → sample index 转换
-            if echo_range is not None:
-                depth_lo = float(row["depth_lo"])
-                depth_hi = float(row["depth_hi"])
-                sample_start = int(np.searchsorted(echo_range, depth_lo))
-                sample_end = int(np.searchsorted(echo_range, depth_hi))
+            if echo_range is not None and echo_range.size > 1:
+                # 深度边界的 exclusive end：两侧都用 side=left
+                sample_start = int(np.searchsorted(echo_range, depth_lo, side="left"))
+                sample_end = int(np.searchsorted(echo_range, depth_hi, side="left"))
             else:
-                # 无除数据时用 ping_start/end 直接作为索引
-                sample_start = int(row.get("depth_lo", 0))
-                sample_end = int(row.get("depth_hi", self._n_samples))
+                # 无除数据时按米或索引直接使用（旧路径）
+                sample_start = int(depth_lo)
+                sample_end = int(depth_hi)
+
+            # 至少 1 个采样厚度，避免空单元
+            if sample_end <= sample_start:
+                sample_end = sample_start + 1
+            if self._n_samples and sample_end > self._n_samples:
+                sample_end = self._n_samples
+            if sample_start < 0:
+                sample_start = 0
+            if sample_end <= sample_start:
+                continue
 
             cells.append({
                 "ping_start": ping_start,
                 "ping_end": ping_end,
                 "sample_start": sample_start,
                 "sample_end": sample_end,
+                "interval": int(row.get("interval", 0)),
+                "layer": int(row.get("layer", 0)),
             })
-            values.append(float(row.get(color_by, 0)))
+            try:
+                values.append(float(row[col]))
+            except (TypeError, ValueError):
+                values.append(np.nan)
+            labels.append(f"{row[col]:.1f}" if col in ("mean_Sv", "mean_sv", "min_Sv", "max_Sv")
+                          else f"{row[col]:.3g}")
+
+        if not cells:
+            self.clear_grid_overlay()
+            return
 
         self._grid_cells = cells
         self._grid_values = np.array(values, dtype=np.float32)
-        if len(values) > 0:
-            self._grid_vmin = float(np.nanmin(self._grid_values))
-            self._grid_vmax = float(np.nanmax(self._grid_values))
+        self._grid_label_fmt = col
+        finite = self._grid_values[np.isfinite(self._grid_values)]
+        if finite.size:
+            self._grid_vmin = float(np.nanmin(finite))
+            self._grid_vmax = float(np.nanmax(finite))
             if self._grid_vmin == self._grid_vmax:
                 self._grid_vmax = self._grid_vmin + 1.0
-        self._grid_colors_dirty = True  # 标记颜色缓存需要更新
+        self._grid_meta = {
+            "n_cells": len(cells),
+            "vmin": self._grid_vmin,
+            "vmax": self._grid_vmax,
+            "color_by": col,
+        }
+        self._grid_colors_dirty = True
+        self._overlay_visibility["grid"] = True
         self.update()
 
     def clear_grid_overlay(self) -> None:
@@ -353,7 +415,17 @@ class EchogramRenderer(QOpenGLWidget):
         self._grid_values = None
         self._grid_colors_cache = None
         self._grid_colors_dirty = True
+        self._grid_meta = None
+        self._grid_drawn_cells = 0
         self.update()
+
+    def set_grid_alpha(self, alpha: float) -> None:
+        """网格填充透明度 0–1。"""
+        self._grid_alpha = float(min(1.0, max(0.0, alpha)))
+        self.update()
+
+    def grid_summary(self) -> dict | None:
+        return dict(self._grid_meta) if self._grid_meta else None
 
     def set_single_targets(self, targets_df) -> None:
         """设置单体目标标记。
@@ -386,6 +458,9 @@ class EchogramRenderer(QOpenGLWidget):
         self._vmin = vmin
         self._vmax = vmax
         self._texture_dirty = True
+        self._layout_legend()
+        self._resize_view()
+        self.legend.update()
         self.update()
 
     def set_channel_info(self, text: str) -> None:
@@ -419,7 +494,7 @@ class EchogramRenderer(QOpenGLWidget):
 
 
     def initializeGL(self) -> None:
-        glClearColor(0.12, 0.12, 0.14, 1.0)
+        glClearColor(1.0, 1.0, 1.0, 1.0)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
@@ -434,7 +509,36 @@ class EchogramRenderer(QOpenGLWidget):
         self._max_tex_size = int(max_size) if max_size else self.MAX_TEX_SIZE_FALLBACK
 
     def resizeGL(self, w: int, h: int) -> None:
-        glViewport(0, 0, w, h)
+        ratio = self.devicePixelRatioF()
+        glViewport(0, 0, round(w * ratio), round(h * ratio))
+
+    def _plot_rect(self):
+        return QRect(0, 0, max(1, self.width() - self.legend.width()), max(1, self.height()))
+
+    def _layout_legend(self):
+        width = self.legend.preferred_width()
+        self.legend.setGeometry(max(1, self.width() - width), 0, width, self.height())
+
+    def resizeEvent(self, event):
+        self._layout_legend()
+        self._resize_view()
+        super().resizeEvent(event)
+
+    def _resize_view(self):
+        if self._n_pings and self._n_samples:
+            rect = self._plot_rect()
+            # 第一次显示时 Qt 的 oldSize 可能为 (-1, -1)，使用实际适配过的尺寸。
+            if self._view_size is None:
+                self._fit_to_view()
+                return
+            old_width, old_height = self._view_size
+            self._zoom_x *= rect.width() / max(1, old_width)
+            self._offset_x *= rect.width() / max(1, old_width)
+            self._zoom_y *= rect.height() / max(1, old_height)
+            self._offset_y *= rect.height() / max(1, old_height)
+            self._constrain_view()
+            self._view_size = (rect.width(), rect.height())
+            self._emit_zoom()
 
     def paintGL(self) -> None:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -447,10 +551,14 @@ class EchogramRenderer(QOpenGLWidget):
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
 
+        rect = self._plot_rect()
+        ratio = self.devicePixelRatioF()
+        glEnable(GL_SCISSOR_TEST)
+        glScissor(0, 0, round(rect.width() * ratio), round(rect.height() * ratio))
         self._draw_echogram_texture()
 
         # 网格叠加在 echogram 之上、底线/鱼群之下
-        if self._grid_cells is not None:
+        if self._grid_cells is not None and self._overlay_visibility.get("grid", True):
             self._draw_grid_overlay()
         if self._noise_mask is not None and self._overlay_visibility["noise"]:
             self._draw_noise_overlay()
@@ -467,13 +575,12 @@ class EchogramRenderer(QOpenGLWidget):
         if self._bottom_draw_points:
             self._draw_bottom_preview()
 
+        self._draw_file_seams()
         # 叠加信息文字
         if self._channel_text or self._cmap_name:
             self._draw_overlay_text()
 
-        # 右侧渐变色图例（colorbar）
-        if self._sv_data is not None:
-            self._draw_colorbar()
+        glDisable(GL_SCISSOR_TEST)
     def _sv_to_rgba(self, ping_start: int = 0, ping_end: int = -1,
                     sample_start: int = 0, sample_end: int = -1) -> np.ndarray:
         """Sv 数据 → RGBA 纹理数组。
@@ -516,6 +623,7 @@ class EchogramRenderer(QOpenGLWidget):
             span = 1.0
         norm = np.clip((data_T - self._vmin) / span, 0, 1)
         rgba = cmap(norm)
+        rgba[~np.isfinite(data_T)] = (112 / 255, 119 / 255, 128 / 255, 1)
         return (rgba * 255).astype(np.uint8)
 
     def _upload_texture(self) -> None:
@@ -732,65 +840,88 @@ class EchogramRenderer(QOpenGLWidget):
 
         glDisable(GL_LINE_STIPPLE)
 
+    def _visible_grid_indices(self):
+        """视口裁剪：只返回与绘图区相交的单元索引。"""
+        width = max(1, self.width() - self.legend.width())
+        height = max(1, self.height())
+        # 数据坐标 → 屏幕：screen = offset + index * zoom；求数据范围
+        # x: 0..n_pings → offset .. offset+n*zoom
+        # 反解 ping 范围
+        if self._zoom_x == 0 or self._zoom_y == 0:
+            return range(len(self._grid_cells))
+        ping_lo = (0 - self._offset_x) / self._zoom_x
+        ping_hi = (width - self._offset_x) / self._zoom_x
+        sample_lo = (0 - self._offset_y) / self._zoom_y
+        sample_hi = (height - self._offset_y) / self._zoom_y
+        # 重叠判定时 ping 与 sample 轴可能翻转（offset 后）
+        x0, x1 = min(ping_lo, ping_hi), max(ping_lo, ping_hi)
+        y0, y1 = min(sample_lo, sample_hi), max(sample_lo, sample_hi)
+        out = []
+        for i, cell in enumerate(self._grid_cells):
+            if (cell["ping_end"] < x0 or cell["ping_start"] > x1
+                    or cell["sample_end"] < y0 or cell["sample_start"] > y1):
+                continue
+            out.append(i)
+        return out
+
     def _draw_grid_overlay(self) -> None:
-        """绘制网格单元叠加（半透明彩色矩形 + 边框 + 数值标签）"""
+        """绘制 ESU 网格：半透明填充 + 适配浅色底的描边 + 标签（视口裁剪）。"""
         if not self._grid_cells or self._grid_values is None:
             return
 
-        # 构建或使用缓存的颜色数组
         if self._grid_colors_dirty or self._grid_colors_cache is None:
             self._build_grid_colors_cache()
         colors = self._grid_colors_cache
         if colors is None:
             return
 
+        indices = self._visible_grid_indices()
+        self._grid_drawn_cells = len(indices)
+        if not indices:
+            return
+
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-
         alpha = self._grid_alpha
 
-        # 绘制填充矩形（半透明，使用缓存颜色）
         glBegin(GL_QUADS)
-        for i, cell in enumerate(self._grid_cells):
+        for i in indices:
+            cell = self._grid_cells[i]
             r, g, b = colors[i]
+            if not np.isfinite(self._grid_values[i]):
+                continue
             glColor4f(r, g, b, alpha)
-
             x0 = self._offset_x + cell["ping_start"] * self._zoom_x
             x1 = self._offset_x + cell["ping_end"] * self._zoom_x
             y0 = self._offset_y + cell["sample_start"] * self._zoom_y
             y1 = self._offset_y + cell["sample_end"] * self._zoom_y
-
             glVertex2f(x0, y0)
             glVertex2f(x1, y0)
             glVertex2f(x1, y1)
             glVertex2f(x0, y1)
         glEnd()
 
-        # 绘制边框（白色细线）
-        glColor4f(1.0, 1.0, 1.0, 0.8)
+        # 浅色仪器风：深色描边，避免白底上白线不可见
+        glColor4f(0.12, 0.16, 0.2, 0.55)
         glLineWidth(1.0)
         glBegin(GL_LINES)
-        for cell in self._grid_cells:
+        for i in indices:
+            cell = self._grid_cells[i]
             x0 = self._offset_x + cell["ping_start"] * self._zoom_x
             x1 = self._offset_x + cell["ping_end"] * self._zoom_x
             y0 = self._offset_y + cell["sample_start"] * self._zoom_y
             y1 = self._offset_y + cell["sample_end"] * self._zoom_y
-            # 上边
             glVertex2f(x0, y0)
             glVertex2f(x1, y0)
-            # 下边
             glVertex2f(x0, y1)
             glVertex2f(x1, y1)
-            # 左边
             glVertex2f(x0, y0)
             glVertex2f(x0, y1)
-            # 右边
             glVertex2f(x1, y0)
             glVertex2f(x1, y1)
         glEnd()
 
-        # 在足够大的单元格内绘制 mean_sv 数值
-        self._draw_grid_labels()
+        self._draw_grid_labels(indices)
 
     def _build_grid_colors_cache(self) -> None:
         """构建网格颜色缓存数组"""
@@ -816,19 +947,22 @@ class EchogramRenderer(QOpenGLWidget):
         self._grid_colors_cache = colors
         self._grid_colors_dirty = False
 
-    def _draw_grid_labels(self) -> None:
-        """在足够大的网格单元内绘制 mean_sv 数值标签"""
-        # 计算单元格屏幕尺寸，只在足够大时显示文字
-        min_cell_width = 60   # 最小宽度（像素）
-        min_cell_height = 20  # 最小高度（像素）
+    def _draw_grid_labels(self, indices=None) -> None:
+        """在足够大的网格单元内绘制指标数值标签（默认只画视口内单元）。"""
+        min_cell_width = 48
+        min_cell_height = 16
+        if indices is None:
+            indices = range(len(self._grid_cells))
 
-        # 收集需要绘制标签的单元格
         labels_to_draw = []
-        for i, cell in enumerate(self._grid_cells):
+        for i in indices:
+            cell = self._grid_cells[i]
             cell_w = (cell["ping_end"] - cell["ping_start"]) * self._zoom_x
             cell_h = (cell["sample_end"] - cell["sample_start"]) * self._zoom_y
 
             if cell_w >= min_cell_width and cell_h >= min_cell_height:
+                if not np.isfinite(self._grid_values[i]):
+                    continue
                 x0 = self._offset_x + cell["ping_start"] * self._zoom_x
                 x1 = self._offset_x + cell["ping_end"] * self._zoom_x
                 y0 = self._offset_y + cell["sample_start"] * self._zoom_y
@@ -844,6 +978,7 @@ class EchogramRenderer(QOpenGLWidget):
         # 使用 QPainter 绘制文字（在 OpenGL 上下文之上）
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setClipRect(self._plot_rect())
 
         for cx, cy, val, cell_w in labels_to_draw:
             # 根据单元格大小调整字体
@@ -994,19 +1129,34 @@ class EchogramRenderer(QOpenGLWidget):
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         pos = event.position()
+        if not self._n_pings or not self._n_samples or not self._plot_rect().contains(pos.toPoint()):
+            event.accept()
+            return
         sx, sy = float(pos.x()), float(pos.y())
         data_x, data_y = self._screen_to_data(sx, sy)
-        delta = event.angleDelta().y()
-        factor = 1.15 if delta > 0 else 1.0 / 1.15
-        self._zoom_x = max(0.01, min(100.0, self._zoom_x * factor))
-        self._zoom_y = max(0.01, min(100.0, self._zoom_y * factor))
+        # 高精度滚轮按实际步长缩放，零增量不能被误判为缩小。
+        steps = event.angleDelta().y() / 120
+        if not steps:
+            steps = event.pixelDelta().y() / 120
+        if not steps:
+            event.accept()
+            return
+        factor = 1.05 ** max(-20, min(20, steps))
+        rect = self._plot_rect()
+        fit_x, fit_y = rect.width() / self._n_pings, rect.height() / self._n_samples
+        self._zoom_x = min(max(fit_x, self._zoom_x * factor), max(fit_x, 100.0))
+        self._zoom_y = min(max(fit_y, self._zoom_y * factor), max(fit_y, 100.0))
         self._offset_x = sx - data_x * self._zoom_x
         self._offset_y = sy - data_y * self._zoom_y
-        self.zoom_changed.emit(self._zoom_x, self._zoom_y)
+        self._constrain_view()
+        self._emit_zoom()
         self.update()
+        event.accept()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        sx, sy = float(event.x()), float(event.y())
+        if not self._plot_rect().contains(event.position().toPoint()):
+            return
+        sx, sy = float(event.position().x()), float(event.position().y())
 
         if event.button() == Qt.MiddleButton:
             self._panning = True
@@ -1037,7 +1187,11 @@ class EchogramRenderer(QOpenGLWidget):
                 self.update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        sx, sy = float(event.x()), float(event.y())
+        sx, sy = float(event.position().x()), float(event.position().y())
+        rect = self._plot_rect()
+        if not rect.contains(event.position().toPoint()) and not (self._panning or self._selecting or self._bottom_drawing):
+            return
+        sx, sy = min(max(0., sx), rect.width()), min(max(0., sy), rect.height())
         data_x, data_y = self._screen_to_data(sx, sy)
         self.mouse_moved.emit(data_x, data_y)
 
@@ -1046,6 +1200,13 @@ class EchogramRenderer(QOpenGLWidget):
         sample_idx = round(data_y)
         sv_val = self._get_sv_at(ping_idx, sample_idx)
         self.sv_at_cursor.emit(data_x, data_y, sv_val)
+        if not (self._panning or self._selecting or self._bottom_drawing):
+            seam = next((label for ping, label in self._file_seams
+                         if abs(self._data_to_screen(ping, 0)[0] - sx) <= 5), None)
+            if seam:
+                QToolTip.showText(event.globalPosition().toPoint(), seam, self)
+            else:
+                QToolTip.hideText()
 
         # 自由手绘中 — 持续收集采样点
         if self._bottom_drawing and self._mouse_mode == MouseMode.DRAW_BOTTOM:
@@ -1062,7 +1223,8 @@ class EchogramRenderer(QOpenGLWidget):
             self._offset_x += dx
             self._offset_y += dy
             self._pan_start = (sx, sy)
-            self.zoom_changed.emit(self._zoom_x, self._zoom_y)  # 同步导航滑块
+            self._constrain_view()
+            self._emit_zoom()
             self.update()
 
         elif self._selecting:
@@ -1129,18 +1291,17 @@ class EchogramRenderer(QOpenGLWidget):
     def _show_context_menu(self, pos) -> None:
         """显示右键菜单"""
         menu = QMenu(self)
-        if self._colorbar_rect is not None and self._colorbar_rect.contains(pos):
-            menu.addAction("显示设置...", self.display_settings_requested.emit)
-            menu.exec_(self.mapToGlobal(pos))
+        if not self._plot_rect().contains(pos):
             return
-        menu.addAction("🔄 重置视图", self.reset_view)
-        menu.addAction("⬜ 适应窗口", self._fit_to_view_and_update)
+        from src.gui.icons import icon
+        menu.addAction(icon("reset"), "重置视图", self.reset_view)
+        menu.addAction(icon("fit"), "适应窗口", self._fit_to_view_and_update)
         menu.addSeparator()
 
         # ── 翻页 ──
-        act_prev = menu.addAction("◀ 上一页")
+        act_prev = menu.addAction(icon("prev"), "上一页")
         act_prev.triggered.connect(self._emit_prev_page)
-        act_next = menu.addAction("▶ 下一页")
+        act_next = menu.addAction(icon("next"), "下一页")
         act_next.triggered.connect(self._emit_next_page)
         menu.addSeparator()
 
@@ -1151,13 +1312,13 @@ class EchogramRenderer(QOpenGLWidget):
         sample_idx = round(py)
         sv_val = self._get_sv_at(ping_idx, sample_idx)
         if not np.isnan(sv_val):
-            menu.addAction(f"📍 Ping: {ping_idx} | Sample: {sample_idx} | Sv: {sv_val:.1f} dB").setEnabled(False)
+            menu.addAction(f"Ping: {ping_idx} | Sample: {sample_idx} | Sv: {sv_val:.1f} dB").setEnabled(False)
             menu.addSeparator()
 
         # ── 表线 / 分析区域 ──
-        menu.addAction("📏 设置表线深度...", lambda: self.surface_line_requested.emit())
-        menu.addAction("📐 分析区域...", self.analysis_region_requested.emit)
-        act_analysis = menu.addAction("📐 限定分析区域（表线~底线）")
+        menu.addAction(icon("ruler"), "设置表线深度...", lambda: self.surface_line_requested.emit())
+        menu.addAction(icon("ruler"), "分析区域...", self.analysis_region_requested.emit)
+        act_analysis = menu.addAction("限定分析区域（表线~底线）")
         act_analysis.setCheckable(True)
         act_analysis.setChecked(self._analysis_region_enabled)
         act_analysis.triggered.connect(
@@ -1172,20 +1333,20 @@ class EchogramRenderer(QOpenGLWidget):
         data_menu.addAction("SED 单体目标检测...", self.real_sed_requested.emit)
         menu.addSeparator()
 
-        menu.addAction("🔍 重新检测底部", lambda: self.re_detect_bottom.emit())
+        menu.addAction(icon("bottom"), "重新检测底部", lambda: self.re_detect_bottom.emit())
 
         # ── 更新底线（有底线时始终可见）──
         if self._bottom_line is not None:
-            menu.addAction("💾 更新底线", lambda: self.update_bottom_requested.emit())
+            menu.addAction(icon("save"), "更新底线", lambda: self.update_bottom_requested.emit())
 
         # ── 底线绘制模式菜单 ──
         if self._mouse_mode == MouseMode.DRAW_BOTTOM:
             menu.addSeparator()
             if self._bottom_draw_points:
-                menu.addAction("✅ 完成绘制", self._finish_bottom_drawing)
-                menu.addAction("🗑 清除绘制点", self._clear_bottom_drawing)
+                menu.addAction("完成绘制", self._finish_bottom_drawing)
+                menu.addAction("清除绘制点", self._clear_bottom_drawing)
             if self._line_undo_stacks.get(self._active_line_id):
-                menu.addAction("↩ 撤销 (Ctrl+Z)", self._undo_line)
+                menu.addAction(icon("undo"), "撤销 (Ctrl+Z)", self._undo_line)
 
         menu.exec_(self.mapToGlobal(pos))
 
@@ -1360,7 +1521,10 @@ class EchogramRenderer(QOpenGLWidget):
         """在左上角渲染叠加文字"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        font = QFont("Segoe UI", 10, QFont.Bold)
+        painter.setClipRect(self._plot_rect())
+        font = QFont(self.font())
+        font.setPointSize(10)
+        font.setBold(True)
         painter.setFont(font)
         painter.setPen(QColor(255, 255, 255, 200))
 
@@ -1372,79 +1536,6 @@ class EchogramRenderer(QOpenGLWidget):
             painter.drawText(10, y, f"Colormap: {self._cmap_name}  [{self._vmin:.0f}, {self._vmax:.0f}] dB")
         painter.end()
 
-    def _draw_colorbar(self) -> None:
-        """在 echogram 右侧绘制渐变色图例（colorbar）
-
-        布局：
-        - 色条位于右侧边缘，与 echogram 等高
-        - 右侧标注刻度值（Sv dB）
-        """
-        if self._sv_data is None:
-            return
-
-        # ── 布局参数 ──
-        margin_right = 55   # 色条右侧留给刻度文字的宽度
-        bar_width = 20      # 色条宽度（像素）
-
-        w = self.width()
-
-        # 固定到窗口右侧，平移/缩放 Echogram 时保持可见。
-        bar_x = w - margin_right - bar_width
-        bar_y = 28
-        bar_h = max(40, self.height() - 56)
-        self._colorbar_rect = QRect(int(bar_x), int(bar_y), bar_width, int(bar_h))
-
-        # ── 获取 colormap ──
-        try:
-            from matplotlib import colormaps
-            cmap = colormaps[self._cmap_name]
-        except (ImportError, AttributeError):
-            cmap = cm.get_cmap(self._cmap_name)
-
-        # ── 用 QPainter 绘制渐变色条（比逐像素 OpenGL quad 更简洁）──
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        # 绘制渐变色条：从上到下，采样 colormap
-        n_steps = max(int(bar_h), 1)
-        for i in range(n_steps):
-            # 归一化坐标：top=vmax, bottom=vmin（与 echogram Y 轴一致）
-            t = 1.0 - i / max(n_steps - 1, 1)  # 顶部=1(vmax), 底部=0(vmin)
-            r, g, b, _ = cmap(t)
-            painter.setPen(QColor(int(r * 255), int(g * 255), int(b * 255)))
-            painter.drawLine(int(bar_x), int(bar_y + i), int(bar_x + bar_width), int(bar_y + i))
-
-        # ── 绘制刻度文字 ──
-        font = QFont("Segoe UI", 9)
-        painter.setFont(font)
-        painter.setPen(QColor(0, 0, 0))  # 黑色文字
-
-        # 自动计算刻度数量（目标每 60~80 像素一个刻度）
-        target_spacing = 70
-        n_ticks = max(2, min(10, int(bar_h / target_spacing) + 1))
-
-        for i in range(n_ticks):
-            t = i / (n_ticks - 1)  # 0=底部(vmin), 1=顶部(vmax)
-            value = self._vmin + t * (self._vmax - self._vmin)
-            tick_y = bar_y + bar_h - t * bar_h  # 底部=vmin, 顶部=vmax
-
-            # 刻度线
-            painter.drawLine(
-                int(bar_x + bar_width), int(tick_y),
-                int(bar_x + bar_width + 4), int(tick_y)
-            )
-
-            # 刻度标签
-            label = f"{value:.0f}"
-            painter.drawText(int(bar_x + bar_width + 7), int(tick_y + 4), label)
-
-        # ── 标注单位 ──
-        unit_font = QFont("Segoe UI", 8, QFont.Bold)
-        painter.setFont(unit_font)
-        painter.drawText(int(bar_x), int(bar_y - 8), "Sv (dB)")
-
-        painter.end()
-
     def _fit_to_view_and_update(self):
         self._fit_to_view()
         self.update()
@@ -1454,17 +1545,43 @@ class EchogramRenderer(QOpenGLWidget):
     def _fit_to_view(self) -> None:
         if self._n_pings == 0 or self._n_samples == 0:
             return
-        ww = max(self.width(), 200)
-        wh = max(self.height(), 200)
-        margin = 0.05
-        avail_w = ww * (1 - 2 * margin)
-        avail_h = wh * (1 - 2 * margin)
-        self._zoom_x = avail_w / self._n_pings
-        self._zoom_y = avail_h / self._n_samples
-        data_screen_w = self._n_pings * self._zoom_x
-        data_screen_h = self._n_samples * self._zoom_y
-        self._offset_x = (ww - data_screen_w) / 2
-        self._offset_y = (wh - data_screen_h) / 2
+        rect = self._plot_rect()
+        self._zoom_x = rect.width() / self._n_pings
+        self._zoom_y = rect.height() / self._n_samples
+        self._offset_x = self._offset_y = 0.0
+        self._view_size = (rect.width(), rect.height())
+        self._emit_zoom()
+
+    def _constrain_view(self):
+        if not self._n_pings or not self._n_samples:
+            return
+        rect = self._plot_rect()
+        self._zoom_x = max(rect.width() / self._n_pings, self._zoom_x)
+        self._zoom_y = max(rect.height() / self._n_samples, self._zoom_y)
+        self._offset_x = min(0., max(rect.width() - self._n_pings * self._zoom_x, self._offset_x))
+        self._offset_y = min(0., max(rect.height() - self._n_samples * self._zoom_y, self._offset_y))
+
+    def _emit_zoom(self):
+        if self._n_pings and self._n_samples:
+            rect = self._plot_rect()
+            self.zoom_changed.emit(self._zoom_x * self._n_pings / rect.width(),
+                                   self._zoom_y * self._n_samples / rect.height())
+
+    def _draw_file_seams(self):
+        rect = self._plot_rect()
+        glDisable(GL_TEXTURE_2D)
+        glColor4f(1., 1., 1., 0.9)
+        glLineWidth(1.5)
+        glEnable(GL_LINE_STIPPLE)
+        glLineStipple(2, 0x00FF)
+        glBegin(GL_LINES)
+        for ping, _ in self._file_seams:
+            x, _ = self._data_to_screen(ping, 0)
+            if 0 <= x < rect.width():
+                glVertex2f(x, 0)
+                glVertex2f(x, rect.height())
+        glEnd()
+        glDisable(GL_LINE_STIPPLE)
 
     def reset_view(self) -> None:
         self._selecting = False
@@ -1482,7 +1599,7 @@ class EchogramRenderer(QOpenGLWidget):
         """
         if self._n_pings == 0:
             return (0.0, 1.0)
-        ww = max(self.width(), 1)
+        ww = self._plot_rect().width()
         start = -self._offset_x / self._zoom_x / self._n_pings
         end = (ww - self._offset_x) / self._zoom_x / self._n_pings
         start = max(0.0, min(1.0, start))
@@ -1496,10 +1613,12 @@ class EchogramRenderer(QOpenGLWidget):
         """
         if self._n_pings == 0 or self._zoom_x <= 0:
             return
-        ww = max(self.width(), 1)
+        ww = self._plot_rect().width()
         # 目标：可见区域中心对应 [start,end] 的中心
         center_ping = ((start + end) / 2) * self._n_pings
         self._offset_x = ww / 2 - center_ping * self._zoom_x
+        self._constrain_view()
+        self._emit_zoom()
         self.update()
 
     def get_ping_count(self) -> int:

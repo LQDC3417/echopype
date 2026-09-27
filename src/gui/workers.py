@@ -10,6 +10,7 @@
 
 import logging
 import traceback
+from copy import deepcopy
 from dataclasses import dataclass
 from src.gui.i18n import T
 from pathlib import Path
@@ -18,6 +19,11 @@ import numpy as np
 import pandas as pd
 from PySide6.QtCore import QThread, Signal
 
+from src.core.processing import (
+    apply_manual_mask as apply_manual_mask,
+    merge_region_noise_result as merge_region_noise_result,
+    remove_noise,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +45,7 @@ class MergeResult:
     dataset: object
     loaded_files: tuple[str, ...]
     failed_files: tuple[FileFailure, ...]
+    loaded_paths: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -58,36 +65,23 @@ class MultiFileSedResult:
     targets_df: object
     grid_df: object
     failed_files: tuple[FileFailure, ...]
-def apply_manual_mask(ds, manual_mask):
-    """将手动框选的噪声 mask 应用到数据集（写入 Sv_corrected，不覆盖原始 Sv）。"""
-    if manual_mask is None:
-        return ds
-    if "Sv_corrected" not in ds:
-        ds["Sv_corrected"] = ds["Sv"].copy(deep=True)
-    target = ds["Sv_corrected"]
-    sv_arr = target.values.copy()
-    if sv_arr.ndim == 3:
-        if manual_mask.shape == sv_arr.shape[1:]:
-            sv_arr[:, manual_mask] = np.nan
-        else:
-            return ds
-    elif manual_mask.shape == sv_arr.shape:
-        sv_arr[manual_mask] = np.nan
-    else:
-        return ds
-    target.values[:] = sv_arr
-    return ds
+class ReplayProjectWorker(QThread):
+    """在后台重算保存快照，保持当前工作台数据不变。"""
+    finished = Signal(object)
+    error = Signal(str)
+    progress = Signal(str)
 
+    def __init__(self, project_path, output_dir):
+        super().__init__()
+        self.project_path = project_path
+        self.output_dir = output_dir
 
-def merge_region_noise_result(original_ds, analysis_ds, processed_ds):
-    """将区域内去噪结果写回完整数据，区域外保持原始 Sv。"""
-    import xarray as xr
-
-    result = original_ds.copy(deep=True)
-    corrected = processed_ds.get("Sv_corrected", analysis_ds["Sv"])
-    region_mask = analysis_ds["Sv"].notnull()
-    result["Sv_corrected"] = xr.where(region_mask, corrected, original_ds["Sv"])
-    return result
+    def run(self):
+        from src.core.replay import replay_project
+        try:
+            self.finished.emit(replay_project(self.project_path, self.output_dir, self.progress.emit))
+        except Exception:
+            self.error.emit(traceback.format_exc())
 
 
 class LoadFileWorker(QThread):
@@ -99,7 +93,7 @@ class LoadFileWorker(QThread):
     def __init__(self, raw_file: Path, config: dict):
         super().__init__()
         self.raw_file = raw_file
-        self.config = config
+        self.config = deepcopy(config)
 
     def run(self):
         try:
@@ -120,7 +114,7 @@ class ComputeSvWorker(QThread):
     def __init__(self, echodata, config: dict):
         super().__init__()
         self.echodata = echodata
-        self.config = config
+        self.config = deepcopy(config)
 
     def run(self):
         try:
@@ -148,7 +142,7 @@ class MergeFilesWorker(QThread):
     def __init__(self, raw_files: list[Path], config: dict):
         super().__init__()
         self.raw_files = raw_files
-        self.config = config
+        self.config = deepcopy(config)
         self.echodata = None
 
     def run(self):
@@ -161,11 +155,14 @@ class MergeFilesWorker(QThread):
 
         ds_list = []
         loaded_files = []
+        loaded_paths = []
         failed_files = []
         single_echodata = None
         total = len(self.raw_files)
 
         for i, path in enumerate(self.raw_files):
+            if self.isInterruptionRequested():
+                return
             self.progress.emit(T("msg_loading_file", cur=i + 1, total=total, name=path.name))
             self.progress_num.emit(i, total)
             stage = "open_raw"
@@ -173,6 +170,7 @@ class MergeFilesWorker(QThread):
                 echodata = open_single_file(path, self.config)
                 stage = "compute_sv"
                 ds = compute_sv(echodata, self.config)
+                ds = ds.assign_coords(source_file=("ping_time", [str(path.resolve())] * ds.sizes["ping_time"]))
             except Exception as exc:
                 failed_files.append(
                     FileFailure(
@@ -188,10 +186,14 @@ class MergeFilesWorker(QThread):
 
             ds_list.append(ds)
             loaded_files.append(path.name)
+            loaded_paths.append(path)
             single_echodata = echodata
             self.progress_num.emit(i + 1, total)
             # 只发送轻量进度，不把完整 Dataset 交给主线程做增量 vstack。
             self.progress.emit(f"文件完成: {path.name} [{i + 1}/{total}]")
+
+        if self.isInterruptionRequested():
+            return
 
         if not ds_list:
             details = "\n".join(
@@ -216,6 +218,7 @@ class MergeFilesWorker(QThread):
             MergeResult(
                 dataset=merged,
                 loaded_files=tuple(loaded_files),
+                loaded_paths=tuple(loaded_paths),
                 failed_files=tuple(failed_files),
             )
         )
@@ -227,32 +230,21 @@ class NoiseRemovalWorker(QThread):
     error = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, ds_Sv, config: dict, manual_mask=None, analysis_ds=None):
+    def __init__(self, ds_Sv, config: dict, manual_mask=None, analysis_ds=None, automatic=True):
         super().__init__()
         self.ds_Sv = ds_Sv
-        self.config = config
+        self.config = deepcopy(config)
         self.manual_mask = manual_mask
         self.analysis_ds = analysis_ds
+        self.automatic = bool(automatic)
 
     def run(self):
         try:
-            from echopype.clean import remove_background_noise
-            noise_cfg = self.config.get("processing", {}).get("noise_removal", {})
             self.progress.emit(T("msg_removing_noise"))
-            # echopype 0.11.1: remove_background_noise 装饰器 @add_processing_level("L*B")
-            # 要求输入带 input_processing_level 属性，缺失时抛 RuntimeError
-            processing_ds = self.analysis_ds if self.analysis_ds is not None else self.ds_Sv
-            if "input_processing_level" not in processing_ds.attrs:
-                processing_ds.attrs["input_processing_level"] = "L2A"
-            ds = remove_background_noise(
-                processing_ds,
-                ping_num=noise_cfg.get("ping_num", 5),
-                range_sample_num=noise_cfg.get("range_sample_num", 10),
-                SNR_threshold=noise_cfg.get("SNR_threshold", "3.0dB"),
-            )
-            ds = apply_manual_mask(ds, self.manual_mask)
-            if self.analysis_ds is not None:
-                ds = merge_region_noise_result(self.ds_Sv, self.analysis_ds, ds)
+            if self.automatic:
+                ds = remove_noise(self.ds_Sv, self.config, self.manual_mask, self.analysis_ds)
+            else:
+                ds = apply_manual_mask(self.ds_Sv, self.manual_mask)
             self.finished.emit(ds)
         except Exception:
             self.error.emit(traceback.format_exc())
@@ -267,7 +259,7 @@ class DetectSeafloorWorker(QThread):
     def __init__(self, ds_Sv, config: dict):
         super().__init__()
         self.ds_Sv = ds_Sv
-        self.config = config
+        self.config = deepcopy(config)
 
     def run(self):
         try:
@@ -334,7 +326,7 @@ class DetectSchoolsWorker(QThread):
     def __init__(self, ds_Sv, config: dict):
         super().__init__()
         self.ds_Sv = ds_Sv
-        self.config = config
+        self.config = deepcopy(config)
 
     def run(self):
         try:
@@ -397,7 +389,7 @@ class MultifreqAnalysisWorker(QThread):
     def __init__(self, ds_Sv, config, channels=None):
         super().__init__()
         self.ds_Sv = ds_Sv
-        self.config = config
+        self.config = deepcopy(config)
         self.channels = channels
 
     def run(self):
@@ -450,17 +442,19 @@ class RealSedWorker(QThread):
         config,
         upper_depth_m=None,
         lower_depth_m=None,
+        channel_id=None,
     ):
         super().__init__()
         self.echodata = echodata
         self.ds_Sv = ds_Sv
-        self.config = config
+        self.config = deepcopy(config)
         self.upper_depth_m = upper_depth_m
         self.lower_depth_m = lower_depth_m
+        self.channel_id = channel_id
 
     def run(self):
         try:
-            from src.core.acoustic import _detect_waveform_mode
+            from src.core.acoustic import _add_depth, _detect_waveform_mode
             from echopype.calibrate import compute_TS
             from src.core.sed import (
                 aggregate_targets_to_grid,
@@ -469,9 +463,20 @@ class RealSedWorker(QThread):
             )
 
             self.progress.emit(T("msg_real_sed_running"))
-            wm, em = _detect_waveform_mode(self.echodata)
+            wm, em = (
+                _detect_waveform_mode(self.echodata)
+                if self.channel_id is None
+                else _detect_waveform_mode(self.echodata, self.channel_id)
+            )
             ds_TS = compute_TS(self.echodata, waveform_mode=wm, encode_mode=em)
-            targets_df = detect_single_targets_real(self.echodata, ds_TS, self.config)
+            if "echo_range" in ds_TS:
+                ds_TS = _add_depth(ds_TS, self.echodata)
+            if self.channel_id is None:
+                targets_df = detect_single_targets_real(self.echodata, ds_TS, self.config)
+            else:
+                targets_df = detect_single_targets_real(
+                    self.echodata, ds_TS, self.config, channel_id=self.channel_id
+                )
             targets_df = filter_targets_by_region(
                 targets_df, self.upper_depth_m, self.lower_depth_m
             )
@@ -498,13 +503,15 @@ class MultiFileRealSedWorker(QThread):
         config,
         upper_depth_m=None,
         lower_depth_m=None,
+        channel_id=None,
     ):
         super().__init__()
         self.raw_files = [Path(path) for path in raw_files]
         self.ds_Sv = ds_Sv
-        self.config = config
+        self.config = deepcopy(config)
         self.upper_depth_m = upper_depth_m
         self.lower_depth_m = lower_depth_m
+        self.channel_id = channel_id
 
     @staticmethod
     def _ping_time_ns(dataset) -> np.ndarray:
@@ -547,7 +554,7 @@ class MultiFileRealSedWorker(QThread):
     def run(self):
         try:
             from echopype.calibrate import compute_TS
-            from src.core.acoustic import _detect_waveform_mode, open_single_file
+            from src.core.acoustic import _add_depth, _detect_waveform_mode, open_single_file
             from src.core.sed import (
                 aggregate_targets_to_grid,
                 detect_single_targets_real,
@@ -580,14 +587,24 @@ class MultiFileRealSedWorker(QThread):
             try:
                 echodata = open_single_file(path, self.config)
                 stage = "compute_ts"
-                waveform_mode, encode_mode = _detect_waveform_mode(echodata)
+                if self.channel_id is None:
+                    waveform_mode, encode_mode = _detect_waveform_mode(echodata)
+                else:
+                    waveform_mode, encode_mode = _detect_waveform_mode(echodata, self.channel_id)
                 ds_TS = compute_TS(
                     echodata,
                     waveform_mode=waveform_mode,
                     encode_mode=encode_mode,
                 )
+                if "echo_range" in ds_TS:
+                    ds_TS = _add_depth(ds_TS, echodata)
                 stage = "detect_targets"
-                targets_df = detect_single_targets_real(echodata, ds_TS, self.config)
+                if self.channel_id is None:
+                    targets_df = detect_single_targets_real(echodata, ds_TS, self.config)
+                else:
+                    targets_df = detect_single_targets_real(
+                        echodata, ds_TS, self.config, channel_id=self.channel_id
+                    )
                 local_times = self._ping_time_ns(ds_TS)
                 frames.append(
                     self._map_targets(
@@ -708,12 +725,26 @@ class IntegrationWorker(QThread):
     progress = Signal(str)
     progress_percent = Signal(int)
 
-    def __init__(self, ds_Sv, config, surface_depth_m=0.0, max_depth_m=None):
+    def __init__(
+        self, ds_Sv, config, surface_depth_m=0.0, max_depth_m=None,
+        noise_enabled=None, manual_mask=None, line_manager=None,
+        analysis_region=None, region_enabled=False, channel_id="", raw_paths=(),
+    ):
         super().__init__()
         self.ds_Sv = ds_Sv
-        self.config = config
+        self.config = deepcopy(config)
         self.surface_depth_m = surface_depth_m
         self.max_depth_m = max_depth_m
+        self.noise_enabled = noise_enabled
+        self.manual_mask = None if manual_mask is None else manual_mask.copy()
+        self.line_manager = deepcopy(line_manager)
+        self.analysis_region = deepcopy(analysis_region)
+        self.region_enabled = bool(region_enabled)
+        self.channel_id = str(channel_id)
+        self.raw_paths = tuple(raw_paths)
+        self.processed_dataset = None
+        self.analysis_dataset = ds_Sv
+        self.run_metadata = None
 
     def run(self):
         try:
@@ -732,13 +763,28 @@ class IntegrationWorker(QThread):
             ts_default = float(cfg.get("ts_default", -30.0))
 
             self.progress.emit(T("msg_integration_running"))
+            integration_ds = self.ds_Sv
+            if self.noise_enabled is not None:
+                from src.core.processing import prepare_analysis_dataset
+
+                self.processed_dataset, integration_ds = prepare_analysis_dataset(
+                    self.ds_Sv, self.config, self.noise_enabled, self.manual_mask,
+                    self.line_manager, self.analysis_region, self.region_enabled,
+                )
+            self.analysis_dataset = integration_ds
+            max_depth_m = self.max_depth_m
+            if max_depth_m is None and "bottom_depth" in integration_ds:
+                bottom = np.asarray(integration_ds["bottom_depth"].values)
+                valid = bottom[np.isfinite(bottom) & (bottom > 0)]
+                if valid.size:
+                    max_depth_m = float(valid.max())
             grid = create_integration_grid(
-                self.ds_Sv,
+                integration_ds,
                 esu_type=esu_type,
                 esu_size=esu_size,
                 layer_width=layer_width,
                 surface_depth_m=self.surface_depth_m,
-                max_depth_m=self.max_depth_m,
+                max_depth_m=max_depth_m,
             )
 
             def _progress_cb(current: int, total: int):
@@ -746,13 +792,36 @@ class IntegrationWorker(QThread):
                     self.progress_percent.emit(int(current / total * 100))
 
             result = integrate(
-                self.ds_Sv,
+                integration_ds,
                 grid,
                 min_threshold=min_threshold,
                 max_threshold=max_threshold,
                 exclude_below_bottom=False,
                 ts_default_db=ts_default,
                 progress_callback=_progress_cb,
+            )
+            from src.core.provenance import execution_metadata
+
+            self.run_metadata = execution_metadata(
+                self.config,
+                channel_id=self.channel_id,
+                raw_paths=self.raw_paths,
+                noise_enabled=self.noise_enabled,
+                manual_mask=self.manual_mask,
+                line_manager=self.line_manager,
+                analysis_region=self.analysis_region,
+                region_enabled=self.region_enabled,
+                surface_depth_m=self.surface_depth_m,
+                max_depth_m=max_depth_m,
+                integration_settings={
+                    "esu_type": esu_type.value,
+                    "esu_size": esu_size,
+                    "layer_width_m": layer_width,
+                    "min_threshold_db": min_threshold,
+                    "max_threshold_db": max_threshold,
+                    "ts_default_db": ts_default,
+                    "exclude_below_bottom": False,
+                },
             )
             self.finished.emit(result)
 

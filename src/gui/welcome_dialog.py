@@ -3,7 +3,15 @@
 from pathlib import Path
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QListWidget, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QPushButton,
+    QVBoxLayout,
+)
 
 
 class WelcomeDialog(QDialog):
@@ -15,23 +23,47 @@ class WelcomeDialog(QDialog):
 
     def __init__(self, recent_projects: list[str], parent=None):
         super().__init__(parent)
+        self.setObjectName("welcomeDialog")
         self.setWindowTitle("欢迎使用")
         self.setModal(False)
-        self.resize(460, 280)
+        self.resize(440, 300)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("创建或打开一个 .ep 项目"))
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        card = QFrame()
+        card.setObjectName("welcomeCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(22, 20, 22, 18)
+        card_layout.setSpacing(10)
+
+        title = QLabel("欢迎使用")
+        title.setObjectName("welcomeTitle")
+        card_layout.addWidget(title)
+        subtitle = QLabel("导入声学数据或打开已有项目，开始分析。")
+        subtitle.setObjectName("welcomeSubtitle")
+        card_layout.addWidget(subtitle)
+
         buttons = QHBoxLayout()
-        self.new_button = QPushButton("新建项目（导入 .raw）")
-        self.open_button = QPushButton("打开 .ep 项目")
+        buttons.setSpacing(10)
+        self.new_button = QPushButton("导入 .raw")
+        self.new_button.setObjectName("importRawButton")
+        self.new_button.setProperty("cssClass", "primary")
+        self.open_button = QPushButton("打开项目")
+        self.open_button.setObjectName("openProjectButton")
         buttons.addWidget(self.new_button)
         buttons.addWidget(self.open_button)
-        layout.addLayout(buttons)
+        card_layout.addLayout(buttons)
+
+        recent_title = QLabel("最近项目")
+        recent_title.setObjectName("recentProjectsTitle")
+        card_layout.addWidget(recent_title)
         self.recent_list = QListWidget()
+        self.recent_list.setObjectName("recentProjects")
         for project in recent_projects:
             self.recent_list.addItem(f"{Path(project).name} — {project}")
             self.recent_list.item(self.recent_list.count() - 1).setData(256, project)
-        layout.addWidget(QLabel("最近项目"))
-        layout.addWidget(self.recent_list, 1)
+        card_layout.addWidget(self.recent_list, 1)
+        layout.addWidget(card)
         self.new_button.clicked.connect(self.new_project_requested)
         self.open_button.clicked.connect(self.open_project_requested)
         self.recent_list.itemActivated.connect(lambda item: self.recent_project_requested.emit(item.data(256)))

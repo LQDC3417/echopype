@@ -9,6 +9,8 @@ from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
+from src.gui.theme import CHROME_COLORS
+
 
 _ICON_DIR = Path(__file__).with_name("assets") / "icons"
 _ICON_FILES = {
@@ -64,8 +66,8 @@ def icon(name: str, size: int = 22) -> QIcon:
     """构建包含默认、悬停、选中和禁用状态的 QIcon。"""
     svg = icon_path(name).read_text(encoding="utf-8")
     result = QIcon()
-    result.addPixmap(_render_svg(svg, "#d7e1e8", size), QIcon.Mode.Normal, QIcon.State.Off)
-    result.addPixmap(_render_svg(svg, "#00cbea", size), QIcon.Mode.Active, QIcon.State.Off)
-    result.addPixmap(_render_svg(svg, "#00cbea", size), QIcon.Mode.Normal, QIcon.State.On)
-    result.addPixmap(_render_svg(svg, "#65717c", size), QIcon.Mode.Disabled, QIcon.State.Off)
+    result.addPixmap(_render_svg(svg, CHROME_COLORS["secondary"], size), QIcon.Mode.Normal, QIcon.State.Off)
+    result.addPixmap(_render_svg(svg, CHROME_COLORS["accent"], size), QIcon.Mode.Active, QIcon.State.Off)
+    result.addPixmap(_render_svg(svg, CHROME_COLORS["accent"], size), QIcon.Mode.Normal, QIcon.State.On)
+    result.addPixmap(_render_svg(svg, CHROME_COLORS["disabled"], size), QIcon.Mode.Disabled, QIcon.State.Off)
     return result

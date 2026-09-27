@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from src.core.region import get_echo_range_1d
 from src.core.utils import get_sv_array, sv_to_linear
 
 logger = logging.getLogger("fish_acoustics")
@@ -39,18 +38,25 @@ def abc_integral(sv_linear: np.ndarray, dr: np.ndarray, axis=None):
 
 def _get_depth_resolution(ds_Sv: xr.Dataset) -> np.ndarray:
     """获取深度分辨率 dr，shape 与 Sv 一致 (n_pings, n_samples) 或 (n_samples,)。"""
-    er = get_echo_range_1d(ds_Sv)
-    if er is None:
-        sv = get_sv_array(ds_Sv)
-        return np.ones_like(sv)
-    # 计算相邻深度差
-    dr = np.abs(np.diff(er))
-    dr = np.append(dr, dr[-1])
-    # 如果 Sv 是 2D，广播 dr
     sv = get_sv_array(ds_Sv)
-    if sv.ndim == 2 and dr.ndim == 1:
-        dr = np.broadcast_to(dr, sv.shape)
-    return dr
+    if "echo_range" not in ds_Sv:
+        return np.ones_like(sv)
+    er = ds_Sv["echo_range"]
+    if "channel" in er.dims:
+        er = er.isel(channel=0)
+    if "ping_time" in er.dims:
+        er = er.transpose("ping_time", "range_sample").values
+    else:
+        er = er.transpose("range_sample").values
+    if er.shape[-1] < 2:
+        raise ValueError("至少需要两个深度样本才能确定积分采样厚度")
+    dr = np.abs(np.diff(er, axis=-1))
+    forward = np.concatenate([dr, dr[..., -1:]], axis=-1)
+    previous = np.concatenate([dr[..., :1], dr], axis=-1)
+    # 有效段末点沿用前一采样厚度，与完整 ping 的末点规则一致；缺测点不补数据。
+    dr = np.where(np.isfinite(er) & ~np.isfinite(forward), previous, forward)
+    return np.broadcast_to(dr, sv.shape)
+
 
 
 def density_from_abc(abc: float, ts_default_db: float = -30.0) -> float:

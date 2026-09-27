@@ -77,7 +77,8 @@ class AnalysisMixin:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return
         self.statusbar.show_progress(T("msg_multifreq_analyzing"))
-        worker = MultifreqAnalysisWorker(self._get_analysis_ds(), self._config)
+        # 多频比较只使用原始全通道数据，不混入单通道去噪与人工标注。
+        worker = MultifreqAnalysisWorker(self._ds_Sv_all, self._config)
         worker.progress.connect(self.statusbar.set_status)
         if not self._start_worker(worker, self._on_multifreq_done):
             return
@@ -150,6 +151,7 @@ class AnalysisMixin:
                 self._config,
                 upper_depth_m=upper_depth_m,
                 lower_depth_m=lower_depth_m,
+                channel_id=self._current_channel,
             )
         else:
             worker = RealSedWorker(
@@ -158,14 +160,15 @@ class AnalysisMixin:
                 self._config,
                 upper_depth_m=upper_depth_m,
                 lower_depth_m=lower_depth_m,
+                channel_id=self._current_channel,
             )
         worker.progress.connect(self.statusbar.set_status)
         if not self._start_worker(worker, self._on_real_sed_done):
             return
+        self._mark_results_stale("real_sed")
 
     def _on_real_sed_done(self, result):
         """真实 SED 完成 → 展示网格聚合表 + echogram 叠加（逐目标）"""
-        self._stale_results.discard("real_sed")
         self.statusbar.hide_progress()
         failures = getattr(result, "failed_files", ())
         if hasattr(result, "targets_df"):
@@ -173,20 +176,25 @@ class AnalysisMixin:
         else:
             targets_df, grid_df = result
         if failures:
+            self._incomplete_results.add("real_sed")
             details = "\n".join(
                 f"SED 文件失败: {failure.path} [{failure.stage}]: {failure.error}"
                 for failure in failures
             )
             self._append_error_message(details)
+            self._stale_results.add("real_sed")
+        else:
+            self._incomplete_results.discard("real_sed")
+            self._stale_results.discard("real_sed")
         n = len(targets_df) if targets_df is not None and not targets_df.empty else 0
-        if n == 0:
-            self.echogram.clear_single_targets()
-            QMessageBox.information(self, T("msg_real_sed_done"), T("msg_real_sed_none"))
-            return
         self._real_sed_df = targets_df
         self._real_sed_grid_df = grid_df
-        self._stale_results.discard("real_sed")
         self.stats_dialog.update_real_sed(grid_df)
+        if n == 0:
+            self.echogram.clear_single_targets()
+            self._refresh_workbench()
+            QMessageBox.information(self, T("msg_real_sed_done"), T("msg_real_sed_none"))
+            return
         self.echogram.set_single_targets(targets_df)
         self.statusbar.set_status(T("msg_real_sed_done", n=n))
         self._show_stats()

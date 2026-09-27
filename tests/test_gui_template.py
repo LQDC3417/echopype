@@ -8,7 +8,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication, QScrollArea, QTabWidget
+from PySide6.QtWidgets import QApplication, QTabWidget
 
 from src.gui.property_panel import PropertyPanel
 
@@ -38,16 +38,17 @@ def test_light_template_exposes_workbench_regions(qapp):
 
     window.close()
 def test_live_property_panel_is_single_scrollable_page(qapp):
-    """实际主窗口属性区应使用单页滚动布局，而不是多页签切换。"""
+    """属性区为 ESP3 任务页（Processing 等），不是旧 Accordion 单页。"""
     panel = PropertyPanel()
     try:
         assert not isinstance(panel, QTabWidget)
-        scroll = panel.findChild(QScrollArea, "propertyScroll")
-        assert scroll is not None
+        tabs = panel.findChild(QTabWidget, "propertyTaskTabs")
+        assert tabs is not None
         assert panel.file_info is not None
         assert panel.display is not None
         assert panel.processing is not None
         assert panel.stats is not None
+        assert panel.btn_apply_current is not None
     finally:
         panel.close()
 

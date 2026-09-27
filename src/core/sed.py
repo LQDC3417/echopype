@@ -149,6 +149,7 @@ def detect_single_targets_real(
     echodata,
     ds_TS,
     config: dict,
+    channel_id: str | None = None,
 ) -> pd.DataFrame:
     """真实单体目标检测主函数。
 
@@ -187,9 +188,26 @@ def detect_single_targets_real(
 
     # 1. 提取数据
     bg = echodata["Sonar/Beam_group1"]
-    ts = ds_TS["TS"].values
-    if ts.ndim == 3:
-        ts = ts[0]  # (n_pings, n_samples)
+    ts_data = ds_TS["TS"]
+    def select_channel(data, label):
+        values = list(data["channel"].values if isinstance(data, xr.Dataset) else data.channel.values)
+        lookup = {
+            value.decode("utf-8") if isinstance(value, bytes) else str(value): value
+            for value in values
+        }
+        if label is None:
+            if len(values) != 1:
+                raise ValueError("多通道 SED 必须指定 channel_id")
+            label = next(iter(lookup))
+        if str(label) not in lookup:
+            raise ValueError(f"SED 输入中不存在所选通道：{label}")
+        return data.sel(channel=[lookup[str(label)]]), str(label)
+
+    if "channel" in ts_data.dims:
+        ts_data, channel_id = select_channel(ts_data, channel_id)
+    if "channel" in bg.dims:
+        bg, channel_id = select_channel(bg, channel_id)
+    ts = ts_data.transpose("ping_time", "range_sample").values
     n_pings, n_samples = ts.shape
 
     # 复采样 (n_pings, n_samples, 4)
@@ -220,19 +238,29 @@ def detect_single_targets_real(
     # echo_range（用于深度）
     # 注意：部分 EK80 数据 compute_TS 的 echo_range 坐标仅覆盖前段，
     # 之后为 NaN。从有效段推导采样间距 Δr，重建完整 range。
-    echo_range = None
-    dr = 0.003  # 默认采样间距（米）
-    if "echo_range" in ds_TS:
-        er = ds_TS["echo_range"].values
-        while er.ndim > 1:
-            er = er[0]
+    if "echo_range" not in ds_TS:
+        raise ValueError("SED 需要 echo_range 米制坐标，不能用采样索引代替距离")
+    er_data = ds_TS["echo_range"]
+    if "channel" in er_data.dims:
+        if channel_id is None:
+            raise ValueError("SED 距离坐标存在多通道但未指定 channel_id")
+        er_data, _ = select_channel(er_data, channel_id)
+    ranges = er_data.broadcast_like(ts_data).transpose("ping_time", "range_sample").values.copy()
+    for er in ranges:
         valid = np.isfinite(er)
-        if np.any(valid):
+        if np.count_nonzero(valid) >= 2:
             vidx = np.where(valid)[0]
-            if len(vidx) >= 2:
-                dr = float((er[vidx[1]] - er[vidx[0]]) / (vidx[1] - vidx[0]))
+            dr = float((er[vidx[1]] - er[vidx[0]]) / (vidx[1] - vidx[0]))
             first_valid = int(vidx[0])
-            echo_range = er[first_valid] + (np.arange(len(er), dtype=np.float64) - first_valid) * dr
+            er[~valid] = (er[first_valid] + (np.arange(len(er)) - first_valid) * dr)[~valid]
+    depths = ranges
+    if "depth" in ds_TS:
+        depth_data = ds_TS["depth"]
+        if "channel" in depth_data.dims:
+            if channel_id is None:
+                raise ValueError("SED 深度坐标存在多通道但未指定 channel_id")
+            depth_data, _ = select_channel(depth_data, channel_id)
+        depths = depth_data.broadcast_like(ts_data).transpose("ping_time", "range_sample").values
 
     logger.info(
         f"SED 参数: threshold={ts_threshold} dB, PLDL={pldl} dB, "
@@ -251,12 +279,14 @@ def detect_single_targets_real(
             left, right = cand["left"], cand["right"]
 
             # 深度范围过滤
-            if echo_range is not None:
-                depth_m = float(echo_range[peak_idx])
-                if min_depth_m is not None and depth_m < min_depth_m:
-                    continue
-                if max_depth_m is not None and depth_m > max_depth_m:
-                    continue
+            range_m = float(ranges[ping, peak_idx])
+            depth_m = float(depths[ping, peak_idx])
+            if not np.isfinite(range_m) or not np.isfinite(depth_m):
+                continue
+            if min_depth_m is not None and depth_m < min_depth_m:
+                continue
+            if max_depth_m is not None and depth_m > max_depth_m:
+                continue
 
             # 分裂波束测角（脉冲窗口内逐样本）
             if complex_data is not None:
@@ -300,7 +330,8 @@ def detect_single_targets_real(
             records.append({
                 "ping_idx": ping,
                 "sample_idx": peak_idx,
-                "range_m": depth_m if echo_range is not None else float(peak_idx),
+                "range_m": range_m,
+                "depth_m": depth_m,
                 "ts_db": ts_compensated,
                 "ts_uncompensated_db": cand["peak_ts"],
                 "alongship_deg": along_mean,
@@ -314,10 +345,12 @@ def detect_single_targets_real(
     if records:
         df = pd.DataFrame(records)
         df.insert(0, "target_id", range(1, len(df) + 1))
+        if channel_id is not None:
+            df.insert(1, "channel", str(channel_id))
         logger.info(f"真实 SED 检测到 {len(df)} 个单体目标")
         return df
     return pd.DataFrame(columns=[
-        "target_id", "ping_idx", "sample_idx", "range_m", "ts_db",
+        "target_id", "channel", "ping_idx", "sample_idx", "range_m", "depth_m", "ts_db",
         "ts_uncompensated_db", "alongship_deg", "athwartship_deg",
         "pulse_len", "norm_pulse", "beam_comp_db", "angle_std_deg",
     ])
@@ -348,7 +381,7 @@ def filter_targets_by_region(
         raise ValueError("SED targets require ping_idx and range_m columns")
 
     ping_values = pd.to_numeric(targets_df["ping_idx"], errors="coerce").to_numpy()
-    depth_values = pd.to_numeric(targets_df["range_m"], errors="coerce").to_numpy()
+    depth_values = pd.to_numeric(targets_df.get("depth_m", targets_df["range_m"]), errors="coerce").to_numpy()
     integer_ping = np.isfinite(ping_values) & (ping_values == np.floor(ping_values))
     ping_indices = np.zeros(len(targets_df), dtype=np.int64)
     ping_indices[integer_ping] = ping_values[integer_ping].astype(np.int64)
@@ -416,13 +449,14 @@ def aggregate_targets_to_grid(
 
     # 目标 → 网格单元映射
     interval_idx = np.searchsorted(grid.ping_end, targets_df["ping_idx"].values, side="right")
-    layer_idx = np.searchsorted(grid.depth_end, targets_df["range_m"].values, side="right")
+    target_depth = targets_df.get("depth_m", targets_df["range_m"]).values
+    layer_idx = np.searchsorted(grid.depth_end, target_depth, side="right")
 
     # 越界目标剔除（ping 超出最后 interval、深度超出最后 layer）
     valid = (
         (interval_idx < grid.n_intervals)
         & (layer_idx < grid.n_layers)
-        & (targets_df["range_m"].values >= grid.depth_start[0])
+        & (target_depth >= grid.depth_start[0])
     )
     interval_idx = interval_idx[valid]
     layer_idx = layer_idx[valid]

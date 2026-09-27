@@ -1,10 +1,11 @@
 """Mixin: 处理流水线：Sv计算、噪声去除、底部检测、鱼群检测、网格分析"""
 
 import logging
+from copy import deepcopy
 
 import numpy as np
 from src.gui.i18n import T
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 from src.core.utils import squeeze_sv
@@ -34,6 +35,7 @@ class ProcessingMixin:
             return
 
     def _on_sv_computed(self, ds_Sv):
+        self._noise_applied = False
         self._ds_Sv = ds_Sv
         self._ds_Sv_analysis = None  # 清除裁剪缓存，等待后续重新裁剪
         self.statusbar.hide_progress()
@@ -48,55 +50,98 @@ class ProcessingMixin:
             QTimer.singleShot(200, self._apply_noise_params)
 
     def _on_noise_params_changed(self, params):
-        # 参数变更只标记结果过期；实际运行由参数弹窗的 Apply/确定触发。
-        self._mark_results_stale("bottom", "schools", "integration")
+        self._merge_ui_config({"processing": {"noise_removal": params}})
+        self._mark_results_stale("noise", "bottom", "schools", "integration", "real_sed")
 
-    def _on_bottom_params_changed(self, _params):
+    def _on_bottom_params_changed(self, params):
+        self._merge_ui_config({"processing": {"bottom_detection": params}})
         self._mark_results_stale("schools", "integration", "real_sed")
 
-    def _on_school_params_changed(self, _params):
-        self._mark_results_stale("integration", "real_sed")
+    def _on_school_params_changed(self, params):
+        self._merge_ui_config({"school_detection": params})
+        self._mark_results_stale("schools")
 
-    def _on_integration_params_changed(self, _params):
+    def _on_integration_params_changed(self, params):
+        self._merge_ui_config({"integration": params})
         self._mark_results_stale("integration")
 
+    def _on_real_sed_params_changed(self, params):
+        self._merge_ui_config({"single_target_real": params})
+        self._mark_results_stale("real_sed")
+
+    def _merge_ui_config(self, updates):
+        """只更新界面负责的配置字段，保留调查与设备配置。"""
+        if self._config is None:
+            self._config = {}
+
+        def merge(target, patch):
+            for key, value in patch.items():
+                if isinstance(value, dict) and isinstance(target.get(key), dict):
+                    merge(target[key], value)
+                elif isinstance(value, dict):
+                    target[key] = deepcopy(value)
+                else:
+                    target[key] = deepcopy(value)
+
+        merge(self._config, updates)
+
     def _apply_all_params(self):
-        """应用全部参数：保存配置 → 更新config → 触发处理"""
-        if self._ds_Sv is None:
-            QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
-            return
-
-        # 保存配置到QSettings
+        """保存面板配置；分析由用户通过对应按钮明确启动。"""
         self.property_panel.save_settings()
-
-        # 从UI获取所有配置并更新config
-        ui_config = self.property_panel.get_all_config()
-        self._config = ui_config
-
-        # 更新状态栏
+        self._merge_ui_config(self.property_panel.get_all_config())
         self.statusbar.set_status(T("msg_params_applied"))
 
-        # 触发噪声去除（第一步）
-        self._apply_noise_params()
+    def _on_noise_policy_changed(self, check_state):
+        """明确保存重算时是否运行自动去噪；部分勾选表示旧项目策略未知。"""
+        if int(check_state) == int(Qt.PartiallyChecked):
+            self._noise_enabled = None
+            return
+        enabled = int(check_state) == int(Qt.Checked)
+        if self._noise_enabled is enabled:
+            return
+        self._noise_enabled = enabled
+        if enabled:
+            self._mark_results_stale("noise", "bottom", "schools", "integration", "real_sed")
+        elif self._ds_Sv is not None:
+            self._channel_corrected.pop(self._current_channel, None)
+            self._activate_channel(self._current_channel, restore_state=False)
+            if self._noise_mask_manual is not None:
+                self._apply_noise_params(automatic=False)
+                return
+            self._noise_applied = False
+            self.echogram.set_data(squeeze_sv(self._ds_Sv["Sv"].values))
+            self._mark_results_stale("noise", "bottom", "schools", "integration", "real_sed")
 
-    def _apply_noise_params(self):
+    def _apply_noise_params(self, automatic=True):
         if self._ds_Sv is None or self._config is None:
             return
         # 从 UI 同步噪声参数到 config
-        self._config.setdefault("processing", {})["noise_removal"] = (
-            self.property_panel.processing.get_noise_config()
-        )
+        self._merge_ui_config({"processing": {"noise_removal":
+            self.property_panel.processing.get_noise_config()}})
         self.pipeline_step.emit(T("pipeline_noise"))
         self.statusbar.show_progress(T("msg_removing_noise"))
         analysis_ds = self._get_analysis_ds() if self._analysis_region_enabled else None
         worker = NoiseRemovalWorker(
-            self._ds_Sv, self._config, self._noise_mask_manual, analysis_ds=analysis_ds
+            self._ds_Sv, self._config, self._noise_mask_manual,
+            analysis_ds=analysis_ds if automatic else None, automatic=automatic,
         )
         if not self._start_worker(worker, self._on_noise_removed):
             return
+        if automatic:
+            self._noise_enabled = True
+            checkbox = self.property_panel.processing.chk_noise_enabled
+            checkbox.blockSignals(True)
+            checkbox.setCheckState(Qt.Checked)
+            checkbox.blockSignals(False)
+        self._mark_results_stale("noise", "bottom", "schools", "integration", "real_sed")
 
     def _on_noise_removed(self, ds_Sv):
+        self._noise_applied = "Sv_corrected" in ds_Sv
+        self._stale_results.discard("noise")
+        self._mark_results_stale("bottom", "schools", "integration", "real_sed")
         self._ds_Sv = ds_Sv
+        if "Sv_corrected" in ds_Sv:
+            self._channel_corrected[self._current_channel] = ds_Sv["Sv_corrected"].copy(deep=False)
         self._ds_Sv_analysis = None  # 清除裁剪缓存，等待后续重新裁剪
         self.statusbar.hide_progress()
 
@@ -126,10 +171,13 @@ class ProcessingMixin:
         # 同步更新缓存中当前文件的 ds
         cache = self._file_cache.get("merged")
         if cache is not None:
-            cache["ds"] = ds_Sv
+            cache["ds"] = self._ds_Sv_all
 
         if getattr(self, "_run_all_chain", False):
             QTimer.singleShot(200, self._detect_bottom)
+        elif getattr(self, "_continue_integration_after_noise", False):
+            self._continue_integration_after_noise = False
+            QTimer.singleShot(0, self._run_integration)
 
     def _detect_bottom(self):
         if self._ds_Sv is None or self._config is None:
@@ -138,6 +186,8 @@ class ProcessingMixin:
         # 手动编辑过的底线不自动覆盖
         if self._bottom_manually_edited and self._bottom_line is not None:
             self.statusbar.set_status(T("msg_bottom_manually_edited"))
+            if getattr(self, "_run_all_chain", False):
+                QTimer.singleShot(200, self._detect_schools)
             return
         # 同步 UI 参数到 config
         self._config.setdefault("processing", {})["bottom_detection"] = {
@@ -150,6 +200,7 @@ class ProcessingMixin:
         worker.progress.connect(self.statusbar.set_status)
         if not self._start_worker(worker, self._on_bottom_detected):
             return
+        self._mark_results_stale("bottom", "schools", "integration", "real_sed")
     def _on_bottom_detected(self, bottom_result):
         if isinstance(bottom_result, BottomDetectionResult):
             bottom = bottom_result.indices
@@ -171,6 +222,15 @@ class ProcessingMixin:
         self._stale_results.discard("bottom")
         valid_count = int(np.isfinite(bottom).sum())
         if valid_count == 0:
+            self._run_all_chain = False
+            self._invalidate_analysis_region_cache()
+            if hasattr(self, "line_manager"):
+                self.line_manager.set_line_data(
+                    self.line_manager.BOTTOM_ID,
+                    self._bottom_line,
+                    np.asarray(self._ds_Sv["ping_time"].values),
+                    kind="detected",
+                )
             self.echogram.set_bottom_line(self._bottom_line)
             self.statusbar.hide_progress()
             message = f"底线检测完成，但结果全部为空：有效点 0/{total_count}"
@@ -250,6 +310,8 @@ class ProcessingMixin:
     def _invalidate_analysis_region_cache(self) -> None:
         self._ds_Sv_analysis = None
         self._analysis_region_cache_key = None
+        if hasattr(self, "_mark_results_stale"):
+            self._mark_results_stale("schools", "integration", "real_sed")
 
     def _sync_lines_to_renderer(self) -> None:
         """解析可见米深线，并转换为 Renderer 使用的 sample index。"""
@@ -397,9 +459,12 @@ class ProcessingMixin:
 
     def _on_analysis_region_toggle(self, enabled: bool):
         """切换分析区域限定：开启时裁剪 ds_Sv，关闭时恢复完整数据"""
+        if self._analysis_region_enabled == bool(enabled):
+            return
         self._analysis_region_enabled = enabled
         self.echogram.set_analysis_region_enabled(enabled)
         self._apply_analysis_region_to_ds()
+        self._mark_results_stale("noise", "bottom", "schools", "integration", "real_sed")
         if enabled:
             self.statusbar.set_status(T("msg_analysis_region_on"))
         else:
@@ -419,6 +484,7 @@ class ProcessingMixin:
         worker = DetectSchoolsWorker(ds_for_detect, self._config)
         if not self._start_worker(worker, self._on_schools_detected):
             return
+        self._mark_results_stale("schools")
 
     def _on_schools_detected(self, mask):
         # 将 mask 转换为 xr.DataArray
@@ -426,6 +492,7 @@ class ProcessingMixin:
 
         from src.core.school import schools_to_dataframe
         mask_da = xr.DataArray(mask) if not isinstance(mask, xr.DataArray) else mask
+        self._incomplete_results.discard("schools")
         self._stale_results.discard("schools")
         self._schools_mask = mask_da.values if hasattr(mask_da, "values") else mask_da
         self.echogram.set_school_mask(self._schools_mask)
@@ -477,43 +544,64 @@ class ProcessingMixin:
         if self._ds_Sv is None or self._config is None:
             QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
             return
+        active_worker = getattr(self, "_current_worker", None)
+        if active_worker is not None and active_worker.isRunning():
+            return
+        if getattr(self, "_noise_enabled", False) is None:
+            QMessageBox.information(
+                self, T("dialog_warning"),
+                "当前项目的自动去噪策略尚未确认，请先在处理面板明确选择后再重算。",
+            )
+            return
 
         # 从 UI 同步积分配置到 config
         integ_cfg = self.property_panel.processing.get_integration_config()
         self._config.setdefault("integration", {}).update(integ_cfg)
 
-        # 统一使用 _get_analysis_ds() 获取裁剪后的数据（表线→底线区域）
-        ds_for_integ = self._get_analysis_ds()
-        if ds_for_integ is None:
-            QMessageBox.warning(self, T("dialog_warning"), T("msg_load_data_first"))
+        if self._noise_enabled and (
+            not self._noise_applied or "noise" in self._stale_results
+        ):
+            self._continue_integration_after_noise = True
+            self._apply_noise_params(automatic=True)
             return
 
-        # 计算底线最大深度（米），用于限制积分层范围（与网格分析一致）
-        max_depth_m = None
-        if "bottom_depth" in ds_for_integ:
-            bd = ds_for_integ["bottom_depth"].values
-            if bd.ndim > 1:
-                bd = bd.flatten()
-            valid_bd = bd[np.isfinite(bd)]
-            positive_bd = valid_bd[valid_bd > 0]
-            if len(positive_bd) > 0:
-                max_depth_m = float(np.max(positive_bd))
-            elif len(valid_bd) > 0:
-                max_depth_m = float(np.max(valid_bd))
+        self._mark_results_stale("integration")
 
         self.statusbar.show_progress(T("msg_integration_running"))
-        self._ds_for_integration = ds_for_integ
         worker = IntegrationWorker(
-            ds_for_integ, self._config,
+            self._ds_Sv, self._config,
             surface_depth_m=self._surface_depth_m,
-            max_depth_m=max_depth_m,
+            noise_enabled=self._noise_enabled,
+            manual_mask=self._noise_mask_manual,
+            line_manager=self.line_manager,
+            analysis_region=self.analysis_region,
+            region_enabled=self._analysis_region_enabled,
+            channel_id=self._current_channel,
+            raw_paths=getattr(self, "_current_raw_files", ()),
         )
         worker.progress.connect(self.statusbar.set_status)
-        if not self._start_worker(worker, self._on_integration_done):
-            return
+        self._start_worker(worker, self._on_integration_done)
 
     def _on_integration_done(self, result):
         """回声积分完成 → 展示结果表格 + echogram 网格叠加"""
+        worker = self._current_worker
+        if worker is not None and worker.run_metadata is not None:
+            state = self._channel_states.setdefault(self._current_channel, {})
+            state.setdefault("result_provenance", {})["integration"] = worker.run_metadata
+        if worker is not None and worker.analysis_dataset is not None:
+            self._ds_for_integration = worker.analysis_dataset
+            self._ds_Sv_analysis = worker.analysis_dataset
+        if worker is not None and worker.processed_dataset is not None:
+            self._ds_Sv = worker.processed_dataset
+            self._noise_applied = "Sv_corrected" in self._ds_Sv
+            self._channel_corrected.pop(self._current_channel, None)
+            if self._noise_applied:
+                self._channel_corrected[self._current_channel] = self._ds_Sv["Sv_corrected"].copy(deep=False)
+            self._stale_results.discard("noise")
+            cache = self._file_cache.get("merged")
+            if cache is not None:
+                cache["ds"] = self._ds_Sv_all
+        self._incomplete_results.discard("integration")
         self._stale_results.discard("integration")
         self._integration_result = result
         self._stale_results.discard("integration")
@@ -521,14 +609,23 @@ class ProcessingMixin:
         df = result.to_dataframe()
         self._integration_df = df
         self.stats_dialog.update_integration(df)
+        self.property_panel.update_integration_preview(df)
+        self.property_panel.show_task("integration")
         self.statusbar.set_status(T("msg_integration_done", n=len(df)))
         # echogram 网格叠加（按 mean_Sv 着色，列名映射到渲染器期望格式）
         try:
             overlay_df = df.rename(columns={"depth_start": "depth_lo", "depth_end": "depth_hi"})
             self.echogram.set_grid_data(overlay_df, self._ds_for_integration, color_by="mean_Sv")
+            summary = self.echogram.grid_summary() if hasattr(self.echogram, "grid_summary") else None
+            if summary:
+                self.statusbar.set_status(
+                    f"{T('msg_integration_done', n=len(df))} · ESU {summary.get('n_cells', 0)} "
+                    f"({summary.get('color_by', 'mean_Sv')} "
+                    f"{summary.get('vmin', 0):.1f}~{summary.get('vmax', 0):.1f} dB)"
+                )
         except Exception:
             logger.exception("积分结果叠加到 echogram 失败")
-        self._show_stats()
+        # 结果已在右栏 Echo Integration 页预览；仍同步对话框数据源
 
     # ═══════════════════════════════════════════════════════
     # 质量检查
