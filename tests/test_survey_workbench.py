@@ -102,12 +102,47 @@ def test_saved_snapshot_reopens_with_mask_and_unverified_results(qapp, tmp_path)
         assert window._bottom_manually_edited
         assert {"integration", "noise"} <= window._stale_results
         assert np.isnan(window._ds_Sv.Sv_corrected.values[0, 0])
+        assert np.isnan(window.echogram.get_data()[0, 0])
         assert np.isfinite(ds.Sv.values).all()
         assert window.left_panel.project_summary.text() == "淡水验证"
         assert "25 pings" in window.left_panel.survey_status.text()
         snapshot = EpProject()
         window._copy_gui_state_to_project(snapshot)
         assert snapshot.processing_state["noise_applied"] is False
+    finally:
+        window.close()
+
+
+def test_channel_switch_uses_channel_data_and_clears_old_overlays(qapp):
+    import numpy as np
+    import xarray as xr
+
+    from src.gui.main_window import MainWindow
+
+    ds = xr.Dataset(
+        {"Sv": (("channel", "ping_time", "range_sample"),
+                np.array([[[-50., -51.], [-52., -53.]],
+                          [[-60., -61.], [-62., -63.]]]))},
+        coords={"channel": ["A", "B"], "ping_time": [0, 1],
+                "range_sample": [0, 1], "echo_range": ("range_sample", [3., 4.])},
+    )
+    window = MainWindow()
+    try:
+        window._apply_sv_to_display(ds, ds.Sv.values)
+        window.echogram._grid_cells = [{}]
+        window.echogram._single_targets = np.array([[0., 0.]])
+
+        window._activate_channel("B")
+        np.testing.assert_array_equal(window.echogram.get_data(), ds.Sv.sel(channel="B").values)
+        assert window.echogram._grid_cells is None
+        assert window.echogram._single_targets is None
+
+        window._noise_mask_manual = np.array([[True, False], [False, False]])
+        window._activate_channel("A")
+        window._activate_channel("B")
+        assert np.isnan(window.echogram.get_data()[0, 0])
+        assert np.isnan(window._variable_cache["Sv_corrected"][0, 0])
+        assert np.isfinite(window._ds_Sv["Sv"].values).all()
     finally:
         window.close()
 

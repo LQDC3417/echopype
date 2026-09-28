@@ -1,6 +1,6 @@
 PySide6>=6.6.0
 PyOpenGL>=3.1.7
-echopype>=0.11.0
+echopype>=0.11.0,<0.12
 numpy>=1.24.0
 pandas>=2.0.0
 xarray>=2023.1.0
@@ -10,3 +10,4 @@ matplotlib>=3.7.0
 h5py>=3.9.0
 h5netcdf
 openpyxl>=3.1.0
+zarr

@@ -240,6 +240,31 @@ def test_integration_averages_linear_sv_and_per_ping_abc(with_bottom):
     assert result.mean_Sv[0, 0] == pytest.approx(10 * np.log10((1e-4 + 1e-6) / 2))
 
 
+def test_integration_abc_excludes_pings_without_valid_samples():
+    ds = xr.Dataset({"Sv": (("ping_time", "range_sample"),
+                             [[np.nan, np.nan], [-40., np.nan]])},
+                    coords={"ping_time": [0, 1], "range_sample": [0, 1],
+                            "echo_range": ("range_sample", [1., 2.])})
+    grid = create_integration_grid(ds, esu_size=2, layer_width=2., max_depth_m=2.)
+
+    result = integrate(ds, grid)
+
+    assert result.n_good[0, 0] == 1
+    assert result.abc[0, 0] == pytest.approx(4 * np.pi * 1e-4)
+
+
+def test_integration_includes_sample_at_maximum_depth():
+    ds = xr.Dataset({"Sv": (("ping_time", "range_sample"), [[-40., -60.]])},
+                    coords={"ping_time": [0], "range_sample": [0, 1],
+                            "echo_range": ("range_sample", [1., 2.])})
+    grid = create_integration_grid(ds, esu_size=1, layer_width=2., max_depth_m=2.)
+
+    result = integrate(ds, grid)
+
+    assert result.n_good[0, 0] == 2
+    assert result.abc[0, 0] == pytest.approx(4 * np.pi * (1e-4 + 1e-6))
+
+
 def test_distance_grid_preserves_channel_gps_pings(mock_ds_Sv):
     ds = mock_ds_Sv.assign_coords(channel=[0, 1])
     for name in ("latitude", "longitude"):

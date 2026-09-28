@@ -179,7 +179,7 @@ class FileMixin:
                 self._stale_results = set()
                 self._incomplete_results = set()
                 self._noise_enabled = False
-                self._noise_applied = bool(state.get("noise_applied", False)) and corrected is not None
+                self._noise_applied = corrected is not None
                 self._undo_stack = []
                 self._redo_stack = []
                 self._clear_channel_results()
@@ -217,9 +217,12 @@ class FileMixin:
                 self._ds_Sv = apply_manual_mask(self._ds_Sv, self._noise_mask_manual)
                 self._channel_corrected[channel_id] = self._ds_Sv["Sv_corrected"].copy(deep=False)
 
-        variable = "Sv_corrected" if "Sv_corrected" in active else "Sv"
-        sv = squeeze_sv(active[variable].values)
-        self._update_variable_list(active, squeeze_sv(active["Sv"].values))
+        variable = "Sv_corrected" if "Sv_corrected" in self._ds_Sv else "Sv"
+        sv = squeeze_sv(self._ds_Sv[variable].values)
+        self._update_variable_list(self._ds_Sv, squeeze_sv(self._ds_Sv["Sv"].values))
+        if old_channel != channel_id:
+            self.echogram.clear_grid_overlay()
+            self.echogram.clear_single_targets()
         self.echogram.set_data(sv)
         self.nav_bar.set_thumbnail(sv)
         self.echogram.set_bottom_line(self._bottom_line)
@@ -273,6 +276,8 @@ class FileMixin:
                 self.echogram.set_analysis_region_enabled(False)
             if hasattr(self.echogram, "clear_grid_overlay"):
                 self.echogram.clear_grid_overlay()
+            if hasattr(self.echogram, "clear_single_targets"):
+                self.echogram.clear_single_targets()
         if hasattr(self, "_set_overlay_actions_enabled"):
             self._set_overlay_actions_enabled(False)
         if hasattr(self, "echogram") and hasattr(self.echogram, "set_lines"):
@@ -634,6 +639,9 @@ class FileMixin:
             self._channel_corrected[self._current_channel] = self._ds_Sv["Sv_corrected"].copy(deep=False)
             self._file_cache["merged"]["ds"] = self._ds_Sv_all
             self._update_variable_list(self._ds_Sv)
+            corrected_sv = squeeze_sv(self._ds_Sv["Sv_corrected"].values)
+            self.echogram.set_data(corrected_sv)
+            self.nav_bar.set_thumbnail(corrected_sv)
         self._stale_results.update(proj.processing_state.get("stale_results", ()))
         for name, value in (("schools", proj.schools_df), ("integration", proj.integration_df), ("real_sed", proj.sed_df)):
             if value is not None:

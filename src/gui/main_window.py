@@ -109,6 +109,8 @@ class MainWindow(QMainWindow, FileMixin, ProcessingMixin, AnalysisMixin, Interac
         self._schools_mask = None
         self._schools_df = None
         self._integration_df = None
+        self._real_sed_df = None
+        self._real_sed_grid_df = None
         self._noise_applied = False
         self._current_worker = None
         self._close_pending = False

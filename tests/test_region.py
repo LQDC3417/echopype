@@ -208,3 +208,20 @@ def test_crop_sv_by_region_masks_both_sv_and_sv_corrected():
     # 两者都应被裁剪
     assert np.all(np.isnan(sv[:, :3]))
     assert np.all(np.isnan(sv_corr[:, :3]))
+
+
+def test_crop_sv_by_region_masks_every_channel_without_changing_input():
+    values = np.array([[[-40., -41., -42.]], [[-50., -51., -52.]]])
+    ds = xr.Dataset(
+        {"Sv": (("channel", "ping_time", "range_sample"), values),
+         "Sv_corrected": (("channel", "ping_time", "range_sample"), values + 1)},
+        coords={"channel": ["a", "b"], "echo_range": ("range_sample", [1., 2., 3.])},
+    )
+
+    result = crop_sv_by_region(ds, surface_depth_m=2.)
+
+    for name in ("Sv", "Sv_corrected"):
+        assert np.isnan(result[name].values[:, :, 0]).all()
+        np.testing.assert_array_equal(result[name].values[:, :, 1:],
+                                      ds[name].values[:, :, 1:])
+        assert np.isfinite(ds[name].values).all()

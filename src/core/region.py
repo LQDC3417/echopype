@@ -394,19 +394,11 @@ def crop_sv_by_region(
     # 裁剪：区域外设为 NaN（deep copy 避免污染原始数据）
     # 同时裁剪 Sv 和 Sv_corrected（如果存在），确保下游无论读哪个变量都受分析区域约束
     ds_out = ds_Sv.copy(deep=True)
+    region_mask = xr.DataArray(mask, dims=("ping_time", "range_sample"))
     for vname in ("Sv", "Sv_corrected"):
         if vname not in ds_out:
             continue
-        arr = ds_out[vname]
-        if "channel" in arr.dims:
-            arr = arr.isel(channel=0)
-        arr_vals = arr.values.copy()
-        if arr_vals.ndim == 3:
-            arr_vals[0, :, :][~mask] = np.nan
-            ds_out[vname].values[0, :, :] = arr_vals[0, :, :]
-        else:
-            arr_vals[~mask] = np.nan
-            ds_out[vname].values[:] = arr_vals
+        ds_out[vname] = ds_out[vname].where(region_mask)
 
     n_valid = int(mask.sum())
     n_total = mask.size

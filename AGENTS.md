@@ -38,7 +38,7 @@ raw/.ep 项目
 - `MainWindow`（`src/gui/main_window.py`）通过 Mixin 拆分逻辑：`src/gui/handlers/` 下的 `FileMixin` / `ProcessingMixin` / `AnalysisMixin` / `InteractionMixin`。改 GUI 行为优先找对应 handler，不要在 `main_window.py` 里无脑堆代码。
 - 统一去噪入口是 `src/core/processing.py::remove_noise()`（调 echopype）；`src/core/noise.py` 里还有遗留实现，GUI 主路径已不依赖它。
 - UI 文案走 `src/gui/i18n.py` 的 `T("key")`，新字符串要同时补 `zh` / `en`。
-- 主题是深色（`DARK_THEME`）；`LIGHT_THEME = DARK_THEME` 只是兼容别名，不要再当浅色用。
+- 主题当前为浅色（`LIGHT_THEME`）；`DARK_THEME` 是兼容旧导入名的别名，不要把它当作另一套深色主题。
 - `.ep` 项目文件是 HDF5，存 raw 路径/校验和/配置/线与 mask；重开会校验 raw 是否仍在且校验和一致。
 
 ## 硬性不变量（违反会踩历史坑）

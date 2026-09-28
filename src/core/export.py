@@ -58,6 +58,8 @@ def export_to_zarr(
     ds_Sv : xr.Dataset
     output_path : str or Path
         输出目录路径（.zarr）
+    overwrite : bool
+        是否显式覆盖已有目录。
 
     Returns
     -------
@@ -70,7 +72,7 @@ def export_to_zarr(
         import shutil
         shutil.rmtree(output_path)
 
-    ds_Sv.to_zarr(output_path)
+    ds_Sv.to_zarr(output_path, consolidated=False)
     logger.info(f"已导出 Zarr: {output_path}")
     return output_path
 
@@ -187,10 +189,17 @@ def export_to_excel(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        has_results = False
         if schools_df is not None and not schools_df.empty:
             schools_df.to_excel(writer, sheet_name="鱼群", index=False)
+            has_results = True
         if density_df is not None and not density_df.empty:
             density_df.to_excel(writer, sheet_name="密度", index=False)
+            has_results = True
+        if not has_results:
+            pd.DataFrame({"说明": ["当前没有鱼群或积分结果"]}).to_excel(
+                writer, sheet_name="说明", index=False
+            )
 
     logger.info(f"已导出 Excel: {output_path}")
     return output_path

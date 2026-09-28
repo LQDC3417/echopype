@@ -234,9 +234,15 @@ class InteractionMixin:
         if content.get("sv") and self._ds_Sv is not None:
             from src.core.export import (
                 export_sv_to_csv,
-                export_to_excel,
                 export_to_netcdf,
+                export_to_zarr,
             )
+            if "zarr" in formats:
+                try:
+                    exported.append(export_to_zarr(self._get_analysis_ds(), output_dir / f"{sv_stem}.zarr"))
+                except FileExistsError as exc:
+                    QMessageBox.warning(self, T("dialog_warning"), str(exc))
+                    return
             if "netcdf" in formats:
                 exported.append(export_to_netcdf(self._get_analysis_ds(), output_dir / f"{sv_stem}.nc"))
             if "csv" in formats:

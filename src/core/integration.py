@@ -316,7 +316,9 @@ def _compute_abc_density(
     from src.core.density import abc_integral, density_from_abc
 
     # EDSU 报告每 ping 垂直积分的均值，不随区间 ping 数增大。
-    abc = float(np.mean(abc_integral(sv_to_linear(sv_layer), dr_layer, axis=1)))
+    valid_pings = np.isfinite(sv_layer).any(axis=1)
+    abc = float(np.mean(abc_integral(sv_to_linear(sv_layer[valid_pings]),
+                                     dr_layer[valid_pings], axis=1)))
     density_ha = density_from_abc(abc, ts_default_db)
     return abc, density_ha
 
@@ -398,7 +400,10 @@ def integrate(
             valid_interval &= ~np.isfinite(bottom) | (depth_interval < bottom)
 
         for j in range(grid.n_layers):
-            depth_mask = (depth_interval >= grid.depth_start[j]) & (depth_interval < grid.depth_end[j])
+            depth_mask = (depth_interval >= grid.depth_start[j]) & (
+                depth_interval <= grid.depth_end[j] if j == grid.n_layers - 1
+                else depth_interval < grid.depth_end[j]
+            )
             valid_mask = valid_interval & depth_mask
             n_total[i, j] = int(np.sum(depth_mask))
             n_good[i, j] = int(np.sum(valid_mask))

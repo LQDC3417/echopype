@@ -201,7 +201,7 @@ def detect_single_targets_real(
             label = next(iter(lookup))
         if str(label) not in lookup:
             raise ValueError(f"SED 输入中不存在所选通道：{label}")
-        return data.sel(channel=[lookup[str(label)]]), str(label)
+        return data.sel(channel=lookup[str(label)]), str(label)
 
     if "channel" in ts_data.dims:
         ts_data, channel_id = select_channel(ts_data, channel_id)
